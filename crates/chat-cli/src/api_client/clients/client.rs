@@ -1,12 +1,15 @@
 use amzn_codewhisperer_client::Client as CodewhispererClient;
+use amzn_codewhisperer_client::operation::create_subscription_token::CreateSubscriptionTokenOutput;
 use amzn_codewhisperer_client::types::{
     OptOutPreference,
+    SubscriptionStatus,
     TelemetryEvent,
     UserContext,
 };
 use tracing::error;
 
 use super::shared::bearer_sdk_config;
+use crate::api_client::consts::SUBSCRIPTION_STATUS_ACCOUNT_ID;
 use crate::api_client::interceptor::opt_out::OptOutInterceptor;
 use crate::api_client::{
     ApiClientError,
@@ -119,6 +122,36 @@ impl Client {
                     profile_name: "MyOtherProfile".to_owned(),
                 },
             ]),
+        }
+    }
+
+    #[allow(dead_code)] // TODO: Remove
+    pub async fn create_subscription_token(
+        &self,
+        account_id: &str,
+    ) -> Result<CreateSubscriptionTokenOutput, ApiClientError> {
+        match &self.inner {
+            inner::Inner::Codewhisperer(client) => client
+                .create_subscription_token()
+                .account_id(account_id)
+                .send()
+                .await
+                .map_err(ApiClientError::CreateSubscriptionToken),
+            inner::Inner::Mock => Ok(CreateSubscriptionTokenOutput::builder()
+                .set_encoded_verification_url(Some("test/url".to_string()))
+                .build()?),
+        }
+    }
+
+    #[allow(dead_code)] // TODO: Remove
+    pub async fn get_subscription_status(&self) -> Result<SubscriptionStatus, ApiClientError> {
+        match &self.inner {
+            inner::Inner::Codewhisperer(_) => Ok(self
+                .create_subscription_token(SUBSCRIPTION_STATUS_ACCOUNT_ID)
+                .await?
+                .status()
+                .clone()),
+            inner::Inner::Mock => Ok(SubscriptionStatus::Active),
         }
     }
 }
