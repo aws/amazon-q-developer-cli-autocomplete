@@ -1228,7 +1228,7 @@ fn process_tool_specs(
     // This ensures all tool names are valid identifiers that can be safely used in the system
     // If after all of the aforementioned modification the combined tool
     // name we have exceeds a length of 64, we surface it as an error
-    for spec in specs {
+    for spec in specs.iter_mut() {
         let sn = if !regex.is_match(&spec.name) {
             let mut sn = sanitize_name(spec.name.clone(), regex, &mut hasher);
             while tn_map.contains_key(&sn) {
@@ -1255,6 +1255,9 @@ fn process_tool_specs(
         spec.name = full_name;
         spec.tool_origin = ToolOrigin::McpServer(server_name.to_string());
     }
+    // Native origin is the default, and since this function never reads native tools, if we still
+    // have it, that would indicate a tool that should not be included.
+    specs.retain(|spec| !matches!(spec.tool_origin, ToolOrigin::Native));
     // Send server load success metric datum
     let conversation_id = conversation_id.to_string();
     let _ = telemetry.send_mcp_server_init(conversation_id, None, number_of_tools);
