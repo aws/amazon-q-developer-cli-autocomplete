@@ -18,6 +18,10 @@
       "changes": [
         {
           "type": "fixed",
+          "description": "Unqualified tools from being included in the tools schema - [#84](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/84)"
+        },
+        {
+          "type": "fixed",
           "description": "Update stalled stream protection to 12s - [#75](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/75)"
         },
         {
