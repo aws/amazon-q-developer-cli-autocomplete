@@ -170,10 +170,21 @@ impl StreamingClient {
                                 && err.meta().message() == Some("Input is too long."))
                         });
 
+                        let is_monthly_limit_err = e
+                            .raw_response()
+                            .and_then(|resp| resp.body().bytes())
+                            .and_then(|bytes| match String::from_utf8(bytes.to_vec()) {
+                                Ok(s) => Some(s.contains("MONTHLY_REQUEST_COUNT")),
+                                Err(_) => None,
+                            })
+                            .unwrap_or(false);
+
                         if is_quota_breach {
                             Err(ApiClientError::QuotaBreach("quota has reached its limit"))
                         } else if is_context_window_overflow {
                             Err(ApiClientError::ContextWindowOverflow)
+                        } else if is_monthly_limit_err {
+                            Err(ApiClientError::MonthlyLimitReached)
                         } else {
                             Err(e.into())
                         }
