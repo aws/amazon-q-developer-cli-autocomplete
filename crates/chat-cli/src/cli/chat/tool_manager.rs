@@ -180,7 +180,7 @@ impl McpServerConfig {
         let mut cwd = std::env::current_dir()?;
         cwd.push(".amazonq/mcp.json");
         let expanded_path = shellexpand::tilde("~/.aws/amazonq/mcp.json");
-        let global_path = PathBuf::from(expanded_path.as_ref());
+        let global_path = PathBuf::from(expanded_path.as_ref() as &str);
         let global_buf = tokio::fs::read(global_path).await.ok();
         let local_buf = tokio::fs::read(cwd).await.ok();
         let conf = match (global_buf, local_buf) {

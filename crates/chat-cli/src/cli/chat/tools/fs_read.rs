@@ -497,6 +497,7 @@ fn format_ftype(md: &Metadata) -> char {
 }
 
 /// Formats a permissions mode into the form used by `ls`, e.g. `0o644` to `rw-r--r--`
+#[cfg(unix)]
 fn format_mode(mode: u32) -> [char; 9] {
     let mut mode = mode & 0o777;
     let mut res = ['-'; 9];
@@ -644,6 +645,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_format_mode() {
         macro_rules! assert_mode {
             ($actual:expr, $expected:expr) => {

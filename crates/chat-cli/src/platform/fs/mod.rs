@@ -31,26 +31,33 @@ use windows::{
     symlink_sync,
 };
 
-/// Rust path handling is hard coded to work specific ways depending on the 
-/// OS that is being executed on. Because of this, if Unix paths are provided, 
+/// Rust path handling is hard coded to work specific ways depending on the
+/// OS that is being executed on. Because of this, if Unix paths are provided,
 /// they aren't recognized. For example a leading prefix of '/' isn't considered
-/// an absolute path. To fix this, all test paths would need to have windows 
-/// equivalents which is tedious and can lead to errors. To make writing tests 
-/// easier, path normalization happens on Windows systems implicitly during test
-/// runtime. 
+/// an absolute path. To fix this, all test paths would need to have windows
+/// equivalents which is tedious and can lead to errors and missed test cases.
+/// To make writing tests easier, path normalization happens on Windows systems
+/// implicitly during test runtime.
 #[cfg(test)]
 fn normalize_test_path(path: impl AsRef<Path>) -> PathBuf {
     #[cfg(windows)]
     {
-        use typed_path::{Utf8TypedPath};
+        use typed_path::Utf8TypedPath;
         let path_ref = path.as_ref();
-        
+
         // Only process string paths with forward slashes
         let typed_path = Utf8TypedPath::derive(path_ref.to_str().unwrap());
         if typed_path.is_unix() {
-            return PathBuf::from(typed_path.with_windows_encoding().to_string());
-        }
+            let windows_path = typed_path.with_windows_encoding().to_string();
 
+            // If path is absolute (starts with /) and doesn't already have a drive letter
+            if PathBuf::from(&windows_path).has_root() {
+                // Prepend C: drive letter to make it truly absolute on Windows
+                return PathBuf::from(format!("C:{}", windows_path));
+            }
+
+            return PathBuf::from(windows_path);
+        }
     }
     path.as_ref().to_path_buf()
 }
@@ -60,10 +67,9 @@ fn append(base: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
     #[cfg(test)]
     {
         // Normalize the path for tests, then use the platform-specific append
-        let normalized_path = normalize_test_path(path);
-        return platform_append(base, normalized_path);
+        return platform_append(normalize_test_path(base), normalize_test_path(path));
     }
-    
+
     #[cfg(not(test))]
     {
         // In non-test code, just use the platform-specific append directly
@@ -500,18 +506,25 @@ mod tests {
         assert_eq!(fs.read_to_string(dir.path().join("write")).await.unwrap(), "write");
     }
 
-    #[test]
-    fn test_append() {
-        macro_rules! assert_append {
-            ($a:expr, $b:expr, $expected:expr) => {
-                assert_eq!(append($a, $b), PathBuf::from($expected));
-            };
-        }
-        assert_append!("/abc/test", "/test", "/abc/test/test");
-        assert_append!("/tmp/.dir", "/tmp/.dir/home/myuser", "/tmp/.dir/home/myuser");
-        assert_append!("/tmp/.dir", "/tmp/hello", "/tmp/.dir/tmp/hello");
-        assert_append!("/tmp/.dir", "/tmp/.dir/tmp/.dir/home/user", "/tmp/.dir/home/user");
-    }
+    macro_rules! test_append_cases {
+    ($(
+        $name:ident: ($a:expr, $b:expr) => $expected:expr
+    ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_eq!(append($a, $b), normalize_test_path($expected));
+            }
+        )*
+    };
+}
+
+    test_append_cases!(
+        append_test_path_to_dir: ("/abc/test", "/test") => "/abc/test/test",
+        append_absolute_to_tmp_dir: ("/tmp/.dir", "/tmp/.dir/home/myuser") => "/tmp/.dir/home/myuser",
+        append_different_tmp_path: ("/tmp/.dir", "/tmp/hello") => "/tmp/.dir/tmp/hello",
+        append_nested_path_to_tmpdir: ("/tmp/.dir", "/tmp/.dir/tmp/.dir/home/user") => "/tmp/.dir/home/user",
+    );
 
     #[tokio::test]
     async fn test_read_to_string() {
