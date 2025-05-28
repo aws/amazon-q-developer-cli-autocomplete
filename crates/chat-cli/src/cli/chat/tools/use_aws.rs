@@ -51,6 +51,7 @@ impl UseAws {
 
     pub async fn invoke(&self, _ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
         let mut command = tokio::process::Command::new("aws");
+        command.envs(std::env::vars());
 
         // Set up environment variables
         let mut env_vars: std::collections::HashMap<String, String> = std::env::vars().collect();
