@@ -67,13 +67,13 @@ fn append(base: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
     #[cfg(test)]
     {
         // Normalize the path for tests, then use the platform-specific append
-        return platform_append(normalize_test_path(base), normalize_test_path(path));
+        platform_append(normalize_test_path(base), normalize_test_path(path))
     }
 
     #[cfg(not(test))]
     {
         // In non-test code, just use the platform-specific append directly
-        return platform_append(base, path);
+        platform_append(base, path)
     }
 }
 
