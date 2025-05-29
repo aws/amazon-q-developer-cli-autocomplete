@@ -372,9 +372,8 @@ impl FsDirectory {
         )?)
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let cwd = ctx.env().current_dir()?;
         let max_depth = self.depth();
         debug!(?path, max_depth, "Reading directory at path with depth");
         let mut result = Vec::new();
@@ -383,17 +382,6 @@ impl FsDirectory {
         while let Some((path, depth)) = dir_queue.pop_front() {
             if depth > max_depth {
                 break;
-            }
-            let relative_path = format_path(&cwd, &path);
-            if !relative_path.is_empty() {
-                queue!(
-                    updates,
-                    style::Print("Reading: "),
-                    style::SetForegroundColor(Color::Green),
-                    style::Print(&relative_path),
-                    style::ResetColor,
-                    style::Print("\n"),
-                )?;
             }
             let mut read_dir = ctx.fs().read_dir(path).await?;
 
