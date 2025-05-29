@@ -28,54 +28,178 @@
   },
   "fs_read": {
     "name": "fs_read",
-    "description": "Tool for reading files (for example, `cat -n`),  directories (for example, `ls -la`) and images. If user has supplied paths that appear to be leading to images, you should use this tool right away using Image mode. The behavior of this tool is determined by the `mode` parameter. The available modes are:\n- line: Show lines in a file, given by an optional `start_line` and optional `end_line`.\n- directory: List directory contents. Content is returned in the \"long format\" of ls (that is, `ls -la`).\n- search: Search for a pattern in a file. The pattern is a string. The matching is case insensitive.\n\nExample Usage:\n1. Read all lines from a file: command=\"line\", path=\"/path/to/file.txt\"\n2. Read the last 5 lines from a file: command=\"line\", path=\"/path/to/file.txt\", start_line=-5\n3. List the files in the home directory: command=\"line\", path=\"~\"\n4. Recursively list files in a directory to a max depth of 2: command=\"line\", path=\"/path/to/directory\", depth=2\n5. Search for all instances of \"test\" in a file: command=\"search\", path=\"/path/to/file.txt\", pattern=\"test\"\n",
+    "description": "Tool for reading files, directories, and images with support for multiple operations in a single call. Each operation can have its own mode and parameters.\n\nAvailable modes for operations:\n- Line: Show lines in a file, given by an optional `start_line` and optional `end_line`\n- Directory: List directory contents in the \"long format\" of ls (that is, `ls -la`)\n- Search: Search for a substring in a file (case insensitive)\n- Image: Display images from the specified paths\n\nIf user has supplied paths that appear to be leading to images, you should use this tool right away using Image mode.\n\nPrefer batching multiple reads within a file or across files into one batch read, including optimistic reads to prevent extra roundtrips of thinking.\n\nExample Usage:\n```json\n{\n \"file_reads\": [\n {\n \"mode\": \"Line\",\n \"path\": \"/path/to/file1.txt\",\n \"start_line\": 10,\n \"end_line\": 20\n },\n {\n \"mode\": \"Search\",\n \"path\": \"/path/to/file2.txt\",\n \"substring_match\": \"important term\"\n },\n {\n \"mode\": \"Directory\",\n \"path\": \"/path/to/directory\",\n \"depth\": 1\n },\n {\n \"mode\": \"Image\",\n \"image_paths\": [\"/path/to/image1.png\", \"/path/to/image2.jpg\"]\n }\n ],\n \"summary\": \"Reading configuration files and searching for settings\"\n}\n```\n\nResponse format:\n- For a single operation, returns the content directly\n- For multiple operations, returns a BatchReadResult object with:\n - total_files: Total number of files processed\n - successful_reads: Number of successful read operations\n - failed_reads: Number of failed read operations\n - results: Array of FileReadResult objects containing:\n - path: File path\n - success: Whether the read was successful\n - content: File content (if successful)\n - error: Error message (if failed)\n - content_hash: SHA-256 hash of the content (if successful)\n - last_modified: Timestamp of when the file was last modified (if available)",
     "input_schema": {
       "type": "object",
       "properties": {
-        "path": {
-          "description": "Path to the file or directory. The path should be absolute, or otherwise start with ~ for the user's home.",
-          "type": "string"
-        },
-        "image_paths": {
-          "description": "List of paths to the images. This is currently supported by the Image mode.",
+        "file_reads": {
+          "description": "Array of file read operations to perform in a single call.",
           "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
           "items": {
-            "type": "string"
+            "type": "object",
+            "properties": {
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "Line",
+                  "Directory",
+                  "Search",
+                  "Image"
+                ],
+                "description": "The mode for this operation: `Line`, `Directory`, `Search`, or `Image`."
+              },
+              "path": {
+                "description": "Path to the file or directory for Line, Directory, and Search modes.",
+                "type": "string"
+              },
+              "image_paths": {
+                "description": "List of paths to the images. Only valid for Image mode.",
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 10,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "start_line": {
+                "type": "integer",
+                "description": "Starting line number for Line mode (1-based indexing). Required for Line mode. Default is 1, which means start from the first line.",
+                "default": 1
+              },
+              "end_line": {
+                "type": "integer",
+                "description": "Ending line number for Line mode. Use -1 for the last line of the file. Negative numbers count from the end of the file (-2 = second-to-last line, etc.). Required for Line mode. Default is -1, which means read to the end of the file.",
+                "default": -1
+              },
+              "substring_match": {
+                "type": "string",
+                "description": "Text to search for in Search mode. The search is case-insensitive and matches any occurrence of the text within lines. Does not support wildcards or regular expressions."
+              },
+              "context_lines": {
+                "type": "integer",
+                "description": "Number of context lines to show around search results in Search mode. Default is 2.",
+                "default": 2
+              },
+              "depth": {
+                "type": "integer",
+                "description": "Depth of a recursive directory listing in Directory mode. 0 means no recursion, only list the immediate contents. Default is 0.",
+                "default": 0
+              },
+              "summary": {
+                "type": "string",
+                "description": "A brief explanation of the purpose of this specific file read operation."
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "Line"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "path"
+                  ],
+                  "not": {
+                    "required": [
+                      "image_paths",
+                      "substring_match",
+                      "context_lines"
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "Directory"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "path"
+                  ],
+                  "not": {
+                    "required": [
+                      "image_paths",
+                      "start_line",
+                      "end_line",
+                      "substring_match",
+                      "context_lines"
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "Search"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "path",
+                    "substring_match"
+                  ],
+                  "not": {
+                    "required": [
+                      "image_paths",
+                      "start_line",
+                      "end_line"
+                    ]
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "Image"
+                      ]
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "image_paths"
+                  ],
+                  "not": {
+                    "required": [
+                      "path",
+                      "start_line",
+                      "end_line",
+                      "substring_match",
+                      "context_lines",
+                      "depth"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         },
-        "mode": {
+        "summary": {
           "type": "string",
-          "enum": [
-            "Line",
-            "Directory",
-            "Search",
-            "Image"
-          ],
-          "description": "The mode to run in: `Line`, `Directory`, `Search`. `Line` and `Search` are only for text files, and `Directory` is only for directories. `Image` is for image files, in this mode `image_paths` is required."
-        },
-        "start_line": {
-          "type": "integer",
-          "description": "Starting line number (optional, for Line mode). A negative index represents a line number starting from the end of the file.",
-          "default": 1
-        },
-        "end_line": {
-          "type": "integer",
-          "description": "Ending line number (optional, for Line mode). A negative index represents a line number starting from the end of the file.",
-          "default": -1
-        },
-        "pattern": {
-          "type": "string",
-          "description": "Pattern to search for (required, for Search mode). Case insensitive. The pattern matching is performed per line."
-        },
-        "context_lines": {
-          "type": "integer",
-          "description": "Number of context lines around search results (optional, for Search mode)",
-          "default": 2
-        },
-        "depth": {
-          "type": "integer",
-          "description": "Depth of a recursive directory listing (optional, for Directory mode)",
-          "default": 0
+          "description": "Recommended: A brief explanation of the overall purpose of this file read operation."
         }
       },
       "required": ["path", "mode"]
