@@ -122,7 +122,6 @@ mod tests {
 }
 
 #[cfg(test)]
-#[cfg(windows)]
 mod integration_tests {
     use tempfile::TempDir;
 
