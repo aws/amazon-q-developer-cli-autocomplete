@@ -1,5 +1,5 @@
 pub mod custom_tool;
-pub mod execute_bash;
+pub mod execute;
 pub mod fs_read;
 pub mod fs_write;
 pub mod gh_issue;
@@ -15,7 +15,7 @@ use std::path::{
 
 use crossterm::style::Stylize;
 use custom_tool::CustomTool;
-use execute_bash::ExecuteBash;
+use execute::ExecuteCommand;
 use eyre::Result;
 use fs_read::FsRead;
 use fs_write::FsWrite;
@@ -37,7 +37,7 @@ use crate::platform::Context;
 pub enum Tool {
     FsRead(FsRead),
     FsWrite(FsWrite),
-    ExecuteBash(ExecuteBash),
+    ExecuteCommand(ExecuteCommand),
     UseAws(UseAws),
     Custom(CustomTool),
     GhIssue(GhIssue),
@@ -50,7 +50,10 @@ impl Tool {
         match self {
             Tool::FsRead(_) => "fs_read",
             Tool::FsWrite(_) => "fs_write",
-            Tool::ExecuteBash(_) => "execute_bash",
+            #[cfg(windows)]
+            Tool::ExecuteCommand(_) => "execute_cmd",
+            #[cfg(not(windows))]
+            Tool::ExecuteCommand(_) => "execute_bash",
             Tool::UseAws(_) => "use_aws",
             Tool::Custom(custom_tool) => &custom_tool.name,
             Tool::GhIssue(_) => "gh_issue",
@@ -64,7 +67,7 @@ impl Tool {
         match self {
             Tool::FsRead(_) => false,
             Tool::FsWrite(_) => true,
-            Tool::ExecuteBash(execute_bash) => execute_bash.requires_acceptance(),
+            Tool::ExecuteCommand(execute_command) => execute_command.requires_acceptance(),
             Tool::UseAws(use_aws) => use_aws.requires_acceptance(),
             Tool::Custom(_) => true,
             Tool::GhIssue(_) => false,
@@ -77,7 +80,7 @@ impl Tool {
         match self {
             Tool::FsRead(fs_read) => fs_read.invoke(context, updates).await,
             Tool::FsWrite(fs_write) => fs_write.invoke(context, updates).await,
-            Tool::ExecuteBash(execute_bash) => execute_bash.invoke(updates).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.invoke(updates).await,
             Tool::UseAws(use_aws) => use_aws.invoke(context, updates).await,
             Tool::Custom(custom_tool) => custom_tool.invoke(context, updates).await,
             Tool::GhIssue(gh_issue) => gh_issue.invoke(updates).await,
@@ -90,7 +93,7 @@ impl Tool {
         match self {
             Tool::FsRead(fs_read) => fs_read.queue_description(ctx, updates).await,
             Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, updates),
-            Tool::ExecuteBash(execute_bash) => execute_bash.queue_description(updates),
+            Tool::ExecuteCommand(execute_command) => execute_command.queue_description(updates),
             Tool::UseAws(use_aws) => use_aws.queue_description(updates),
             Tool::Custom(custom_tool) => custom_tool.queue_description(updates),
             Tool::GhIssue(gh_issue) => gh_issue.queue_description(updates),
@@ -103,7 +106,7 @@ impl Tool {
         match self {
             Tool::FsRead(fs_read) => fs_read.validate(ctx).await,
             Tool::FsWrite(fs_write) => fs_write.validate(ctx).await,
-            Tool::ExecuteBash(execute_bash) => execute_bash.validate(ctx).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.validate(ctx).await,
             Tool::UseAws(use_aws) => use_aws.validate(ctx).await,
             Tool::Custom(custom_tool) => custom_tool.validate(ctx).await,
             Tool::GhIssue(gh_issue) => gh_issue.validate(ctx).await,
@@ -183,7 +186,10 @@ impl ToolPermissions {
         let label = match tool_name {
             "fs_read" => "trusted".dark_green().bold(),
             "fs_write" => "not trusted".dark_grey(),
+            #[cfg(not(windows))]
             "execute_bash" => "trust read-only commands".dark_grey(),
+            #[cfg(windows)]
+            "execute_cmd" => "trust read-only commands".dark_grey(),
             "use_aws" => "trust read-only commands".dark_grey(),
             "report_issue" => "trusted".dark_green().bold(),
             "thinking" => "trusted (prerelease)".dark_green().bold(),
