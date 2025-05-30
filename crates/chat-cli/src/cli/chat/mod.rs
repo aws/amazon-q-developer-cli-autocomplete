@@ -3422,7 +3422,7 @@ impl ChatContext {
 
                 // TODO: We should buffer output based on how much we have to parse, not as a constant
                 // Do not remove unless you are nabochay :)
-                std::thread::sleep(Duration::from_millis(8));
+                tokio::time::sleep(Duration::from_millis(8)).await;
             }
 
             // Set spinner after showing all of the assistant text content so far.
