@@ -812,27 +812,29 @@ impl ToolManager {
                 tool_specs.remove("thinking");
             }
 
-            // #[cfg(windows)]
-            // tool_specs.remove("execute_bash");
-            // #[cfg(windows)]
-            // tool_specs.insert("execute_cmd".to_string(), ToolSpec {
-            //     name: "execute_cmd".to_string(),
-            //     description: "Execute the specified Windows command.".to_string(),
-            //     input_schema: InputSchema(json!({
-            //     "type": "object",
-            //     "properties": {
-            //       "command": {
-            //         "type": "string",
-            //         "description": "Windows command to execute"
-            //       },
-            //       "summary": {
-            //         "type": "string",
-            //         "description": "A brief explanation of what the command does"
-            //       }
-            //     },
-            //         "required": ["command"]})),
-            //     tool_origin: ToolOrigin::Native,
-            // });
+            #[cfg(windows)]
+            {
+                tool_specs.remove("execute_bash");
+            
+                tool_specs.insert("execute_cmd".to_string(), ToolSpec {
+                    name: "execute_cmd".to_string(),
+                    description: "Execute the specified Windows command.".to_string(),
+                    input_schema: InputSchema(json!({
+                    "type": "object",
+                    "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "Windows command to execute"
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "A brief explanation of what the command does"
+                    }
+                    },
+                        "required": ["command"]})),
+                    tool_origin: ToolOrigin::Native,
+                });
+            }
 
             tool_specs
         };

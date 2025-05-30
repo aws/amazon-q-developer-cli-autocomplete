@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use crossterm::style::Stylize;
 use eyre::Result;
 use rustyline::completion::{
     Completer,
@@ -37,6 +36,9 @@ use winnow::stream::AsChar;
 
 use crate::database::Database;
 use crate::database::settings::Setting;
+use super::prompt_parser::parse_prompt_components;
+
+pub use super::prompt_parser::generate_prompt;
 
 pub const COMMANDS: &[&str] = &[
     "/clear",
@@ -80,16 +82,6 @@ pub const COMMANDS: &[&str] = &[
     "/save",
     "/load",
 ];
-
-pub fn generate_prompt(current_profile: Option<&str>, warning: bool) -> String {
-    let warning_symbol = if warning { "!".red().to_string() } else { "".to_string() };
-    let profile_part = current_profile
-        .filter(|&p| p != "default")
-        .map(|p| format!("[{p}] ").cyan().to_string())
-        .unwrap_or_default();
-
-    format!("{profile_part}{warning_symbol}{}", "> ".magenta())
-}
 
 /// Complete commands that start with a slash
 fn complete_command(word: &str, start: usize) -> (usize, Vec<String>) {
@@ -265,6 +257,34 @@ impl Highlighter for ChatHelper {
     fn highlight_char(&self, _line: &str, _pos: usize, _kind: CmdKind) -> bool {
         false
     }
+
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> Cow<'b, str> {
+        use crossterm::style::Stylize;
+
+        // Parse the plain text prompt to extract profile and warning information
+        // and apply colors using crossterm's ANSI escape codes
+        if let Some(components) = parse_prompt_components(prompt) {
+            let mut result = String::new();
+
+            // Add profile part if present
+            if let Some(profile) = components.profile {
+                result.push_str(&format!("[{}] ", profile).cyan().to_string());
+            }
+
+            // Add warning symbol if present
+            if components.warning {
+                result.push_str(&"!".red().to_string());
+            }
+
+            // Add the prompt symbol
+            result.push_str(&"> ".magenta().to_string());
+
+            Cow::Owned(result)
+        } else {
+            // If we can't parse the prompt, return it as-is
+            Cow::Borrowed(prompt)
+        }
+    }
 }
 
 pub fn rl(
@@ -306,28 +326,10 @@ pub fn rl(
 
 #[cfg(test)]
 mod tests {
+    use crossterm::style::Stylize;
+    use rustyline::highlight::Highlighter;
+
     use super::*;
-
-    #[test]
-    fn test_generate_prompt() {
-        // Test default prompt (no profile)
-        assert_eq!(generate_prompt(None, false), "> ".magenta().to_string());
-        // Test default prompt with warning
-        assert_eq!(generate_prompt(None, true), format!("{}{}", "!".red(), "> ".magenta()));
-        // Test default profile (should be same as no profile)
-        assert_eq!(generate_prompt(Some("default"), false), "> ".magenta().to_string());
-        // Test custom profile
-        assert_eq!(
-            generate_prompt(Some("test-profile"), false),
-            format!("{}{}", "[test-profile] ".cyan(), "> ".magenta())
-        );
-        // Test another custom profile with warning
-        assert_eq!(
-            generate_prompt(Some("dev"), true),
-            format!("{}{}{}", "[dev] ".cyan(), "!".red(), "> ".magenta())
-        );
-    }
-
     #[test]
     fn test_chat_completer_command_completion() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
@@ -367,5 +369,88 @@ mod tests {
 
         // Verify no completions are returned for regular text
         assert!(completions.is_empty());
+    }
+
+    #[test]
+    fn test_highlight_prompt_basic() {
+        let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
+        let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let helper = ChatHelper {
+            completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
+            hinter: (),
+            validator: MultiLineValidator,
+        };
+
+        // Test basic prompt highlighting
+        let highlighted = helper.highlight_prompt("> ", true);
+
+        assert_eq!(highlighted, "> ".magenta().to_string());
+    }
+
+    #[test]
+    fn test_highlight_prompt_with_warning() {
+        let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
+        let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let helper = ChatHelper {
+            completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
+            hinter: (),
+            validator: MultiLineValidator,
+        };
+
+        // Test warning prompt highlighting
+        let highlighted = helper.highlight_prompt("!> ", true);
+
+        assert_eq!(highlighted, format!("{}{}", "!".red(), "> ".magenta()));
+    }
+
+    #[test]
+    fn test_highlight_prompt_with_profile() {
+        let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
+        let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let helper = ChatHelper {
+            completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
+            hinter: (),
+            validator: MultiLineValidator,
+        };
+
+        // Test profile prompt highlighting
+        let highlighted = helper.highlight_prompt("[test-profile] > ", true);
+
+        assert_eq!(highlighted, format!("{}{}", "[test-profile] ".cyan(), "> ".magenta()));
+    }
+
+    #[test]
+    fn test_highlight_prompt_with_profile_and_warning() {
+        let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
+        let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let helper = ChatHelper {
+            completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
+            hinter: (),
+            validator: MultiLineValidator,
+        };
+
+        // Test profile + warning prompt highlighting
+        let highlighted = helper.highlight_prompt("[dev] !> ", true);
+        // Should have cyan profile + red warning + cyan bold prompt
+        assert_eq!(
+            highlighted,
+            format!("{}{}{}", "[dev] ".cyan(), "!".red(), "> ".magenta())
+        );
+    }
+
+    #[test]
+    fn test_highlight_prompt_invalid_format() {
+        let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
+        let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let helper = ChatHelper {
+            completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
+            hinter: (),
+            validator: MultiLineValidator,
+        };
+
+        // Test invalid prompt format (should return as-is)
+        let invalid_prompt = "invalid prompt format";
+        let highlighted = helper.highlight_prompt(invalid_prompt, true);
+        assert_eq!(highlighted, invalid_prompt);
     }
 }

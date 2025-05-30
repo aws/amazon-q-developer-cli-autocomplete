@@ -163,7 +163,7 @@ impl Client<StdioTransport> {
         } = config;
         let child = {
             let expanded_bin_path = shellexpand::tilde(&bin_path);
-            let mut command = tokio::process::Command::new(expanded_bin_path.as_ref());
+            let mut command = tokio::process::Command::new(expanded_bin_path.as_ref() as &str);
             command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
