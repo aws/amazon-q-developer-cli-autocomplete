@@ -1406,8 +1406,36 @@ impl ChatContext {
             },
             Command::Execute { command } => {
                 queue!(self.output, style::Print('\n'))?;
-                std::process::Command::new("bash").args(["-c", &command]).status().ok();
-                queue!(self.output, style::Print('\n'))?;
+
+                // Use platform-appropriate shell
+                let result = if cfg!(target_os = "windows") {
+                    std::process::Command::new("cmd").args(["/C", &command]).status()
+                } else {
+                    std::process::Command::new("bash").args(["-c", &command]).status()
+                };
+
+                // Handle the result and provide appropriate feedback
+                match result {
+                    Ok(status) => {
+                        if !status.success() {
+                            queue!(
+                                self.output,
+                                style::SetForegroundColor(Color::Yellow),
+                                style::Print(format!("Command exited with status: {}\n", status)),
+                                style::SetForegroundColor(Color::Reset)
+                            )?;
+                        }
+                    },
+                    Err(e) => {
+                        queue!(
+                            self.output,
+                            style::SetForegroundColor(Color::Red),
+                            style::Print(format!("Failed to execute command: {}\n", e)),
+                            style::SetForegroundColor(Color::Reset)
+                        )?;
+                    },
+                }
+
                 ChatState::PromptUser {
                     tool_uses: None,
                     pending_tool_index: None,

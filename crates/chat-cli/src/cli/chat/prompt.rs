@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use crossterm::style::Stylize;
 use eyre::Result;
 use rustyline::completion::{
     Completer,
@@ -80,14 +79,53 @@ pub const COMMANDS: &[&str] = &[
     "/load",
 ];
 
+/// Components extracted from a prompt string
+#[derive(Debug)]
+struct PromptComponents {
+    profile: Option<String>,
+    warning: bool,
+}
+
+/// Parse prompt components from a plain text prompt
+fn parse_prompt_components(prompt: &str) -> Option<PromptComponents> {
+    // Expected format: "[profile] !> " or "> " or "!> " etc.
+    let mut profile = None;
+    let mut warning = false;
+    let mut remaining = prompt.trim();
+
+    // Check for profile pattern [profile]
+    if let Some(start) = remaining.find('[') {
+        if let Some(end) = remaining.find(']') {
+            if start < end {
+                profile = Some(remaining[start + 1..end].to_string());
+                remaining = remaining[end + 1..].trim_start();
+            }
+        }
+    }
+
+    // Check for warning symbol !
+    if remaining.starts_with('!') {
+        warning = true;
+        remaining = remaining[1..].trim_start();
+    }
+
+    // Should end with "> "
+    if remaining.trim_end() == ">" {
+        Some(PromptComponents { profile, warning })
+    } else {
+        None
+    }
+}
+
 pub fn generate_prompt(current_profile: Option<&str>, warning: bool) -> String {
-    let warning_symbol = if warning { "!".red().to_string() } else { "".to_string() };
+    // Generate plain text prompt that will be colored by highlight_prompt
+    let warning_symbol = if warning { "!" } else { "" };
     let profile_part = current_profile
         .filter(|&p| p != "default")
-        .map(|p| format!("[{p}] ").cyan().to_string())
+        .map(|p| format!("[{p}] "))
         .unwrap_or_default();
 
-    format!("{profile_part}{warning_symbol}{}", "> ".cyan().bold())
+    format!("{profile_part}{warning_symbol}> ")
 }
 
 /// Complete commands that start with a slash
@@ -264,6 +302,31 @@ impl Highlighter for ChatHelper {
     fn highlight_char(&self, _line: &str, _pos: usize, _kind: CmdKind) -> bool {
         false
     }
+
+    fn highlight_prompt<'b, 's: 'b, 'p: 'b>(&'s self, prompt: &'p str, _default: bool) -> Cow<'b, str> {
+        // Parse the plain text prompt to extract profile and warning information
+        // and apply colors using ANSI escape codes that rustyline can handle properly
+        if let Some(captures) = parse_prompt_components(prompt) {
+            let profile_part = if let Some(profile) = captures.profile {
+                format!("\x1b[36m[{}] \x1b[0m", profile) // cyan for profile
+            } else {
+                String::new()
+            };
+
+            let warning_part = if captures.warning {
+                "\x1b[31m!\x1b[0m".to_string() // red for warning
+            } else {
+                String::new()
+            };
+
+            let prompt_part = "\x1b[36;1m> \x1b[0m"; // cyan bold for prompt
+
+            Cow::Owned(format!("{}{}{}", profile_part, warning_part, prompt_part))
+        } else {
+            // Fallback: return the prompt as-is
+            Cow::Borrowed(prompt)
+        }
+    }
 }
 
 pub fn rl(
@@ -306,28 +369,44 @@ pub fn rl(
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn test_generate_prompt() {
         // Test default prompt (no profile)
-        assert_eq!(generate_prompt(None, false), "> ".cyan().bold().to_string());
+        assert_eq!(generate_prompt(None, false), "> ");
         // Test default prompt with warning
-        assert_eq!(
-            generate_prompt(None, true),
-            format!("{}{}", "!".red(), "> ".cyan().bold())
-        );
+        assert_eq!(generate_prompt(None, true), "!> ");
         // Test default profile (should be same as no profile)
-        assert_eq!(generate_prompt(Some("default"), false), "> ".cyan().bold().to_string());
+        assert_eq!(generate_prompt(Some("default"), false), "> ");
         // Test custom profile
-        assert_eq!(
-            generate_prompt(Some("test-profile"), false),
-            format!("{}{}", "[test-profile] ".cyan(), "> ".cyan().bold())
-        );
+        assert_eq!(generate_prompt(Some("test-profile"), false), "[test-profile] > ");
         // Test another custom profile with warning
-        assert_eq!(
-            generate_prompt(Some("dev"), true),
-            format!("{}{}{}", "[dev] ".cyan(), "!".red(), "> ".cyan().bold())
-        );
+        assert_eq!(generate_prompt(Some("dev"), true), "[dev] !> ");
+    }
+
+    #[test]
+    fn test_parse_prompt_components() {
+        // Test basic prompt
+        let components = parse_prompt_components("> ").unwrap();
+        assert!(components.profile.is_none());
+        assert!(!components.warning);
+
+        // Test warning prompt
+        let components = parse_prompt_components("!> ").unwrap();
+        assert!(components.profile.is_none());
+        assert!(components.warning);
+
+        // Test profile prompt
+        let components = parse_prompt_components("[test] > ").unwrap();
+        assert_eq!(components.profile.as_deref(), Some("test"));
+        assert!(!components.warning);
+
+        // Test profile with warning
+        let components = parse_prompt_components("[dev] !> ").unwrap();
+        assert_eq!(components.profile.as_deref(), Some("dev"));
+        assert!(components.warning);
+
+        // Test invalid prompt
+        assert!(parse_prompt_components("invalid").is_none());
     }
 
     #[test]

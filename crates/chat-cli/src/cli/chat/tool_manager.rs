@@ -76,7 +76,7 @@ use crate::cli::chat::tools::custom_tool::{
     CustomToolClient,
     CustomToolConfig,
 };
-use crate::cli::chat::tools::execute_bash::ExecuteBash;
+use crate::cli::chat::tools::execute::ExecuteCommand;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
 use crate::cli::chat::tools::gh_issue::GhIssue;
@@ -795,6 +795,35 @@ impl Clone for ToolManager {
     }
 }
 
+#[cfg(windows)]
+/// In Windows, we need to configure the `execute_cmd` tool instead of `execute_bash`.
+fn configure_windows_cmd(tool_specs: &mut HashMap<String, ToolSpec>) {
+    use serde_json::json;
+
+    use crate::cli::chat::tools::InputSchema;
+
+    tool_specs.remove("execute_bash");
+
+    tool_specs.insert("execute_cmd".to_string(), ToolSpec {
+        name: "execute_cmd".to_string(),
+        description: "Execute the specified Windows command.".to_string(),
+        input_schema: InputSchema(json!({
+                "type": "object",
+                "properties": {
+                  "command": {
+                    "type": "string",
+                    "description": "Windows command to execute"
+                  },
+                  "summary": {
+                    "type": "string",
+                    "description": "A brief explanation of what the command does"
+                  }
+                },
+                    "required": ["command"]})),
+        tool_origin: ToolOrigin::Native,
+    });
+}
+
 impl ToolManager {
     pub async fn load_tools(
         &mut self,
@@ -809,6 +838,10 @@ impl ToolManager {
             if !crate::cli::chat::tools::thinking::Thinking::is_enabled(database) {
                 tool_specs.remove("thinking");
             }
+
+            #[cfg(windows)]
+            configure_windows_cmd(&mut tool_specs);
+
             tool_specs
         };
         let load_tools = self
@@ -914,7 +947,14 @@ impl ToolManager {
         Ok(match value.name.as_str() {
             "fs_read" => Tool::FsRead(serde_json::from_value::<FsRead>(value.args).map_err(map_err)?),
             "fs_write" => Tool::FsWrite(serde_json::from_value::<FsWrite>(value.args).map_err(map_err)?),
-            "execute_bash" => Tool::ExecuteBash(serde_json::from_value::<ExecuteBash>(value.args).map_err(map_err)?),
+            #[cfg(windows)]
+            "execute_cmd" => {
+                Tool::ExecuteCommand(serde_json::from_value::<ExecuteCommand>(value.args).map_err(map_err)?)
+            },
+            #[cfg(not(windows))]
+            "execute_bash" => {
+                Tool::ExecuteCommand(serde_json::from_value::<ExecuteCommand>(value.args).map_err(map_err)?)
+            },
             "use_aws" => Tool::UseAws(serde_json::from_value::<UseAws>(value.args).map_err(map_err)?),
             "report_issue" => Tool::GhIssue(serde_json::from_value::<GhIssue>(value.args).map_err(map_err)?),
             "thinking" => Tool::Thinking(serde_json::from_value::<Thinking>(value.args).map_err(map_err)?),
