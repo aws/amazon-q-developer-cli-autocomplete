@@ -204,6 +204,7 @@ impl TelemetryThread {
         context_file_length: Option<usize>,
         result: TelemetryResult,
         reason: Option<String>,
+        reason_desc: Option<String>,
     ) -> Result<(), TelemetryError> {
         let mut event = Event::new(EventType::ChatAddedMessage {
             conversation_id,
@@ -212,6 +213,7 @@ impl TelemetryThread {
             context_file_length,
             result,
             reason,
+            reason_desc,
         });
         set_start_url_and_region(database, &mut event).await;
 
@@ -287,10 +289,12 @@ impl TelemetryThread {
         context_file_length: Option<usize>,
         result: TelemetryResult,
         reason: Option<String>,
+        reason_desc: Option<String>,
     ) -> Result<(), TelemetryError> {
         let mut event = Event::new(EventType::MessageResponseError {
             result,
             reason,
+            reason_desc,
             conversation_id,
             context_file_length,
         });
@@ -483,6 +487,29 @@ impl TelemetryClient {
     }
 }
 
+pub trait ReasonCode: std::error::Error {
+    fn reason_code(&self) -> String;
+}
+
+/// Returns a generic error reason + reason description pair.
+pub fn get_error_reason<E>(error: &E) -> (String, String)
+where
+    E: ReasonCode + 'static,
+{
+    let err_chain = eyre::Chain::new(error);
+    let reason_desc = if err_chain.len() > 1 {
+        format!(
+            "'{}' caused by: {}",
+            error,
+            err_chain.last().map_or("UNKNOWN".to_string(), |e| e.to_string())
+        )
+    } else {
+        error.to_string()
+    };
+
+    (error.reason_code(), reason_desc)
+}
+
 #[cfg(test)]
 mod test {
     use uuid::uuid;
@@ -543,6 +570,7 @@ mod test {
                 Some("req_id".to_owned()),
                 Some(123),
                 TelemetryResult::Succeeded,
+                None,
                 None,
             )
             .await

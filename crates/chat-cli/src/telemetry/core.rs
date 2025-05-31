@@ -131,6 +131,7 @@ impl Event {
                 request_id,
                 result,
                 reason,
+                reason_desc,
                 ..
             } => Some(
                 CodewhispererterminalAddChatMessage {
@@ -145,6 +146,7 @@ impl Event {
                     codewhispererterminal_context_file_length: context_file_length.map(|l| l as i64).map(Into::into),
                     result: result.to_string().into(),
                     reason: reason.map(Into::into),
+                    reason_desc: reason_desc.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -243,6 +245,7 @@ impl Event {
                 context_file_length,
                 result,
                 reason,
+                reason_desc,
             } => Some(
                 AmazonqMessageResponseError {
                     create_time: self.created_time,
@@ -253,6 +256,7 @@ impl Event {
                     sso_region: self.sso_region.map(Into::into),
                     result: Some(result.to_string().into()),
                     reason: reason.map(Into::into),
+                    reason_desc: reason_desc.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -287,6 +291,7 @@ pub enum EventType {
         context_file_length: Option<usize>,
         result: TelemetryResult,
         reason: Option<String>,
+        reason_desc: Option<String>,
     },
     ToolUseSuggested {
         conversation_id: String,
@@ -323,6 +328,7 @@ pub enum EventType {
     MessageResponseError {
         result: TelemetryResult,
         reason: Option<String>,
+        reason_desc: Option<String>,
         conversation_id: String,
         context_file_length: Option<usize>,
     },

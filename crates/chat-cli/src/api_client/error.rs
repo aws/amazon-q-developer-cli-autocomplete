@@ -8,6 +8,7 @@ use amzn_consolas_client::operation::list_customizations::ListCustomizationsErro
 use amzn_qdeveloper_streaming_client::operation::send_message::SendMessageError as QDeveloperSendMessageError;
 use amzn_qdeveloper_streaming_client::types::error::ChatResponseStreamError as QDeveloperChatResponseStreamError;
 use aws_credential_types::provider::error::CredentialsError;
+use aws_sdk_ssooidc::error::ProvideErrorMetadata;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 pub use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::event_stream::RawMessage;
@@ -15,6 +16,7 @@ use thiserror::Error;
 
 use crate::auth::AuthError;
 use crate::aws_common::SdkErrorDisplay;
+use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]
 pub enum ApiClientError {
@@ -65,6 +67,36 @@ pub enum ApiClientError {
 
     #[error(transparent)]
     AuthError(#[from] AuthError),
+}
+
+impl ReasonCode for ApiClientError {
+    fn reason_code(&self) -> String {
+        match self {
+            ApiClientError::GenerateCompletions(e) => sdk_error_code(e),
+            ApiClientError::GenerateRecommendations(e) => sdk_error_code(e),
+            ApiClientError::ListAvailableCustomizations(e) => sdk_error_code(e),
+            ApiClientError::ListAvailableServices(e) => sdk_error_code(e),
+            ApiClientError::CodewhispererGenerateAssistantResponse(e) => sdk_error_code(e),
+            ApiClientError::QDeveloperSendMessage(e) => sdk_error_code(e),
+            ApiClientError::CodewhispererChatResponseStream(e) => sdk_error_code(e),
+            ApiClientError::QDeveloperChatResponseStream(e) => sdk_error_code(e),
+            ApiClientError::ListAvailableProfilesError(e) => sdk_error_code(e),
+            ApiClientError::Credentials(_) => "CredentialsError".to_string(),
+            ApiClientError::QuotaBreach(_) => "QuotaBreachError".to_string(),
+            ApiClientError::ContextWindowOverflow => "ContextWindowOverflow".to_string(),
+            ApiClientError::SmithyBuild(_) => "SmithyBuildError".to_string(),
+            ApiClientError::AuthError(_) => "AuthError".to_string(),
+        }
+    }
+}
+
+fn sdk_error_code<T, R>(e: &SdkError<T, R>) -> String
+where
+    T: ProvideErrorMetadata,
+{
+    e.as_service_error()
+        .and_then(|se| se.meta().code().map(str::to_string))
+        .unwrap_or_else(|| e.to_string())
 }
 
 #[cfg(test)]

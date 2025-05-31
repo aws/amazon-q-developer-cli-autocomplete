@@ -63,7 +63,12 @@
     {
       "name": "reason",
       "type": "string",
-      "description": "Description of what caused an error, if any"
+      "description": "Description of what caused an error, if any. Should be a stable/predictable name."
+    },
+    {
+      "name": "reasonDesc",
+      "type": "string",
+      "description": "Error message detail. May contain arbitrary message details (unlike the `reason` field)."
     },
     {
       "name": "codewhispererterminal_toolUseId",
@@ -158,7 +163,8 @@
         { "type": "codewhispererterminal_contextFileLength", "required": false },
         { "type": "requestId" },
         { "type": "result", "required": true },
-        { "type": "reason", "required": false }
+        { "type": "reason", "required": false },
+        { "type": "reasonDesc", "required": false }
       ]
     },
     {
@@ -276,7 +282,8 @@
           { "type": "amazonqConversationId" },
           { "type": "codewhispererterminal_contextFileLength", "required": false },
           { "type": "result" },
-          { "type": "reason", "required": false }
+          { "type": "reason", "required": false },
+          { "type": "reasonDesc", "required": false }
       ]
     }
   ]
