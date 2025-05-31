@@ -815,7 +815,7 @@ impl ToolManager {
             #[cfg(windows)]
             {
                 tool_specs.remove("execute_bash");
-            
+
                 tool_specs.insert("execute_cmd".to_string(), ToolSpec {
                     name: "execute_cmd".to_string(),
                     description: "Execute the specified Windows command.".to_string(),

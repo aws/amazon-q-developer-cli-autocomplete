@@ -1,19 +1,12 @@
-use std::collections::VecDeque;
 use std::io::Write;
-use std::process::ExitStatus;
-use std::str::from_utf8;
 
 use crossterm::queue;
 use crossterm::style::{
     self,
     Color,
 };
-use eyre::{
-    Context as EyreContext,
-    Result,
-};
+use eyre::Result;
 use serde::Deserialize;
-use tracing::error;
 
 use crate::cli::chat::tools::{
     InvokeOutput,

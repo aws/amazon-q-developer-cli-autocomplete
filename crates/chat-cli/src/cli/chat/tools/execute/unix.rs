@@ -117,9 +117,7 @@ pub async fn run_command<W: Write>(
 }
 
 #[cfg(test)]
-#[cfg(not(windows))]
 mod tests {
-    use super::*;
     use crate::cli::chat::tools::OutputKind;
     use crate::cli::chat::tools::execute::ExecuteCommand;
 
