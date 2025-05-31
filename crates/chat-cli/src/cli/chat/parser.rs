@@ -21,6 +21,7 @@ use super::message::{
 };
 use crate::api_client::clients::SendMessageOutput;
 use crate::api_client::model::ChatResponseStream;
+use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]
 pub struct RecvError {
@@ -28,6 +29,12 @@ pub struct RecvError {
     pub request_id: Option<String>,
     #[source]
     pub source: RecvErrorKind,
+}
+
+impl ReasonCode for RecvError {
+    fn reason_code(&self) -> String {
+        "RecvError".to_string()
+    }
 }
 
 impl std::fmt::Display for RecvError {

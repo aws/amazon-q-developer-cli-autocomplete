@@ -24,7 +24,6 @@ use std::collections::{
     HashSet,
     VecDeque,
 };
-use std::error::Error;
 use std::io::{
     IsTerminal,
     Read,
@@ -67,7 +66,6 @@ use crossterm::{
     terminal,
 };
 use eyre::{
-    Chain,
     ErrReport,
     Result,
     bail,
@@ -164,8 +162,10 @@ use crate::mcp_client::{
 use crate::platform::Context;
 use crate::telemetry::core::ToolUseEventBuilder;
 use crate::telemetry::{
+    ReasonCode,
     TelemetryResult,
     TelemetryThread,
+    get_error_reason,
 };
 use crate::util::CLI_BINARY_NAME;
 
@@ -504,6 +504,21 @@ pub enum ChatError {
     NonInteractiveToolApproval,
     #[error(transparent)]
     GetPromptError(#[from] GetPromptError),
+}
+
+impl ReasonCode for ChatError {
+    fn reason_code(&self) -> String {
+        match self {
+            ChatError::Client(e) => e.reason_code(),
+            ChatError::ResponseStream(e) => e.reason_code(),
+            ChatError::Std(_) => "StdIoError".to_string(),
+            ChatError::Readline(_) => "ReadlineError".to_string(),
+            ChatError::Custom(_) => "GenericError".to_string(),
+            ChatError::Interrupted { .. } => "Interrupted".to_string(),
+            ChatError::NonInteractiveToolApproval => "NonInteractiveToolApprovalError".to_string(),
+            ChatError::GetPromptError(_) => "GetPromptError".to_string(),
+        }
+    }
 }
 
 pub struct ChatContext {
@@ -881,7 +896,7 @@ impl ChatContext {
                 ChatState::HandleResponseStream(response) => tokio::select! {
                     res = self.handle_response(database, telemetry, response) => res,
                     Ok(_) = ctrl_c_stream => {
-                        self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None).await;
+                        self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None, None).await;
 
                         Err(ChatError::Interrupted { tool_uses: None })
                     }
@@ -906,7 +921,8 @@ impl ChatContext {
         match result {
             Ok(state) => Ok(state),
             Err(e) => {
-                self.send_error_telemetry(database, telemetry, get_error_string(&e))
+                let (reason, reason_desc) = get_error_reason(&e);
+                self.send_error_telemetry(database, telemetry, reason, Some(reason_desc))
                     .await;
 
                 macro_rules! print_err {
@@ -1101,12 +1117,14 @@ impl ChatContext {
         let response = match response {
             Ok(res) => res,
             Err(e) => {
+                let (reason, reason_desc) = get_error_reason(&e);
                 self.send_chat_telemetry(
                     database,
                     telemetry,
                     None,
                     TelemetryResult::Failed,
-                    Some(get_error_string(&e)),
+                    Some(reason),
+                    Some(reason_desc),
                 )
                 .await;
                 match e {
@@ -1149,12 +1167,14 @@ impl ChatContext {
                         if let Some(request_id) = &err.request_id {
                             self.failed_request_ids.push(request_id.clone());
                         };
+                        let (reason, reason_desc) = get_error_reason(&err);
                         self.send_chat_telemetry(
                             database,
                             telemetry,
                             err.request_id.clone(),
                             TelemetryResult::Failed,
-                            Some(get_error_string(&err)),
+                            Some(reason),
+                            Some(reason_desc),
                         )
                         .await;
                         return Err(err.into());
@@ -1172,7 +1192,8 @@ impl ChatContext {
                 cursor::Show
             )?;
         }
-        self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None)
+
+        self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
             .await;
 
         self.conversation_state.replace_history_with_summary(summary.clone());
@@ -3289,12 +3310,14 @@ impl ChatContext {
                         self.failed_request_ids.push(request_id.clone());
                     };
 
+                    let (reason, reason_desc) = get_error_reason(&recv_error);
                     self.send_chat_telemetry(
                         database,
                         telemetry,
                         recv_error.request_id.clone(),
                         TelemetryResult::Failed,
-                        Some(get_error_string(&recv_error)),
+                        Some(reason),
+                        Some(reason_desc),
                     )
                     .await;
 
@@ -3432,7 +3455,7 @@ impl ChatContext {
             }
 
             if ended {
-                self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None)
+                self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
                     .await;
 
                 if self.interactive
@@ -3729,6 +3752,7 @@ impl ChatContext {
         request_id: Option<String>,
         result: TelemetryResult,
         reason: Option<String>,
+        reason_desc: Option<String>,
     ) {
         telemetry
             .send_chat_added_message(
@@ -3739,12 +3763,19 @@ impl ChatContext {
                 self.conversation_state.context_message_length(),
                 result,
                 reason,
+                reason_desc,
             )
             .await
             .ok();
     }
 
-    async fn send_error_telemetry(&self, database: &Database, telemetry: &TelemetryThread, reason: String) {
+    async fn send_error_telemetry(
+        &self,
+        database: &Database,
+        telemetry: &TelemetryThread,
+        reason: String,
+        reason_desc: Option<String>,
+    ) {
         telemetry
             .send_response_error(
                 database,
@@ -3752,6 +3783,7 @@ impl ChatContext {
                 self.conversation_state.context_message_length(),
                 TelemetryResult::Failed,
                 Some(reason),
+                reason_desc,
             )
             .await
             .ok();
@@ -3852,22 +3884,6 @@ fn create_stream(model_responses: serde_json::Value) -> StreamingClient {
         mock.push(stream);
     }
     StreamingClient::mock(mock)
-}
-
-/// Returns surface error + root cause as a string. If there is only one error
-/// in the chain, return that as a string.
-fn get_error_string(error: &(dyn Error + 'static)) -> String {
-    let err_chain = Chain::new(error);
-
-    if err_chain.len() > 1 {
-        format!(
-            "'{}' caused by: {}",
-            error,
-            err_chain.last().map_or("UNKNOWN".to_string(), |e| e.to_string())
-        )
-    } else {
-        error.to_string()
-    }
 }
 
 #[cfg(test)]
