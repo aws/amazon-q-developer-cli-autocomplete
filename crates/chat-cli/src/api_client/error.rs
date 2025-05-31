@@ -1,6 +1,7 @@
 use amzn_codewhisperer_client::operation::generate_completions::GenerateCompletionsError;
 use amzn_codewhisperer_client::operation::list_available_customizations::ListAvailableCustomizationsError;
 use amzn_codewhisperer_client::operation::list_available_profiles::ListAvailableProfilesError;
+use amzn_codewhisperer_client::operation::send_telemetry_event::SendTelemetryEventError;
 pub use amzn_codewhisperer_streaming_client::operation::generate_assistant_response::GenerateAssistantResponseError;
 use amzn_codewhisperer_streaming_client::types::error::ChatResponseStreamError as CodewhispererChatResponseStreamError;
 use amzn_consolas_client::operation::generate_recommendations::GenerateRecommendationsError;
@@ -32,6 +33,10 @@ pub enum ApiClientError {
     ListAvailableCustomizations(#[from] SdkError<ListAvailableCustomizationsError, HttpResponse>),
     #[error("{}", SdkErrorDisplay(.0))]
     ListAvailableServices(#[from] SdkError<ListCustomizationsError, HttpResponse>),
+
+    // Telemetry client error
+    #[error("{}", SdkErrorDisplay(.0))]
+    SendTelemetryEvent(#[from] SdkError<SendTelemetryEventError, HttpResponse>),
 
     // Send message errors
     #[error("{}", SdkErrorDisplay(.0))]

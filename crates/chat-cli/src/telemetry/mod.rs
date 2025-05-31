@@ -25,10 +25,7 @@ use amzn_toolkit_telemetry_client::{
     Config,
 };
 use aws_credential_types::provider::SharedCredentialsProvider;
-use cognito::{
-    CognitoProvider,
-    get_cognito_credentials,
-};
+use cognito::CognitoProvider;
 use endpoint::StaticEndpoint;
 pub use install_method::{
     InstallMethod,
@@ -149,7 +146,7 @@ impl TelemetryThread {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let handle = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
-                trace!("Sending telemetry event: {:?}", event);
+                trace!("TelemetryThread received new telemetry event: {:?}", event);
                 telemetry_client.send_event(event).await;
             }
         });
@@ -325,24 +322,21 @@ impl TelemetryClient {
             && database.settings.get_bool(Setting::TelemetryEnabled).unwrap_or(true);
 
         // If telemetry is disabled we do not emit using toolkit_telemetry
-        let toolkit_telemetry_client = match telemetry_enabled {
-            true => match get_cognito_credentials(database, &TelemetryStage::EXTERNAL_PROD).await {
-                Ok(credentials) => Some(ToolkitTelemetryClient::from_conf(
-                    Config::builder()
-                        .http_client(crate::aws_common::http_client::client())
-                        .behavior_version(BehaviorVersion::v2025_01_17())
-                        .endpoint_resolver(StaticEndpoint(TelemetryStage::EXTERNAL_PROD.endpoint))
-                        .app_name(app_name())
-                        .region(TelemetryStage::EXTERNAL_PROD.region.clone())
-                        .credentials_provider(SharedCredentialsProvider::new(CognitoProvider::new(credentials)))
-                        .build(),
-                )),
-                Err(err) => {
-                    error!("Failed to acquire cognito credentials: {err}");
-                    None
-                },
-            },
-            false => None,
+        let toolkit_telemetry_client = if telemetry_enabled {
+            Some(ToolkitTelemetryClient::from_conf(
+                Config::builder()
+                    .http_client(crate::aws_common::http_client::client())
+                    .behavior_version(BehaviorVersion::v2025_01_17())
+                    .endpoint_resolver(StaticEndpoint(TelemetryStage::EXTERNAL_PROD.endpoint))
+                    .app_name(app_name())
+                    .region(TelemetryStage::EXTERNAL_PROD.region.clone())
+                    .credentials_provider(SharedCredentialsProvider::new(CognitoProvider::new(
+                        TelemetryStage::EXTERNAL_PROD,
+                    )))
+                    .build(),
+            ))
+        } else {
+            None
         };
 
         fn client_id(env: &Env, database: &mut Database, telemetry_enabled: bool) -> Result<Uuid, TelemetryError> {
@@ -406,38 +400,43 @@ impl TelemetryClient {
             {
                 Ok(event) => event,
                 Err(err) => {
-                    error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
+                    error!(err =% DisplayErrorContext(err), "Failed to send cw telemetry event");
                     return;
                 },
             };
 
+            let event = TelemetryEvent::ChatAddMessageEvent(chat_add_message_event);
+            debug!(
+                ?event,
+                ?user_context,
+                telemetry_enabled = self.telemetry_enabled,
+                "Sending cw telemetry event"
+            );
             if let Err(err) = self
                 .codewhisperer_client
-                .send_telemetry_event(
-                    TelemetryEvent::ChatAddMessageEvent(chat_add_message_event),
-                    user_context,
-                    self.telemetry_enabled,
-                )
+                .send_telemetry_event(event, user_context, self.telemetry_enabled)
                 .await
             {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
+                error!(err =% DisplayErrorContext(err), "Failed to send cw telemetry event");
             }
         }
     }
 
     async fn send_telemetry_toolkit_metric(&self, event: Event) {
         let Some(toolkit_telemetry_client) = self.toolkit_telemetry_client.clone() else {
+            trace!("not sending toolkit metric - client does not exist");
             return;
         };
         let client_id = self.client_id;
         let Some(metric_datum) = event.into_metric_datum() else {
+            trace!("not sending toolkit metric - metric datum does not exist");
             return;
         };
 
         let product = AwsProduct::CodewhispererTerminal;
         let metric_name = metric_datum.metric_name().to_owned();
 
-        debug!(?product, ?metric_datum, "Posting metrics");
+        debug!(?client_id, ?product, ?metric_datum, "Sending toolkit telemetry event");
         if let Err(err) = toolkit_telemetry_client
             .post_metrics()
             .aws_product(product)
@@ -451,7 +450,7 @@ impl TelemetryClient {
             .await
             .map_err(DisplayErrorContext)
         {
-            error!(%err, ?metric_name, "Failed to post metric");
+            error!(%err, ?metric_name, "Failed to post toolkit metric");
         }
     }
 

@@ -8,6 +8,7 @@ use aws_sdk_cognitoidentity::primitives::{
     DateTime,
     DateTimeFormat,
 };
+use tracing::trace;
 
 use crate::aws_common::app_name;
 use crate::database::{
@@ -20,6 +21,8 @@ pub async fn get_cognito_credentials_send(
     database: &mut Database,
     telemetry_stage: &TelemetryStage,
 ) -> Result<Credentials, CredentialsError> {
+    trace!("Creating new cognito credentials");
+
     let conf = aws_sdk_cognitoidentity::Config::builder()
         .behavior_version(BehaviorVersion::v2025_01_17())
         .region(telemetry_stage.region.clone())
@@ -104,12 +107,12 @@ pub async fn get_cognito_credentials(
 
 #[derive(Debug)]
 pub struct CognitoProvider {
-    credentials: Credentials,
+    telemetry_stage: TelemetryStage,
 }
 
 impl CognitoProvider {
-    pub fn new(credentials: Credentials) -> CognitoProvider {
-        CognitoProvider { credentials }
+    pub fn new(telemetry_stage: TelemetryStage) -> CognitoProvider {
+        CognitoProvider { telemetry_stage }
     }
 }
 
@@ -118,7 +121,15 @@ impl provider::ProvideCredentials for CognitoProvider {
     where
         Self: 'a,
     {
-        provider::future::ProvideCredentials::new(async { Ok(self.credentials.clone()) })
+        provider::future::ProvideCredentials::new(async {
+            match Database::new().await {
+                Ok(mut db) => get_cognito_credentials(&mut db, &self.telemetry_stage).await,
+                Err(err) => Err(CredentialsError::provider_error(format!(
+                    "failed to get database: {:?}",
+                    err
+                ))),
+            }
+        })
     }
 }
 
