@@ -212,7 +212,6 @@ impl Client<StdioTransport> {
         })
     }
 
-    #[cfg(windows)]
     fn build_windows_command(bin_path: &str, args: Vec<String>) -> String {
         let mut parts = Vec::new();
 
@@ -227,7 +226,6 @@ impl Client<StdioTransport> {
         parts.join(" ")
     }
 
-    #[cfg(windows)]
     fn quote_windows_arg(arg: &str) -> String {
         // If the argument doesn't need quoting, return as-is
         if !arg.chars().any(|c| " \t\n\r\"\\".contains(c)) {
@@ -979,5 +977,171 @@ mod tests {
               }
             ]
         })
+    }
+
+    #[cfg(windows)]
+    mod windows_command_tests {
+        use super::*;
+        use crate::mcp_client::transport::stdio::JsonRpcStdioTransport as StdioTransport;
+
+        #[test]
+        fn test_quote_windows_arg_no_special_chars() {
+            let result = Client::<StdioTransport>::quote_windows_arg("simple");
+            assert_eq!(result, "simple");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_with_spaces() {
+            let result = Client::<StdioTransport>::quote_windows_arg("with spaces");
+            assert_eq!(result, "\"with spaces\"");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_with_quotes() {
+            let result = Client::<StdioTransport>::quote_windows_arg("with \"quotes\"");
+            assert_eq!(result, "\"with \\\"quotes\\\"\"");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_with_backslashes() {
+            let result = Client::<StdioTransport>::quote_windows_arg("path\\to\\file");
+            assert_eq!(result, "path\\to\\file");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_with_trailing_backslashes() {
+            let result = Client::<StdioTransport>::quote_windows_arg("path\\to\\dir\\");
+            assert_eq!(result, "path\\to\\dir\\");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_with_backslashes_before_quote() {
+            let result = Client::<StdioTransport>::quote_windows_arg("path\\\\\"quoted\"");
+            assert_eq!(result, "\"path\\\\\\\\\\\"quoted\\\"\"");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_complex_case() {
+            let result = Client::<StdioTransport>::quote_windows_arg("C:\\Program Files\\My App\\bin\\app.exe");
+            assert_eq!(result, "\"C:\\Program Files\\My App\\bin\\app.exe\"");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_with_tabs_and_newlines() {
+            let result = Client::<StdioTransport>::quote_windows_arg("with\ttabs\nand\rnewlines");
+            assert_eq!(result, "\"with\ttabs\nand\rnewlines\"");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_edge_case_only_backslashes() {
+            let result = Client::<StdioTransport>::quote_windows_arg("\\\\\\");
+            assert_eq!(result, "\\\\\\");
+        }
+
+        #[test]
+        fn test_quote_windows_arg_edge_case_only_quotes() {
+            let result = Client::<StdioTransport>::quote_windows_arg("\"\"\"");
+            assert_eq!(result, "\"\\\"\\\"\\\"\"");
+        }
+
+        // Tests for build_windows_command function
+        #[test]
+        fn test_build_windows_command_empty_args() {
+            let bin_path = "myapp";
+            let args = vec![];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(result, "myapp");
+        }
+
+        #[test]
+        fn test_build_windows_command_uvx_example() {
+            let bin_path = "uvx";
+            let args = vec!["mcp-server-fetch".to_string()];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(result, "uvx mcp-server-fetch");
+        }
+
+        #[test]
+        fn test_build_windows_command_npx_example() {
+            let bin_path = "npx";
+            let args = vec!["-y".to_string(), "@modelcontextprotocol/server-memory".to_string()];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(result, "npx -y @modelcontextprotocol/server-memory");
+        }
+
+        #[test]
+        fn test_build_windows_command_docker_example() {
+            let bin_path = "docker";
+            let args = vec![
+                "run".to_string(),
+                "-i".to_string(),
+                "--rm".to_string(),
+                "-e".to_string(),
+                "GITHUB_PERSONAL_ACCESS_TOKEN".to_string(),
+                "ghcr.io/github/github-mcp-server".to_string(),
+            ];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(
+                result,
+                "docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server"
+            );
+        }
+
+        #[test]
+        fn test_build_windows_command_with_quotes_in_args() {
+            let bin_path = "myapp";
+            let args = vec!["--config".to_string(), "{\"key\": \"value\"}".to_string()];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(result, "myapp --config \"{\\\"key\\\": \\\"value\\\"}\"");
+        }
+
+        #[test]
+        fn test_build_windows_command_with_spaces_in_path() {
+            let bin_path = "C:\\Program Files\\My App\\bin\\app.exe";
+            let args = vec!["--input".to_string(), "file with spaces.txt".to_string()];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(
+                result,
+                "\"C:\\Program Files\\My App\\bin\\app.exe\" --input \"file with spaces.txt\""
+            );
+        }
+
+        #[test]
+        fn test_build_windows_command_complex_args() {
+            let bin_path = "myapp";
+            let args = vec![
+                "--config".to_string(),
+                "C:\\Users\\test\\config.json".to_string(),
+                "--output".to_string(),
+                "C:\\Output\\result file.txt".to_string(),
+                "--verbose".to_string(),
+            ];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(
+                result,
+                "myapp --config C:\\Users\\test\\config.json --output \"C:\\Output\\result file.txt\" --verbose"
+            );
+        }
+
+        #[test]
+        fn test_build_windows_command_with_environment_variables() {
+            let bin_path = "cmd";
+            let args = vec!["/c".to_string(), "echo %PATH%".to_string()];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(result, "cmd /c \"echo %PATH%\"");
+        }
+
+        #[test]
+        fn test_build_windows_command_real_world_python() {
+            let bin_path = "python";
+            let args = vec![
+                "-m".to_string(),
+                "mcp_server".to_string(),
+                "--config".to_string(),
+                "C:\\configs\\server.json".to_string(),
+            ];
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            assert_eq!(result, "python -m mcp_server --config C:\\configs\\server.json");
+        }
     }
 }
