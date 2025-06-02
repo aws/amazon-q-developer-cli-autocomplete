@@ -80,6 +80,7 @@ use crate::cli::chat::tools::execute_bash::ExecuteBash;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
 use crate::cli::chat::tools::gh_issue::GhIssue;
+use crate::cli::chat::tools::knowledge::Knowledge;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
 use crate::cli::chat::tools::{
@@ -809,6 +810,9 @@ impl ToolManager {
             if !crate::cli::chat::tools::thinking::Thinking::is_enabled(database) {
                 tool_specs.remove("thinking");
             }
+            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(database) {
+                tool_specs.remove("knowledge");
+            }
             tool_specs
         };
         let load_tools = self
@@ -918,6 +922,7 @@ impl ToolManager {
             "use_aws" => Tool::UseAws(serde_json::from_value::<UseAws>(value.args).map_err(map_err)?),
             "report_issue" => Tool::GhIssue(serde_json::from_value::<GhIssue>(value.args).map_err(map_err)?),
             "thinking" => Tool::Thinking(serde_json::from_value::<Thinking>(value.args).map_err(map_err)?),
+            "knowledge" => Tool::Knowledge(serde_json::from_value::<Knowledge>(value.args).map_err(map_err)?),
             // Note that this name is namespaced with server_name{DELIMITER}tool_name
             name => {
                 // Note: tn_map also has tools that underwent no transformation. In otherwords, if
