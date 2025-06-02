@@ -279,7 +279,7 @@ impl Database {
     }
 
     /// Get the start URL used for IdC login.
-    pub fn get_start_url(&mut self) -> Result<Option<String>, DatabaseError> {
+    pub fn get_start_url(&self) -> Result<Option<String>, DatabaseError> {
         self.get_json_entry::<String>(Table::State, START_URL_KEY)
     }
 
@@ -289,7 +289,7 @@ impl Database {
     }
 
     /// Get the region used for IdC login.
-    pub fn get_idc_region(&mut self) -> Result<Option<String>, DatabaseError> {
+    pub fn get_idc_region(&self) -> Result<Option<String>, DatabaseError> {
         // Annoyingly, this is encoded as a JSON string on older clients
         self.get_json_entry::<String>(Table::State, IDC_REGION_KEY)
     }

@@ -92,7 +92,7 @@ pub fn generate_prompt(current_profile: Option<&str>, warning: bool) -> String {
         .map(|p| format!("[{p}] ").cyan().to_string())
         .unwrap_or_default();
 
-    format!("{profile_part}{warning_symbol}{}", "> ".magenta())
+    format!("{profile_part}{warning_symbol}{}", "> ".cyan().bold())
 }
 
 /// Complete commands that start with a slash
@@ -315,20 +315,23 @@ mod tests {
     #[test]
     fn test_generate_prompt() {
         // Test default prompt (no profile)
-        assert_eq!(generate_prompt(None, false), "> ".magenta().to_string());
+        assert_eq!(generate_prompt(None, false), "> ".cyan().bold().to_string());
         // Test default prompt with warning
-        assert_eq!(generate_prompt(None, true), format!("{}{}", "!".red(), "> ".magenta()));
+        assert_eq!(
+            generate_prompt(None, true),
+            format!("{}{}", "!".red(), "> ".cyan().bold())
+        );
         // Test default profile (should be same as no profile)
-        assert_eq!(generate_prompt(Some("default"), false), "> ".magenta().to_string());
+        assert_eq!(generate_prompt(Some("default"), false), "> ".cyan().bold().to_string());
         // Test custom profile
         assert_eq!(
             generate_prompt(Some("test-profile"), false),
-            format!("{}{}", "[test-profile] ".cyan(), "> ".magenta())
+            format!("{}{}", "[test-profile] ".cyan(), "> ".cyan().bold())
         );
         // Test another custom profile with warning
         assert_eq!(
             generate_prompt(Some("dev"), true),
-            format!("{}{}{}", "[dev] ".cyan(), "!".red(), "> ".magenta())
+            format!("{}{}{}", "[dev] ".cyan(), "!".red(), "> ".cyan().bold())
         );
     }
 

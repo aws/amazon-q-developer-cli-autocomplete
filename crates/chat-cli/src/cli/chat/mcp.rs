@@ -256,7 +256,7 @@ fn resolve_scope_profile(ctx: &Context, scope: Option<Scope>) -> Result<PathBuf>
 
 fn expand_path(ctx: &Context, p: &str) -> Result<PathBuf> {
     let p = shellexpand::tilde(p);
-    let mut path = PathBuf::from(p.as_ref());
+    let mut path = PathBuf::from(p.as_ref() as &str);
     if path.is_relative() {
         path = ctx.env().current_dir()?.join(path);
     }

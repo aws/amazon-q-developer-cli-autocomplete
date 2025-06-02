@@ -151,9 +151,14 @@
       "description": "Captures active usage with Q Chat in shell",
       "metadata": [
         { "type": "amazonqConversationId" },
+        { "type": "codewhispererterminal_utteranceId" },
         { "type": "credentialStartUrl", "required": false },
+        { "type": "ssoRegion", "required": false },
         { "type": "codewhispererterminal_inCloudshell" },
-        { "type": "codewhispererterminal_contextFileLength", "required": false }
+        { "type": "codewhispererterminal_contextFileLength", "required": false },
+        { "type": "requestId" },
+        { "type": "result", "required": true },
+        { "type": "reason", "required": false }
       ]
     },
     {
@@ -261,6 +266,18 @@
         { "type": "credentialStartUrl", "required": false }
       ],
       "passive": true
+    },
+    {
+      "name": "amazonq_messageResponseError",
+      "description": "When an error has occurred in response to a prompt",
+      "metadata": [
+          { "type": "credentialStartUrl", "required": false },
+          { "type": "ssoRegion", "required": false },
+          { "type": "amazonqConversationId" },
+          { "type": "codewhispererterminal_contextFileLength", "required": false },
+          { "type": "result" },
+          { "type": "reason", "required": false }
+      ]
     }
   ]
 }

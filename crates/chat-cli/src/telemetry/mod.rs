@@ -48,6 +48,7 @@ use uuid::{
 };
 
 use crate::api_client::Client as CodewhispererClient;
+use crate::auth::builder_id::get_start_url_and_region;
 use crate::aws_common::app_name;
 use crate::cli::CliRootCommands;
 use crate::database::settings::Setting;
@@ -193,17 +194,28 @@ impl TelemetryThread {
             .send(Event::new(EventType::CliSubcommandExecuted { subcommand }))?)
     }
 
-    pub fn send_chat_added_message(
+    #[allow(clippy::too_many_arguments)] // TODO: Should make a parameters struct.
+    pub async fn send_chat_added_message(
         &self,
+        database: &Database,
         conversation_id: String,
-        message_id: String,
+        message_id: Option<String>,
+        request_id: Option<String>,
         context_file_length: Option<usize>,
+        result: TelemetryResult,
+        reason: Option<String>,
     ) -> Result<(), TelemetryError> {
-        Ok(self.tx.send(Event::new(EventType::ChatAddedMessage {
+        let mut event = Event::new(EventType::ChatAddedMessage {
             conversation_id,
             message_id,
+            request_id,
             context_file_length,
-        }))?)
+            result,
+            reason,
+        });
+        set_start_url_and_region(database, &mut event).await;
+
+        Ok(self.tx.send(event)?)
     }
 
     pub fn send_tool_use_suggested(&self, event: ToolUseEventBuilder) -> Result<(), TelemetryError> {
@@ -266,6 +278,35 @@ impl TelemetryThread {
             result,
             sso_region,
         }))?)
+    }
+
+    pub async fn send_response_error(
+        &self,
+        database: &Database,
+        conversation_id: String,
+        context_file_length: Option<usize>,
+        result: TelemetryResult,
+        reason: Option<String>,
+    ) -> Result<(), TelemetryError> {
+        let mut event = Event::new(EventType::MessageResponseError {
+            result,
+            reason,
+            conversation_id,
+            context_file_length,
+        });
+        set_start_url_and_region(database, &mut event).await;
+
+        Ok(self.tx.send(event)?)
+    }
+}
+
+async fn set_start_url_and_region(database: &Database, event: &mut Event) {
+    let (start_url, region) = get_start_url_and_region(database).await;
+    if let Some(start_url) = start_url {
+        event.set_start_url(start_url);
+    }
+    if let Some(region) = region {
+        event.set_sso_region(region);
     }
 }
 
@@ -360,7 +401,7 @@ impl TelemetryClient {
 
             let chat_add_message_event = match ChatAddMessageEvent::builder()
                 .conversation_id(conversation_id)
-                .message_id(message_id)
+                .message_id(message_id.clone().unwrap_or("not_set".to_string()))
                 .build()
             {
                 Ok(event) => event,
@@ -495,7 +536,16 @@ mod test {
             .send_cli_subcommand_executed(Some(&CliRootCommands::Version { changelog: None }))
             .ok();
         thread
-            .send_chat_added_message("version".to_owned(), "version".to_owned(), Some(123))
+            .send_chat_added_message(
+                &database,
+                "conv_id".to_owned(),
+                Some("message_id".to_owned()),
+                Some("req_id".to_owned()),
+                Some(123),
+                TelemetryResult::Succeeded,
+                None,
+            )
+            .await
             .ok();
 
         drop(thread);
