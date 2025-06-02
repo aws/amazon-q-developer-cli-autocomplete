@@ -15,6 +15,7 @@ use serde::{
     Deserialize,
     Serialize,
 };
+use similar::DiffableStr;
 use thiserror::Error;
 use tokio::time;
 use tokio::time::error::Elapsed;
@@ -163,12 +164,24 @@ impl Client<StdioTransport> {
         } = config;
         let child = {
             let expanded_bin_path = shellexpand::tilde(&bin_path);
-            let mut command = tokio::process::Command::new(expanded_bin_path.as_ref() as &str);
+
+            // On Windows, we need to use cmd.exe to run the binary with arguments because Tokio
+            // always assumes that the program has an .exe extension, which is not the case for
+            // helpers like `uvx` or `npx`.
+            let mut command = if cfg!(windows) {
+                let mut cmd = tokio::process::Command::new("cmd.exe");
+                cmd.args(["/C", &Self::build_windows_command(&expanded_bin_path, args)]);
+                cmd
+            } else {
+                let mut cmd = tokio::process::Command::new(expanded_bin_path.to_string());
+                cmd.args(args);
+                cmd
+            };
+
             command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .envs(std::env::vars());
+                .stderr(Stdio::piped());
 
             #[cfg(not(windows))]
             command.process_group(0);
@@ -178,7 +191,8 @@ impl Client<StdioTransport> {
                     command.env(env_name, env_value);
                 }
             }
-            command.args(args).spawn()?
+
+            command.spawn()?
         };
 
         let server_process_id = child.id().ok_or(ClientError::MissingProcessId)?;
@@ -196,6 +210,61 @@ impl Client<StdioTransport> {
             prompt_gets: Arc::new(SyncRwLock::new(HashMap::new())),
             is_prompts_out_of_date: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    #[cfg(windows)]
+    fn build_windows_command(bin_path: &str, args: Vec<String>) -> String {
+        let mut parts = Vec::new();
+
+        // Add the binary path, quoted if necessary
+        parts.push(Self::quote_windows_arg(bin_path));
+
+        // Add all arguments, quoted if necessary
+        for arg in args {
+            parts.push(Self::quote_windows_arg(&arg));
+        }
+
+        parts.join(" ")
+    }
+
+    #[cfg(windows)]
+    fn quote_windows_arg(arg: &str) -> String {
+        // If the argument doesn't need quoting, return as-is
+        if !arg.chars().any(|c| " \t\n\r\"\\".contains(c)) {
+            return arg.to_string();
+        }
+
+        let mut result = String::from("\"");
+        let mut backslashes = 0;
+
+        for c in arg.chars() {
+            match c {
+                '\\' => {
+                    backslashes += 1;
+                    result.push('\\');
+                },
+                '"' => {
+                    // Escape all preceding backslashes and the quote
+                    for _ in 0..backslashes {
+                        result.push('\\');
+                    }
+                    result.push_str("\\\"");
+                    backslashes = 0;
+                },
+                _ => {
+                    backslashes = 0;
+                    result.push(c);
+                },
+            }
+        }
+
+        // Escape trailing backslashes before the closing quote
+        for _ in 0..backslashes {
+            result.push('\\');
+        }
+
+        result.push('"');
+        result
     }
 }
 
