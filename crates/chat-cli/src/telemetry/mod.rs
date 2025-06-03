@@ -84,9 +84,9 @@ impl From<amzn_toolkit_telemetry_client::operation::post_metrics::PostMetricsErr
     }
 }
 
-impl From<mpsc::error::SendError<Event>> for TelemetryError {
-    fn from(value: mpsc::error::SendError<Event>) -> Self {
-        Self::Send(Box::new(value))
+impl From<Box<mpsc::error::SendError<Event>>> for TelemetryError {
+    fn from(value: Box<mpsc::error::SendError<Event>>) -> Self {
+        Self::Send(value)
     }
 }
 
@@ -126,9 +126,43 @@ impl TelemetryStage {
 }
 
 #[derive(Debug)]
+enum TelemetrySender {
+    Strong(mpsc::UnboundedSender<Event>),
+    Weak(mpsc::WeakUnboundedSender<Event>),
+}
+
+impl TelemetrySender {
+    fn send(&self, ev: Event) -> Result<(), Box<mpsc::error::SendError<Event>>> {
+        match self {
+            Self::Strong(sender) => sender.send(ev).map_err(Box::new),
+            Self::Weak(sender) => {
+                if let Some(sender) = sender.upgrade() {
+                    sender.send(ev).map_err(Box::new)
+                } else {
+                    tracing::error!(
+                        "Attempted to send telemetry after telemetry thread has been dropped. Event attempted {:?}",
+                        ev
+                    );
+                    Ok(())
+                }
+            },
+        }
+    }
+}
+
+impl Clone for TelemetrySender {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Strong(sender) => Self::Weak(sender.downgrade()),
+            Self::Weak(sender) => Self::Weak(sender.clone()),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct TelemetryThread {
     handle: Option<JoinHandle<()>>,
-    tx: mpsc::UnboundedSender<Event>,
+    tx: TelemetrySender,
 }
 
 impl Clone for TelemetryThread {
@@ -144,6 +178,7 @@ impl TelemetryThread {
     pub async fn new(env: &Env, database: &mut Database) -> Result<Self, TelemetryError> {
         let telemetry_client = TelemetryClient::new(env, database).await?;
         let (tx, mut rx) = mpsc::unbounded_channel();
+        let tx = TelemetrySender::Strong(tx);
         let handle = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
                 trace!("TelemetryThread received new telemetry event: {:?}", event);
