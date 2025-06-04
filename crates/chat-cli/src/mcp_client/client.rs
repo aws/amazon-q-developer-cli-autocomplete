@@ -228,7 +228,7 @@ impl Client<StdioTransport> {
 
     fn quote_windows_arg(arg: &str) -> String {
         // If the argument doesn't need quoting, return as-is
-        if !arg.chars().any(|c| " \t\n\r\"\\".contains(c)) {
+        if !arg.chars().any(|c| " \t\n\r\"".contains(c)) {
             return arg.to_string();
         }
 
@@ -1049,7 +1049,7 @@ mod tests {
         fn test_build_windows_command_empty_args() {
             let bin_path = "myapp";
             let args = vec![];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(result, "myapp");
         }
 
@@ -1057,7 +1057,7 @@ mod tests {
         fn test_build_windows_command_uvx_example() {
             let bin_path = "uvx";
             let args = vec!["mcp-server-fetch".to_string()];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(result, "uvx mcp-server-fetch");
         }
 
@@ -1065,7 +1065,7 @@ mod tests {
         fn test_build_windows_command_npx_example() {
             let bin_path = "npx";
             let args = vec!["-y".to_string(), "@modelcontextprotocol/server-memory".to_string()];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(result, "npx -y @modelcontextprotocol/server-memory");
         }
 
@@ -1080,7 +1080,7 @@ mod tests {
                 "GITHUB_PERSONAL_ACCESS_TOKEN".to_string(),
                 "ghcr.io/github/github-mcp-server".to_string(),
             ];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(
                 result,
                 "docker run -i --rm -e GITHUB_PERSONAL_ACCESS_TOKEN ghcr.io/github/github-mcp-server"
@@ -1091,7 +1091,7 @@ mod tests {
         fn test_build_windows_command_with_quotes_in_args() {
             let bin_path = "myapp";
             let args = vec!["--config".to_string(), "{\"key\": \"value\"}".to_string()];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(result, "myapp --config \"{\\\"key\\\": \\\"value\\\"}\"");
         }
 
@@ -1099,7 +1099,7 @@ mod tests {
         fn test_build_windows_command_with_spaces_in_path() {
             let bin_path = "C:\\Program Files\\My App\\bin\\app.exe";
             let args = vec!["--input".to_string(), "file with spaces.txt".to_string()];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(
                 result,
                 "\"C:\\Program Files\\My App\\bin\\app.exe\" --input \"file with spaces.txt\""
@@ -1116,7 +1116,7 @@ mod tests {
                 "C:\\Output\\result file.txt".to_string(),
                 "--verbose".to_string(),
             ];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(
                 result,
                 "myapp --config C:\\Users\\test\\config.json --output \"C:\\Output\\result file.txt\" --verbose"
@@ -1127,7 +1127,7 @@ mod tests {
         fn test_build_windows_command_with_environment_variables() {
             let bin_path = "cmd";
             let args = vec!["/c".to_string(), "echo %PATH%".to_string()];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(result, "cmd /c \"echo %PATH%\"");
         }
 
@@ -1140,7 +1140,7 @@ mod tests {
                 "--config".to_string(),
                 "C:\\configs\\server.json".to_string(),
             ];
-            let result = Client::<StdioTransport>::build_windows_command(bin_path, &args);
+            let result = Client::<StdioTransport>::build_windows_command(bin_path, args);
             assert_eq!(result, "python -m mcp_server --config C:\\configs\\server.json");
         }
     }

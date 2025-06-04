@@ -8,6 +8,7 @@ use crate::platform::Context;
 pub enum DirectoryError {
     #[error("home directory not found")]
     NoHomeDirectory,
+    #[cfg(unix)]
     #[error("runtime directory not found: neither XDG_RUNTIME_DIR nor TMPDIR were found")]
     NoRuntimeDirectory,
     #[error("IO Error: {0}")]
@@ -31,7 +32,7 @@ type Result<T, E = DirectoryError> = std::result::Result<T, E>;
 /// - Linux: /home/Alice
 /// - MacOS: /Users/Alice
 /// - Windows: C:\Users\Alice
-pub fn home_dir(ctx: &Context) -> Result<PathBuf> {
+pub fn home_dir(#[cfg_attr(windows, allow(unused_variables))] ctx: &Context) -> Result<PathBuf> {
     #[cfg(unix)]
     match cfg!(test) {
         true => ctx
@@ -223,14 +224,14 @@ mod tests {
     fn snapshot_fig_data_dir() {
         linux!(fig_data_dir(), @"$HOME/.local/share/amazon-q");
         macos!(fig_data_dir(), @"$HOME/Library/Application Support/amazon-q");
-        windows!(fig_data_dir(), @r"C:\Users\$USER\AppData\Local\Fig\userdata");
+        windows!(fig_data_dir(), @r"C:\Users\$USER\AppData\Local\amazon-q");
     }
 
     #[test]
     fn snapshot_settings_path() {
         linux!(settings_path(), @"$HOME/.local/share/amazon-q/settings.json");
         macos!(settings_path(), @"$HOME/Library/Application Support/amazon-q/settings.json");
-        windows!(settings_path(), @r"C:\Users\$USER\AppData\Lcoal\Fig\settings.json");
+        windows!(settings_path(), @r"C:\Users\$USER\AppData\Local\amazon-q\settings.json");
     }
 
     #[test]

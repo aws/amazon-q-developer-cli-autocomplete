@@ -1379,7 +1379,7 @@ impl ChatContext {
     /// Read input from the user.
     async fn prompt_user(
         &mut self,
-        database: &Database,
+        #[cfg_attr(windows, allow(unused_variables))] database: &Database,
         mut tool_uses: Option<Vec<QueuedTool>>,
         pending_tool_index: Option<usize>,
         skip_printing_tools: bool,
