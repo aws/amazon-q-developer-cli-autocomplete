@@ -1489,6 +1489,7 @@ impl ChatContext {
         Ok(match command {
             Command::Ask { prompt } => {
                 // Check for a pending tool approval
+                let mut reason_prompt = String::from("Tool denied: ");
                 if let Some(index) = pending_tool_index {
                     let tool_use = &mut tool_uses[index];
 
@@ -1500,6 +1501,23 @@ impl ChatContext {
                         tool_use.accepted = true;
 
                         return Ok(ChatState::ExecuteTools(tool_uses));
+                    // Prompt reason if no selected
+                    } else if ["n", "N"].contains(&prompt.as_str()) {
+                        tool_use.accepted = false;
+                        execute!(
+                            self.output,
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print("\nPlease provide a reason for denying this tool use:\n\n"),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                        let reason: String = match self.read_user_input("> ".yellow().to_string().as_str(), true) {
+                            Some(input) if !input.trim().is_empty() => input,
+                            _ => "No reason provided".to_string(),
+                        };
+                        reason_prompt.push_str(&reason);
+                        reason_prompt.push_str(
+                            ". Take user feedback and try again if reason provided, else continue conversation.",
+                        );
                     }
                 } else if !self.pending_prompts.is_empty() {
                     let prompts = self.pending_prompts.drain(0..).collect();
@@ -1511,9 +1529,12 @@ impl ChatContext {
 
                 // Otherwise continue with normal chat on 'n' or other responses
                 self.tool_use_status = ToolUseStatus::Idle;
-
                 if pending_tool_index.is_some() {
-                    self.conversation_state.abandon_tool_use(tool_uses, user_input);
+                    if ["n", "N"].contains(&prompt.as_str()) {
+                        self.conversation_state.abandon_tool_use(tool_uses, reason_prompt);
+                    } else {
+                        self.conversation_state.abandon_tool_use(tool_uses, user_input);
+                    }
                 } else {
                     self.conversation_state.set_next_user_message(user_input).await;
                 }
@@ -4231,11 +4252,13 @@ mod tests {
                 "/tools untrust fs_write".to_string(),
                 "create a file".to_string(), // prompt again due to untrust
                 "n".to_string(),             // cancel
+                "No reason".to_string(),     // provide reason for cancel
                 "/tools trust fs_write".to_string(),
                 "create a file".to_string(), // again without prompting due to '/tools trust'
                 "/tools reset".to_string(),
                 "create a file".to_string(), // prompt again due to reset
                 "n".to_string(),             // cancel
+                "No reason".to_string(),     // provide reason for cancel
                 "exit".to_string(),
             ]),
             true,
