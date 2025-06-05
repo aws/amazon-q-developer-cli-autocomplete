@@ -17,7 +17,7 @@ pub fn parse_prompt_components(prompt: &str) -> Option<PromptComponents> {
         if let Some(end) = remaining.find(']') {
             if start < end {
                 profile = Some(remaining[start + 1..end].to_string());
-                remaining = &remaining[end + 1..].trim_start();
+                remaining = remaining[end + 1..].trim_start();
             }
         }
     }
@@ -25,7 +25,7 @@ pub fn parse_prompt_components(prompt: &str) -> Option<PromptComponents> {
     // Check for warning symbol !
     if remaining.starts_with('!') {
         warning = true;
-        remaining = &remaining[1..].trim_start();
+        remaining = remaining[1..].trim_start();
     }
 
     // Should end with "> "

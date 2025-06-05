@@ -5,9 +5,7 @@ use serde::{
 use winreg::RegKey;
 use winreg::enums::HKEY_LOCAL_MACHINE;
 
-use super::{
-    OSVersion,
-};
+use super::OSVersion;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DisplayServer {

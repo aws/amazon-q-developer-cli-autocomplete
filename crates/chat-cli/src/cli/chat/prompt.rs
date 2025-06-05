@@ -34,11 +34,10 @@ use rustyline::{
 };
 use winnow::stream::AsChar;
 
+pub use super::prompt_parser::generate_prompt;
+use super::prompt_parser::parse_prompt_components;
 use crate::database::Database;
 use crate::database::settings::Setting;
-use super::prompt_parser::parse_prompt_components;
-
-pub use super::prompt_parser::generate_prompt;
 
 pub const COMMANDS: &[&str] = &[
     "/clear",

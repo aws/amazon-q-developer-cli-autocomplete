@@ -47,7 +47,6 @@ use serde::{
     Deserialize,
     Serialize,
 };
-use serde_json::json;
 use thiserror::Error;
 use tokio::signal::ctrl_c;
 use tokio::sync::{
@@ -84,7 +83,6 @@ use crate::cli::chat::tools::gh_issue::GhIssue;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
 use crate::cli::chat::tools::{
-    InputSchema,
     Tool,
     ToolOrigin,
     ToolSpec,
@@ -814,6 +812,10 @@ impl ToolManager {
 
             #[cfg(windows)]
             {
+                use serde_json::json;
+
+                use crate::cli::chat::tools::InputSchema;
+
                 tool_specs.remove("execute_bash");
 
                 tool_specs.insert("execute_cmd".to_string(), ToolSpec {

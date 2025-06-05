@@ -15,7 +15,6 @@ use serde::{
     Deserialize,
     Serialize,
 };
-use similar::DiffableStr;
 use thiserror::Error;
 use tokio::time;
 use tokio::time::error::Elapsed;
