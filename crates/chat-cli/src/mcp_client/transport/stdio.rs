@@ -226,7 +226,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_transport() {
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut cmd = Command::new("powershell");
+            cmd.args(&["cat"]);
+            cmd
+        };
+        #[cfg(not(windows))]
         let mut cmd = Command::new("cat");
+
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // Inject our mock transport instead
