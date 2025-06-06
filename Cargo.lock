@@ -715,9 +715,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-cognitoidentity"
-version = "1.69.0"
+version = "1.73.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9dbf971a10bfb7d2893c6a741b8da97013c6c0b9ad5bab36f912b25f278eb15"
+checksum = "643df74afe23a99af1d580841bbdd7497028e0d98654c52ea9c05b7929b333d1"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -737,9 +737,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-cognitoidentityprovider"
-version = "1.81.0"
+version = "1.85.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef8d5d7f21213ae1c68c15ce5fabad492c777fd094466632a6e253356e5f9deb"
+checksum = "b0a1ff45e6e7da442d22d31971e79f5d167a2111297575e70408cbab0ae15da7"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -781,9 +781,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-ssooidc"
-version = "1.69.0"
+version = "1.73.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27454e4c55aaa4ef65647e3a1cf095cb834ca6d54e959e2909f1fef96ad87860"
+checksum = "f879a8572b4683a8f84f781695bebf2f25cf11a81a2693c31fc0e0215c2c1726"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
