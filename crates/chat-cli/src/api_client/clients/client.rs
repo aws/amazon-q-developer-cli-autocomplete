@@ -1,6 +1,8 @@
 use amzn_codewhisperer_client::Client as CodewhispererClient;
+use amzn_codewhisperer_client::operation::create_subscription_token::CreateSubscriptionTokenOutput;
 use amzn_codewhisperer_client::types::{
     OptOutPreference,
+    SubscriptionStatus,
     TelemetryEvent,
     UserContext,
 };
@@ -121,6 +123,21 @@ impl Client {
                     profile_name: "MyOtherProfile".to_owned(),
                 },
             ]),
+        }
+    }
+
+    pub async fn create_subscription_token(&self) -> Result<CreateSubscriptionTokenOutput, ApiClientError> {
+        match &self.inner {
+            inner::Inner::Codewhisperer(client) => client
+                .create_subscription_token()
+                .send()
+                .await
+                .map_err(ApiClientError::CreateSubscriptionToken),
+            inner::Inner::Mock => Ok(CreateSubscriptionTokenOutput::builder()
+                .set_encoded_verification_url(Some("test/url".to_string()))
+                .set_status(Some(SubscriptionStatus::Inactive))
+                .set_token(Some("test-token".to_string()))
+                .build()?),
         }
     }
 }

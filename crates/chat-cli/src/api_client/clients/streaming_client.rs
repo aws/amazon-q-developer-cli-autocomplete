@@ -147,6 +147,15 @@ impl StreamingClient {
                                 err.meta().message()
                                 == Some("Encountered unexpectedly high load when processing the request, please try again.")
                             });
+                        let is_monthly_limit_err = e
+                            .raw_response()
+                            .and_then(|resp| resp.body().bytes())
+                            .and_then(|bytes| match String::from_utf8(bytes.to_vec()) {
+                                Ok(s) => Some(s.contains("MONTHLY_REQUEST_COUNT")),
+                                Err(_) => None,
+                            })
+                            .unwrap_or(false);
+
                         if is_quota_breach {
                             Err(ApiClientError::QuotaBreach("quota has reached its limit"))
                         } else if is_context_window_overflow {
@@ -157,6 +166,8 @@ impl StreamingClient {
                                 .and_then(|err| err.meta().request_id())
                                 .map(|s| s.to_string());
                             Err(ApiClientError::ModelOverloadedError { request_id })
+                        } else if is_monthly_limit_err {
+                            Err(ApiClientError::MonthlyLimitReached)
                         } else {
                             Err(e.into())
                         }

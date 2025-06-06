@@ -80,6 +80,7 @@ pub const COMMANDS: &[&str] = &[
     "/usage",
     "/save",
     "/load",
+    "/subscribe",
 ];
 
 /// Complete commands that start with a slash

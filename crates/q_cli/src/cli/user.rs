@@ -203,7 +203,7 @@ impl RootUserSubcommand {
 
                 if let Ok(Some(token)) = fig_auth::builder_id_token().await {
                     if matches!(token.token_type(), TokenType::BuilderId) {
-                        bail!("This command is only available for Pro users");
+                        bail!("This command is only available for IAM Identity Center users");
                     }
                 }
 
