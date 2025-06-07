@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "my-server": {
+      "command": "q",
+      "args": [],
+      "env": {},
+      "timeout": 120000
+    }
+  }
+}

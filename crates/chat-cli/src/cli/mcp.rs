@@ -80,11 +80,12 @@ impl McpSubcommand {
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub struct AddArgs {
     /// Name for the server
-    #[arg(long)]
     pub name: String,
     /// The command used to launch the server
-    #[arg(long)]
     pub command: String,
+    /// Arguments to the launch command
+    #[arg(long)]
+    pub args: Option<Vec<String>>,
     /// Where to add the server to.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
@@ -101,6 +102,8 @@ pub struct AddArgs {
 
 impl AddArgs {
     pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+        println!("{self:?}");
+
         let scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
 
