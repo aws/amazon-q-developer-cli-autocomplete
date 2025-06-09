@@ -359,7 +359,8 @@ fn format_path(cwd: impl AsRef<Path>, path: impl AsRef<Path>) -> String {
         .map(|p| p.to_string_lossy().to_string())
         // If we have three consecutive ".." then it should probably just stay as an absolute path.
         .map(|p| {
-            if p.starts_with("../../..") {
+            let three_up = format!("..{}..{}..", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
+            if p.starts_with(&three_up) {
                 path.as_ref().to_string_lossy().to_string()
             } else {
                 p
@@ -376,6 +377,10 @@ fn supports_truecolor(ctx: &Context) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::path::MAIN_SEPARATOR;
+
+    use chat_cli::platform::ACTIVE_USER_HOME;
+
     use super::*;
     use crate::platform::EnvProvider;
 
@@ -384,15 +389,12 @@ mod tests {
         let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
 
         let actual = sanitize_path_tool_arg(&ctx, "~");
-        assert_eq!(
-            actual,
-            ctx.fs().chroot_path(ctx.env().home().unwrap()),
-            "tilde should expand"
-        );
+        let expected_home = ctx.env().home().unwrap_or_default();
+        assert_eq!(actual, ctx.fs().chroot_path(&expected_home), "tilde should expand");
         let actual = sanitize_path_tool_arg(&ctx, "~/hello");
         assert_eq!(
             actual,
-            ctx.fs().chroot_path(ctx.env().home().unwrap().join("hello")),
+            ctx.fs().chroot_path(expected_home.join("hello")),
             "tilde should expand"
         );
         let actual = sanitize_path_tool_arg(&ctx, "/~");
@@ -412,15 +414,39 @@ mod tests {
             let path = sanitize_path_tool_arg(&ctx, path);
             fs.create_dir_all(&cwd).await.unwrap();
             fs.create_dir_all(&path).await.unwrap();
-            // Using `contains` since the chroot test directory will prefix the formatted path with a tmpdir
-            // path.
-            assert!(format_path(cwd, path).contains(expected));
+
+            let formatted = format_path(&cwd, &path);
+
+            if Path::new(expected).is_absolute() {
+                // If the expected path is relative, we need to ensure it is relative to the cwd.
+                let expected = fs.chroot_path_str(expected);
+
+                assert!(formatted == expected, "Expected '{}' to be '{}'", formatted, expected);
+
+                return;
+            }
+
+            assert!(
+                formatted.contains(expected),
+                "Expected '{}' to be '{}'",
+                formatted,
+                expected
+            );
         }
-        assert_paths("/Users/testuser/src", "/Users/testuser/Downloads", "../Downloads").await;
+
+        // Test relative path from src to Downloads (sibling directories)
         assert_paths(
-            "/Users/testuser/projects/MyProject/src",
-            "/Volumes/projects/MyProject/src",
-            "/Volumes/projects/MyProject/src",
+            format!("{ACTIVE_USER_HOME}{MAIN_SEPARATOR}src").as_str(),
+            format!("{ACTIVE_USER_HOME}{MAIN_SEPARATOR}Downloads").as_str(),
+            format!("..{MAIN_SEPARATOR}Downloads").as_str(),
+        )
+        .await;
+
+        // Test absolute path that should stay absolute (going up too many levels)
+        assert_paths(
+            format!("{ACTIVE_USER_HOME}{MAIN_SEPARATOR}projects{MAIN_SEPARATOR}some{MAIN_SEPARATOR}project").as_str(),
+            format!("{ACTIVE_USER_HOME}{MAIN_SEPARATOR}other").as_str(),
+            format!("{ACTIVE_USER_HOME}{MAIN_SEPARATOR}other").as_str(),
         )
         .await;
     }

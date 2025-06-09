@@ -84,6 +84,15 @@ pub struct ContextBuilder {
     platform: Option<Platform>,
 }
 
+pub const WINDOWS_USER_HOME: &str = "C:\\Users\\testuser";
+pub const UNIX_USER_HOME: &str = "/home/testuser";
+
+pub const ACTIVE_USER_HOME: &str = if cfg!(windows) {
+    WINDOWS_USER_HOME
+} else {
+    UNIX_USER_HOME
+};
+
 impl ContextBuilder {
     pub fn new() -> Self {
         Self::default()
@@ -132,11 +141,19 @@ impl ContextBuilder {
     /// [Fs] and [Env] currently set with the builder.
     #[cfg(test)]
     pub async fn with_test_home(mut self) -> Result<Self, std::io::Error> {
-        let home = "/home/testuser";
         let fs = Fs::new_chroot();
-        fs.create_dir_all(home).await?;
+        fs.create_dir_all(ACTIVE_USER_HOME).await?;
         self.fs = Some(fs);
-        self.env = Some(Env::from_slice(&[("HOME", "/home/testuser"), ("USER", "testuser")]));
+
+        if cfg!(windows) {
+            self.env = Some(Env::from_slice(&[
+                ("USERPROFILE", ACTIVE_USER_HOME),
+                ("USERNAME", "testuser"),
+            ]));
+        } else {
+            self.env = Some(Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser")]));
+        }
+
         Ok(self)
     }
 
@@ -165,8 +182,18 @@ mod tests {
             .unwrap()
             .with_env_var("hello", "world")
             .build();
-        assert!(ctx.fs().try_exists("/home/testuser").await.unwrap());
-        assert_eq!(ctx.env().get("HOME").unwrap(), "/home/testuser");
+
+        #[cfg(windows)]
+        {
+            assert!(ctx.fs().try_exists(WINDOWS_USER_HOME).await.unwrap());
+            assert_eq!(ctx.env().get("USERPROFILE").unwrap(), WINDOWS_USER_HOME);
+        }
+        #[cfg(not(windows))]
+        {
+            assert!(ctx.fs().try_exists(UNIX_USER_HOME).await.unwrap());
+            assert_eq!(ctx.env().get("HOME").unwrap(), UNIX_USER_HOME);
+        }
+
         assert_eq!(ctx.env().get("hello").unwrap(), "world");
     }
 }

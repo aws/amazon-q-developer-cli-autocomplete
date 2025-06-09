@@ -52,7 +52,22 @@ pub fn home_dir(#[cfg_attr(windows, allow(unused_variables))] ctx: &Context) -> 
     }
 
     #[cfg(windows)]
-    dirs::home_dir().ok_or(DirectoryError::NoHomeDirectory)
+    match cfg!(test) {
+        true => ctx
+            .env()
+            .get("USERPROFILE")
+            .map_err(|_err| DirectoryError::NoHomeDirectory)
+            .and_then(|h| {
+                if h.is_empty() {
+                    Err(DirectoryError::NoHomeDirectory)
+                } else {
+                    Ok(h)
+                }
+            })
+            .map(PathBuf::from)
+            .map(|p| ctx.fs().chroot_path(p)),
+        false => dirs::home_dir().ok_or(DirectoryError::NoHomeDirectory),
+    }
 }
 
 /// The q data directory
