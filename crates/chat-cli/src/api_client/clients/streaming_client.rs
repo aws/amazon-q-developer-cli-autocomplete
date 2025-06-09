@@ -12,6 +12,7 @@ use tracing::{
 
 use super::shared::{
     bearer_sdk_config,
+    sigv4_sdk_config,
     stalled_stream_protection_config,
 };
 use crate::api_client::interceptor::opt_out::OptOutInterceptor;
@@ -28,6 +29,7 @@ use crate::aws_common::{
     UserAgentOverrideInterceptor,
     app_name,
 };
+use crate::cli::shared::AuthStrategy;
 use crate::database::{
     AuthProfile,
     Database,
@@ -57,8 +59,24 @@ pub struct StreamingClient {
 }
 
 impl StreamingClient {
-    pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
-        Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
+    pub async fn new(database: &mut Database, auth_strategy: Option<AuthStrategy>) -> Result<Self, ApiClientError> {
+        let strategy = auth_strategy.unwrap_or_default();
+        
+        match strategy {
+            AuthStrategy::SigV4 => {
+                Self::new_sigv4_client(database, &Endpoint::load_codewhisperer(database)).await
+            },
+            AuthStrategy::BearerToken => {
+                Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
+            },
+            AuthStrategy::Auto => {
+                // Try SigV4 first, fall back to bearer token
+                match Self::new_sigv4_client(database, &Endpoint::load_codewhisperer(database)).await {
+                    Ok(client) => Ok(client),
+                    Err(_) => Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await,
+                }
+            }
+        }
     }
 
     pub fn mock(events: Vec<Vec<ChatResponseStream>>) -> Self {
@@ -94,6 +112,28 @@ impl StreamingClient {
         };
 
         Ok(Self { inner, profile })
+    }
+    
+    // Add SigV4 client creation method
+    pub async fn new_sigv4_client(
+        database: &Database,
+        endpoint: &Endpoint,
+    ) -> Result<Self, ApiClientError> {
+        let conf_builder: amzn_codewhisperer_streaming_client::config::Builder =
+            (&sigv4_sdk_config(database, endpoint).await?).into();
+        let conf = conf_builder
+            .http_client(crate::aws_common::http_client::client())
+            .interceptor(OptOutInterceptor::new(database))
+            .interceptor(UserAgentOverrideInterceptor::new())
+            .app_name(app_name())
+            .endpoint_url(endpoint.url())
+            .stalled_stream_protection(stalled_stream_protection_config())
+            .build();
+        let client = CodewhispererStreamingClient::from_conf(conf);
+        Ok(Self {
+            inner: inner::Inner::Codewhisperer(client),
+            profile: None,
+        })
     }
 
     pub async fn send_message(

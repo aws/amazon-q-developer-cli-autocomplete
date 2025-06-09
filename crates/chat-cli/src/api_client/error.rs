@@ -10,6 +10,7 @@ use amzn_consolas_client::operation::list_customizations::ListCustomizationsErro
 use amzn_qdeveloper_streaming_client::operation::send_message::SendMessageError as QDeveloperSendMessageError;
 use amzn_qdeveloper_streaming_client::types::error::ChatResponseStreamError as QDeveloperChatResponseStreamError;
 use aws_sdk_ssooidc::error::ProvideErrorMetadata;
+use aws_credential_types::provider::error::CredentialsError;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 pub use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::event_stream::RawMessage;
@@ -21,6 +22,9 @@ use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]
 pub enum ApiClientError {
+    #[error("failed to load credentials: {}", .0)]
+    Credentials(CredentialsError),
+
     // Generate completions errors
     #[error("{}", SdkErrorDisplay(.0))]
     GenerateCompletions(#[from] SdkError<GenerateCompletionsError, HttpResponse>),

@@ -87,6 +87,8 @@ use message::{
     ToolUseResult,
     ToolUseResultBlock,
 };
+use crate::api_client::clients::StreamingClient;
+use crate::cli::shared::AuthStrategy;
 use parse::{
     ParseState,
     interpret_markdown,
@@ -205,6 +207,12 @@ pub struct ChatArgs {
     /// '--trust-tools=fs_read,fs_write', trust no tools: '--trust-tools='
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
+    /// Authentication strategy to use
+    #[arg(long, value_enum)]
+    pub auth_strategy: Option<super::shared::AuthStrategy>,
+    /// AWS profile to use for SigV4 authentication
+    #[arg(long)]
+    pub aws_profile: Option<String>,
 }
 
 impl ChatArgs {
@@ -230,7 +238,7 @@ impl ChatArgs {
 
         let client = match ctx.env().get("Q_MOCK_CHAT_RESPONSE") {
             Ok(json) => create_stream(serde_json::from_str(std::fs::read_to_string(json)?.as_str())?),
-            _ => StreamingClient::new(database).await?,
+            _ => StreamingClient::new(database, self.auth_strategy).await?,
         };
 
         let mcp_server_configs = match McpServerConfig::load_config(&mut output).await {
