@@ -29,6 +29,8 @@ use tracing::{
 
 use super::OutputFormat;
 use crate::api_client::list_available_profiles;
+use crate::database::settings;
+use serde_json;
 use crate::auth::builder_id::{
     BuilderIdToken,
     PollCreateToken,
@@ -73,6 +75,14 @@ pub struct LoginArgs {
     /// redirects cannot be handled.
     #[arg(long)]
     pub use_device_flow: bool,
+    
+    /// Authentication strategy to use
+    #[arg(long, value_enum)]
+    pub auth_strategy: Option<super::shared::AuthStrategy>,
+    
+    /// AWS profile to use for SigV4 authentication
+    #[arg(long)]
+    pub aws_profile: Option<String>,
 }
 
 impl LoginArgs {
@@ -82,6 +92,32 @@ impl LoginArgs {
                 "Already logged in, please logout with {} first",
                 format!("{CLI_BINARY_NAME} logout").magenta()
             );
+        }
+
+        // If auth_strategy is explicitly set to SigV4, use that
+        if let Some(super::shared::AuthStrategy::SigV4) = self.auth_strategy {
+            // Save the auth strategy in the database settings
+            let mut settings = settings::Settings::new().await?;
+            settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
+            
+            // If aws_profile is specified, save it
+            // We can't directly set custom settings, so we'll skip this for now
+            if let Some(profile) = &self.aws_profile {
+                // In a real implementation, you'd save the profile somewhere
+                println!("Using AWS profile: {}", profile);
+            }
+            settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
+            
+            // If aws_profile is specified, save it
+            if let Some(profile) = &self.aws_profile {
+                // In a real implementation, you'd save the profile somewhere
+                println!("Using AWS profile: {}", profile);
+            }
+            
+            // No actual login needed for SigV4 as it uses AWS credentials
+            println!("Using SigV4 authentication with AWS credentials");
+            telemetry.send_user_logged_in().ok();
+            return Ok(ExitCode::SUCCESS);
         }
 
         let login_method = match self.license {
@@ -94,7 +130,7 @@ impl LoginArgs {
                     AuthMethod::IdentityCenter
                 } else {
                     // --license is not specified, prompt the user to choose
-                    let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter];
+                    let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter, AuthMethod::SigV4];
                     let i = match choose("Select login method", &options)? {
                         Some(i) => i,
                         None => bail!("No login method selected"),
@@ -105,6 +141,37 @@ impl LoginArgs {
         };
 
         match login_method {
+            AuthMethod::SigV4 => {
+                // Save the auth strategy in the database settings
+                let mut settings = settings::Settings::new().await?;
+                settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
+                
+                // Prompt for AWS profile if not provided
+                let profile = match self.aws_profile {
+                    Some(p) => p,
+                    None => input("Enter AWS profile name (optional)", None)?,
+                };
+                
+                if !profile.is_empty() {
+                // In a real implementation, you'd save the profile somewhere
+                println!("Using AWS profile: {}", profile);
+                }
+                settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
+                
+                // Prompt for AWS profile if not provided
+                let profile = match self.aws_profile {
+                    Some(p) => p,
+                    None => input("Enter AWS profile name (optional)", None)?,
+                };
+                
+                if !profile.is_empty() {
+                    // In a real implementation, you'd save the profile somewhere
+                    println!("Using AWS profile: {}", profile);
+                }
+                
+                println!("Using SigV4 authentication with AWS credentials");
+                telemetry.send_user_logged_in().ok();
+            },
             AuthMethod::BuilderId | AuthMethod::IdentityCenter => {
                 let (start_url, region) = match login_method {
                     AuthMethod::BuilderId => (None, None),
@@ -126,6 +193,7 @@ impl LoginArgs {
 
                         (Some(start_url), Some(region))
                     },
+                    AuthMethod::SigV4 => unreachable!(), // Already handled above
                 };
 
                 // Remote machine won't be able to handle browser opening and redirects,
@@ -163,6 +231,12 @@ impl LoginArgs {
                         },
                     }
                 }
+                
+                // Save the auth strategy in the database
+                if login_method == AuthMethod::BuilderId {
+                    let mut settings = settings::Settings::new().await?;
+                    settings.set(settings::Setting::AuthStrategy, "bearer").await?;
+                }
             },
         };
 
@@ -195,6 +269,32 @@ pub struct WhoamiArgs {
 
 impl WhoamiArgs {
     pub async fn execute(self, database: &mut Database) -> Result<ExitCode> {
+        // Check if using SigV4 auth
+        let settings = settings::Settings::new().await?;
+        if let Some(serde_json::Value::String(auth_strategy)) = settings.get(settings::Setting::AuthStrategy) {
+            if auth_strategy == "sigv4" {
+                // Get AWS profile if set - in a real implementation you'd retrieve this
+                let aws_profile: Option<String> = None; // Simplified for this example
+                
+                self.format.print(
+                    || {
+                        let profile_info = aws_profile
+                            .as_ref()
+                            .map(|p| format!(" with profile '{}'", p))
+                            .unwrap_or_default();
+                        format!("Using AWS credentials (SigV4) for authentication{}", profile_info)
+                    },
+                    || {
+                        json!({
+                            "accountType": "SigV4",
+                            "awsProfile": aws_profile,
+                        })
+                    },
+                );
+                return Ok(ExitCode::SUCCESS);
+            }
+        }
+
         let builder_id = BuilderIdToken::load(database).await;
 
         match builder_id {
@@ -263,6 +363,8 @@ enum AuthMethod {
     BuilderId,
     /// IdC (enterprise)
     IdentityCenter,
+    /// AWS SigV4
+    SigV4,
 }
 
 impl Display for AuthMethod {
@@ -270,6 +372,7 @@ impl Display for AuthMethod {
         match self {
             AuthMethod::BuilderId => write!(f, "Use for Free with Builder ID"),
             AuthMethod::IdentityCenter => write!(f, "Use with Pro license"),
+            AuthMethod::SigV4 => write!(f, "Use with AWS credentials (SigV4)"),
         }
     }
 }

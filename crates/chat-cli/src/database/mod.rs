@@ -355,6 +355,42 @@ impl Database {
         Ok(())
     }
 
+    pub fn set_setting<T: Serialize>(&self, key: impl AsRef<str>, value: T) -> Result<(), DatabaseError> {
+        let mut settings = settings::Settings::new().await?;
+        let key_str = key.as_ref();
+        
+        // Try to convert to Setting enum if it's a known setting
+        if let Ok(setting) = settings::Setting::try_from(key_str) {
+            settings.set(setting, serde_json::to_value(value)?).await?;
+        } else {
+            // For custom settings not in the enum
+            let mut map = settings.map().clone();
+            map.insert(key_str.to_string(), serde_json::to_value(value)?);
+            let mut new_settings = settings::Settings(map);
+            new_settings.save_to_file().await?;
+        }
+        
+        Ok(())
+    }
+    
+    pub fn delete_setting(&self, key: impl AsRef<str>) -> Result<(), DatabaseError> {
+        let mut settings = settings::Settings::new().await?;
+        let key_str = key.as_ref();
+        
+        // Try to convert to Setting enum if it's a known setting
+        if let Ok(setting) = settings::Setting::try_from(key_str) {
+            settings.remove(setting).await?;
+        } else {
+            // For custom settings not in the enum
+            let mut map = settings.map().clone();
+            map.remove(key_str);
+            let mut new_settings = settings::Settings(map);
+            new_settings.save_to_file().await?;
+        }
+        
+        Ok(())
+    }
+    
     pub async fn delete_secret(&self, key: &str) -> Result<(), DatabaseError> {
         trace!(key, "deleting secret");
         self.delete_entry(Table::Auth, key)
