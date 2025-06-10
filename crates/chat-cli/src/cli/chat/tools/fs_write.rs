@@ -33,6 +33,10 @@ use super::{
     sanitize_path_tool_arg,
     supports_truecolor,
 };
+use crate::cli::chat::{
+    CONTINUATION_LINE,
+    PURPOSE_ARROW,
+};
 use crate::platform::Context;
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
@@ -48,21 +52,28 @@ pub enum FsWrite {
         path: String,
         file_text: Option<String>,
         new_str: Option<String>,
+        summary: Option<String>,
     },
     #[serde(rename = "str_replace")]
     StrReplace {
         path: String,
         old_str: String,
         new_str: String,
+        summary: Option<String>,
     },
     #[serde(rename = "insert")]
     Insert {
         path: String,
         insert_line: usize,
         new_str: String,
+        summary: Option<String>,
     },
     #[serde(rename = "append")]
-    Append { path: String, new_str: String },
+    Append {
+        path: String,
+        new_str: String,
+        summary: Option<String>,
+    },
 }
 
 impl FsWrite {
@@ -90,7 +101,9 @@ impl FsWrite {
                 write_to_file(ctx, path, file_text).await?;
                 Ok(Default::default())
             },
-            FsWrite::StrReplace { path, old_str, new_str } => {
+            FsWrite::StrReplace {
+                path, old_str, new_str, ..
+            } => {
                 let path = sanitize_path_tool_arg(ctx, path);
                 let file = fs.read_to_string(&path).await?;
                 let matches = file.match_indices(old_str).collect::<Vec<_>>();
@@ -116,6 +129,7 @@ impl FsWrite {
                 path,
                 insert_line,
                 new_str,
+                ..
             } => {
                 let path = sanitize_path_tool_arg(ctx, path);
                 let mut file = fs.read_to_string(&path).await?;
@@ -140,7 +154,7 @@ impl FsWrite {
                 write_to_file(ctx, &path, file).await?;
                 Ok(Default::default())
             },
-            FsWrite::Append { path, new_str } => {
+            FsWrite::Append { path, new_str, .. } => {
                 let path = sanitize_path_tool_arg(ctx, path);
 
                 queue!(
@@ -178,12 +192,29 @@ impl FsWrite {
                 };
                 let new = stylize_output_if_able(ctx, &relative_path, &file_text);
                 print_diff(updates, &prev, &new, 1)?;
+
+                // Display summary if available after the diff
+                if let Some(summary) = self.get_summary() {
+                    queue!(
+                        updates,
+                        style::Print(CONTINUATION_LINE),
+                        style::Print("\n"),
+                        style::Print(PURPOSE_ARROW),
+                        style::SetForegroundColor(Color::Blue),
+                        style::Print("Summary of Change: "),
+                        style::ResetColor,
+                        style::Print(summary),
+                        style::Print("\n\n"),
+                    )?;
+                }
+
                 Ok(())
             },
             FsWrite::Insert {
                 path,
                 insert_line,
                 new_str,
+                ..
             } => {
                 let relative_path = format_path(cwd, path);
                 let file = ctx.fs().read_to_string_sync(&relative_path)?;
@@ -201,9 +232,27 @@ impl FsWrite {
                 let old = stylize_output_if_able(ctx, &relative_path, &old);
                 let new = stylize_output_if_able(ctx, &relative_path, &new);
                 print_diff(updates, &old, &new, start_line)?;
+
+                // Display summary if available after the diff
+                if let Some(summary) = self.get_summary() {
+                    queue!(
+                        updates,
+                        style::Print(CONTINUATION_LINE),
+                        style::Print("\n"),
+                        style::Print(PURPOSE_ARROW),
+                        style::SetForegroundColor(Color::Blue),
+                        style::Print("Summary of Change: "),
+                        style::ResetColor,
+                        style::Print(summary),
+                        style::Print("\n"),
+                    )?;
+                }
+
                 Ok(())
             },
-            FsWrite::StrReplace { path, old_str, new_str } => {
+            FsWrite::StrReplace {
+                path, old_str, new_str, ..
+            } => {
                 let relative_path = format_path(cwd, path);
                 let file = ctx.fs().read_to_string_sync(&relative_path)?;
                 let (start_line, _) = match line_number_at(&file, old_str) {
@@ -214,13 +263,44 @@ impl FsWrite {
                 let new_str = stylize_output_if_able(ctx, &relative_path, new_str);
                 print_diff(updates, &old_str, &new_str, start_line)?;
 
+                // Display summary if available after the diff
+                if let Some(summary) = self.get_summary() {
+                    queue!(
+                        updates,
+                        style::Print(CONTINUATION_LINE),
+                        style::Print("\n"),
+                        style::Print(PURPOSE_ARROW),
+                        style::SetForegroundColor(Color::Blue),
+                        style::Print("Summary of Change: "),
+                        style::ResetColor,
+                        style::Print(summary),
+                        style::Print("\n"),
+                    )?;
+                }
+
                 Ok(())
             },
-            FsWrite::Append { path, new_str } => {
+            FsWrite::Append { path, new_str, .. } => {
                 let relative_path = format_path(cwd, path);
                 let start_line = ctx.fs().read_to_string_sync(&relative_path)?.lines().count() + 1;
                 let file = stylize_output_if_able(ctx, &relative_path, new_str);
                 print_diff(updates, &Default::default(), &file, start_line)?;
+
+                // Display summary if available after the diff
+                if let Some(summary) = self.get_summary() {
+                    queue!(
+                        updates,
+                        style::Print(CONTINUATION_LINE),
+                        style::Print("\n"),
+                        style::Print(PURPOSE_ARROW),
+                        style::SetForegroundColor(Color::Blue),
+                        style::Print("Summary of Change: "),
+                        style::ResetColor,
+                        style::Print(summary),
+                        style::Print("\n"),
+                    )?;
+                }
+
                 Ok(())
             },
         }
@@ -239,7 +319,7 @@ impl FsWrite {
                     bail!("The provided path must exist in order to replace or insert contents into it")
                 }
             },
-            FsWrite::Append { path, new_str } => {
+            FsWrite::Append { path, new_str, .. } => {
                 if path.is_empty() {
                     bail!("Path must not be empty")
                 };
@@ -288,6 +368,16 @@ impl FsWrite {
                 },
             },
             _ => String::new(),
+        }
+    }
+
+    /// Returns the summary from any variant of the FsWrite enum
+    fn get_summary(&self) -> Option<&String> {
+        match self {
+            FsWrite::Create { summary, .. } => summary.as_ref(),
+            FsWrite::StrReplace { summary, .. } => summary.as_ref(),
+            FsWrite::Insert { summary, .. } => summary.as_ref(),
+            FsWrite::Append { summary, .. } => summary.as_ref(),
         }
     }
 }
@@ -661,6 +751,68 @@ mod tests {
         });
         let fw = serde_json::from_value::<FsWrite>(v).unwrap();
         assert!(matches!(fw, FsWrite::Append { .. }));
+    }
+
+    #[test]
+    fn test_fs_write_deserialize_with_summary() {
+        let path = "/my-file";
+        let file_text = "hello world";
+        let summary = "Added hello world content";
+
+        // create with summary
+        let v = serde_json::json!({
+            "path": path,
+            "command": "create",
+            "file_text": file_text,
+            "summary": summary
+        });
+        let fw = serde_json::from_value::<FsWrite>(v).unwrap();
+        assert!(matches!(fw, FsWrite::Create { .. }));
+        if let FsWrite::Create { summary: s, .. } = &fw {
+            assert_eq!(s.as_ref().unwrap(), summary);
+        }
+
+        // str_replace with summary
+        let v = serde_json::json!({
+            "path": path,
+            "command": "str_replace",
+            "old_str": "prev string",
+            "new_str": "new string",
+            "summary": summary
+        });
+        let fw = serde_json::from_value::<FsWrite>(v).unwrap();
+        assert!(matches!(fw, FsWrite::StrReplace { .. }));
+        if let FsWrite::StrReplace { summary: s, .. } = &fw {
+            assert_eq!(s.as_ref().unwrap(), summary);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_write_summary_display() {
+        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let fs = ctx.fs();
+        let test_file_path = "/test_file.txt";
+        fs.write(test_file_path, "Test content").await.unwrap();
+
+        let mut output = Vec::new();
+
+        let summary = "Added hello world content";
+        let v = serde_json::json!({
+            "path": test_file_path,
+            "command": "create",
+            "file_text": "Hello, world!",
+            "summary": summary
+        });
+
+        let fs_write = serde_json::from_value::<FsWrite>(v).unwrap();
+        fs_write.queue_description(&ctx, &mut output).unwrap();
+
+        let output_str = String::from_utf8(output).unwrap();
+        println!("Output: {}", output_str);
+
+        // The output contains ANSI color codes, so we need to check for the presence
+        // of the summary text without worrying about the exact formatting
+        assert!(output_str.contains("Summary of Change:") && output_str.contains(summary));
     }
 
     #[tokio::test]
