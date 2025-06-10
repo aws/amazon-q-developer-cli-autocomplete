@@ -24,7 +24,8 @@ const DEFAULT_TIMEOUT_DURATION: Duration = Duration::from_secs(60 * 5);
 pub fn timeout_config(database: &Database) -> TimeoutConfig {
     let timeout = database
         .settings
-        .get_int(Setting::ApiTimeout)
+        .get(Setting::ApiTimeout)
+        .and_then(|v| v.as_i64())
         .and_then(|i| i.try_into().ok())
         .map_or(DEFAULT_TIMEOUT_DURATION, Duration::from_millis);
 
@@ -62,7 +63,21 @@ pub async fn bearer_sdk_config(database: &Database, endpoint: &Endpoint) -> SdkC
 }
 
 pub async fn sigv4_sdk_config(database: &Database, endpoint: &Endpoint) -> Result<SdkConfig, ApiClientError> {
-    let credentials_chain = CredentialsChain::new().await;
+    // Get settings to check for AWS profile
+    let settings = match crate::database::settings::Settings::new().await {
+        Ok(s) => s,
+        Err(_) => return Err(ApiClientError::Other("Failed to load settings".into())),
+    };
+    
+    // Check if a specific AWS profile is configured
+    let aws_profile = settings.get_custom("aws.profile").and_then(|v| v.as_str());
+    
+    // Create credentials chain with the profile if specified
+    let credentials_chain = if let Some(profile) = aws_profile {
+        CredentialsChain::with_profile(profile).await
+    } else {
+        CredentialsChain::new().await
+    };
 
     if let Err(err) = credentials_chain.provide_credentials().await {
         return Err(ApiClientError::Credentials(err));

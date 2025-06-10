@@ -94,7 +94,7 @@ impl TryFrom<&str> for Setting {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct Settings(Map<String, Value>);
+pub struct Settings(pub Map<String, Value>);
 
 impl Settings {
     pub async fn new() -> Result<Self, DatabaseError> {
@@ -153,11 +153,25 @@ impl Settings {
         self.get(key).and_then(|value| value.as_str().map(|s| s.into()))
     }
 
-    pub fn get_int(&self, key: Setting) -> Option<i64> {
-        self.get(key).and_then(|value| value.as_i64())
+    // Add a method to set custom settings (not in the Setting enum)
+    pub async fn set_custom(&mut self, key: &str, value: impl Into<serde_json::Value>) -> Result<(), DatabaseError> {
+        self.0.insert(key.to_string(), value.into());
+        self.save_to_file().await
     }
 
-    async fn save_to_file(&self) -> Result<(), DatabaseError> {
+    // Add a method to get custom settings
+    pub fn get_custom(&self, key: &str) -> Option<&Value> {
+        self.0.get(key)
+    }
+
+    // Add a method to remove custom settings
+    pub async fn remove_custom(&mut self, key: &str) -> Result<Option<Value>, DatabaseError> {
+        let key_value = self.0.remove(key);
+        self.save_to_file().await?;
+        Ok(key_value)
+    }
+
+    pub async fn save_to_file(&self) -> Result<(), DatabaseError> {
         if cfg!(test) {
             return Ok(());
         }

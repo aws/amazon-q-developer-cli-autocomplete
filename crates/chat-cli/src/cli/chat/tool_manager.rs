@@ -862,14 +862,16 @@ impl ToolManager {
         } else if self.is_interactive {
             let init_timeout = database
                 .settings
-                .get_int(Setting::McpInitTimeout)
+                .get(Setting::McpInitTimeout)
+                .and_then(|v| v.as_i64())
                 .map_or(5000_u64, |s| s as u64);
             Box::pin(tokio::time::sleep(std::time::Duration::from_millis(init_timeout)))
         } else {
             // if it is non-interactive we will want to use the "mcp.noInteractiveTimeout"
             let init_timeout = database
                 .settings
-                .get_int(Setting::McpNoInteractiveTimeout)
+                .get(Setting::McpNoInteractiveTimeout)
+                .and_then(|v| v.as_i64())
                 .map_or(30_000_u64, |s| s as u64);
             Box::pin(tokio::time::sleep(std::time::Duration::from_millis(init_timeout)))
         };

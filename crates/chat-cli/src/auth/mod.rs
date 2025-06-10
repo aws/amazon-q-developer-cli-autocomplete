@@ -18,9 +18,7 @@ pub async fn logout(database: &mut Database) -> Result<(), AuthError> {
     if let Some(serde_json::Value::String(auth_strategy)) = settings.get(settings::Setting::AuthStrategy) {
         if auth_strategy == "sigv4" {
             let _ = settings.remove(settings::Setting::AuthStrategy).await;
-            
-            // We can't directly modify the settings map, so we'll just remove the setting
-            // This is a simplified approach
+            let _ = settings.remove_custom("aws.profile").await;
         }
     }
     

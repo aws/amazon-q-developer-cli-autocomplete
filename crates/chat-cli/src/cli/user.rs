@@ -109,8 +109,9 @@ impl LoginArgs {
             settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
             
             // If aws_profile is specified, save it
-            if let Some(profile) = &self.aws_profile {
-                // In a real implementation, you'd save the profile somewhere
+            if let Some(profile) = &self.aws_profile.clone() {
+                // Use the new set_custom method to save the profile
+                settings.set_custom("aws.profile", profile.as_str()).await?;
                 println!("Using AWS profile: {}", profile);
             }
             
@@ -147,25 +148,14 @@ impl LoginArgs {
                 settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
                 
                 // Prompt for AWS profile if not provided
-                let profile = match self.aws_profile {
+                let profile = match self.aws_profile.clone() {
                     Some(p) => p,
                     None => input("Enter AWS profile name (optional)", None)?,
                 };
                 
                 if !profile.is_empty() {
-                // In a real implementation, you'd save the profile somewhere
-                println!("Using AWS profile: {}", profile);
-                }
-                settings.set(settings::Setting::AuthStrategy, "sigv4").await?;
-                
-                // Prompt for AWS profile if not provided
-                let profile = match self.aws_profile {
-                    Some(p) => p,
-                    None => input("Enter AWS profile name (optional)", None)?,
-                };
-                
-                if !profile.is_empty() {
-                    // In a real implementation, you'd save the profile somewhere
+                    // Use the new set_custom method to save the profile
+                    settings.set_custom("aws.profile", profile.as_str()).await?;
                     println!("Using AWS profile: {}", profile);
                 }
                 
@@ -273,8 +263,10 @@ impl WhoamiArgs {
         let settings = settings::Settings::new().await?;
         if let Some(serde_json::Value::String(auth_strategy)) = settings.get(settings::Setting::AuthStrategy) {
             if auth_strategy == "sigv4" {
-                // Get AWS profile if set - in a real implementation you'd retrieve this
-                let aws_profile: Option<String> = None; // Simplified for this example
+                // Get AWS profile if set
+                let aws_profile = settings.get_custom("aws.profile")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
                 
                 self.format.print(
                     || {

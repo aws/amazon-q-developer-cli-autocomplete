@@ -25,6 +25,9 @@ pub enum ApiClientError {
     #[error("failed to load credentials: {}", .0)]
     Credentials(CredentialsError),
 
+    #[error("{0}")]
+    Other(String),
+
     // Generate completions errors
     #[error("{}", SdkErrorDisplay(.0))]
     GenerateCompletions(#[from] SdkError<GenerateCompletionsError, HttpResponse>),

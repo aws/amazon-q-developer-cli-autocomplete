@@ -33,7 +33,9 @@ use crate::cli::shared::AuthStrategy;
 use crate::database::{
     AuthProfile,
     Database,
+    settings,
 };
+use serde_json;
 
 mod inner {
     use std::sync::{
@@ -60,7 +62,19 @@ pub struct StreamingClient {
 
 impl StreamingClient {
     pub async fn new(database: &mut Database, auth_strategy: Option<AuthStrategy>) -> Result<Self, ApiClientError> {
-        let strategy = auth_strategy.unwrap_or_default();
+        // First check if there's a strategy specified in the function call
+        let mut strategy = auth_strategy.unwrap_or_default();
+        
+        // If no strategy is specified in the function call, check the settings
+        if strategy == AuthStrategy::BearerToken {
+            if let Ok(settings) = settings::Settings::new().await {
+                if let Some(serde_json::Value::String(saved_strategy)) = settings.get(settings::Setting::AuthStrategy) {
+                    if saved_strategy == "sigv4" {
+                        strategy = AuthStrategy::SigV4;
+                    }
+                }
+            }
+        }
         
         match strategy {
             AuthStrategy::SigV4 => {
