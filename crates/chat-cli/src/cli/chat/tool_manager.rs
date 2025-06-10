@@ -176,30 +176,38 @@ pub struct McpServerConfig {
 }
 
 impl McpServerConfig {
-    pub async fn load_config(output: &mut impl Write) -> eyre::Result<Self> {
-        let mut cwd = std::env::current_dir()?;
-        cwd.push(".amazonq/mcp.json");
-        let expanded_path = shellexpand::tilde("~/.aws/amazonq/mcp.json");
-        let global_path = PathBuf::from(expanded_path.as_ref() as &str);
+    /// Load MCP server configuration with Context integration and optional additional paths
+    ///
+    /// This method loads configuration from:
+    /// 1. Global configuration (~/.aws/amazonq/mcp.json)
+    /// 2. Workspace configuration (./.amazonq/mcp.json)
+    /// 3. Additional paths (if provided) - processed left to right
+    ///
+    /// Precedence: global < workspace < additional (left to right)
+    pub async fn load_config(
+        ctx: &Context,
+        output: &mut impl Write,
+        additional_paths: Option<&[String]>,
+    ) -> eyre::Result<Self> {
+        // Use existing helper functions for consistency
+        let workspace_path = workspace_mcp_config_path(ctx)?;
+        let global_path = global_mcp_config_path(ctx)?;
+
+        // Track conflicts to show only final warnings
+        let mut conflict_sources = HashMap::<String, String>::new();
+
+        // Load standard configs (existing logic)
         let global_buf = tokio::fs::read(global_path).await.ok();
-        let local_buf = tokio::fs::read(cwd).await.ok();
-        let conf = match (global_buf, local_buf) {
+        let local_buf = tokio::fs::read(workspace_path).await.ok();
+
+        // Merge global and workspace configs (existing logic)
+        let mut conf = match (global_buf, local_buf) {
             (Some(global_buf), Some(local_buf)) => {
                 let mut global_conf = Self::from_slice(&global_buf, output, "global")?;
                 let local_conf = Self::from_slice(&local_buf, output, "local")?;
                 for (server_name, config) in local_conf.mcp_servers {
                     if global_conf.mcp_servers.insert(server_name.clone(), config).is_some() {
-                        queue!(
-                            output,
-                            style::SetForegroundColor(style::Color::Yellow),
-                            style::Print("WARNING: "),
-                            style::ResetColor,
-                            style::Print("MCP config conflict for "),
-                            style::SetForegroundColor(style::Color::Green),
-                            style::Print(server_name),
-                            style::ResetColor,
-                            style::Print(". Using workspace version.\n")
-                        )?;
+                        conflict_sources.insert(server_name, "workspace configuration".to_string());
                     }
                 }
                 global_conf
@@ -208,6 +216,66 @@ impl McpServerConfig {
             (Some(global_buf), None) => Self::from_slice(&global_buf, output, "global")?,
             _ => Default::default(),
         };
+        
+        // Process additional paths if provided
+        if let Some(paths) = additional_paths {
+            for path_str in paths {
+                if path_str.trim().is_empty() {
+                    continue;
+                }
+                
+                let expanded_path = shellexpand::tilde(path_str);
+                let path_buf = PathBuf::from(expanded_path.as_ref());
+                
+                match tokio::fs::read(&path_buf).await {
+                    Ok(buf) => {
+                        let additional_conf = Self::from_slice(
+                            &buf, 
+                            output, 
+                            &format!("additional ({})", path_buf.display())
+                        )?;
+                        
+                        // Merge additional configuration
+                        for (server_name, config) in additional_conf.mcp_servers {
+                            if conf.mcp_servers.insert(server_name.clone(), config).is_some() {
+                                conflict_sources.insert(server_name, format!("configuration from {}", path_buf.display()));
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        queue!(
+                            output,
+                            style::SetForegroundColor(style::Color::Yellow),
+                            style::Print("WARNING: "),
+                            style::ResetColor,
+                            style::Print(format!(
+                                "Could not read MCP configuration from {}: {}\n", 
+                                path_buf.display(), 
+                                e
+                            )),
+                        )?;
+                    }
+                }
+            }
+        }
+        
+        // Show only final conflict warnings
+        for (server_name, source) in conflict_sources {
+            queue!(
+                output,
+                style::SetForegroundColor(style::Color::Yellow),
+                style::Print("WARNING: "),
+                style::ResetColor,
+                style::Print("MCP configuration conflict for "),
+                style::SetForegroundColor(style::Color::Green),
+                style::Print(server_name),
+                style::ResetColor,
+                style::Print(". Using "),
+                style::Print(source),
+                style::Print(".\n")
+            )?;
+        }
+        
         output.flush()?;
         Ok(conf)
     }
@@ -1502,6 +1570,8 @@ fn queue_incomplete_load_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
+    use tempfile::TempDir;
 
     #[test]
     fn test_sanitize_server_name() {
@@ -1522,5 +1592,379 @@ mod tests {
         let with_delim = format!("a{}b{}c", NAMESPACE_DELIMITER, NAMESPACE_DELIMITER);
         let sanitized = sanitize_name(with_delim, &regex, &mut hasher);
         assert_eq!(sanitized, "abc");
+    }
+
+    #[tokio::test]
+    async fn test_load_config_single_additional() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = Context::new();
+        
+        // Create a single additional configuration file
+        let additional_config_path = temp_dir.path().join("additional.json");
+        let additional_config = r#"{
+            "mcpServers": {
+                "additional-server": {
+                    "command": "node",
+                    "args": ["/path/to/additional-server.js"],
+                    "env": {
+                        "ADDITIONAL_VAR": "additional_value"
+                    }
+                }
+            }
+        }"#;
+        std::fs::write(&additional_config_path, additional_config).unwrap();
+        
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec![additional_config_path.to_string_lossy().to_string()];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.mcp_servers.contains_key("additional-server"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_multiple_additional() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = Context::new();
+        
+        // Create multiple additional configuration files
+        let config1_path = temp_dir.path().join("config1.json");
+        let config1 = r#"{
+            "mcpServers": {
+                "server1": {
+                    "command": "node",
+                    "args": ["/path/to/server1.js"]
+                }
+            }
+        }"#;
+        std::fs::write(&config1_path, config1).unwrap();
+        
+        let config2_path = temp_dir.path().join("config2.json");
+        let config2 = r#"{
+            "mcpServers": {
+                "server2": {
+                    "command": "python",
+                    "args": ["/path/to/server2.py"]
+                }
+            }
+        }"#;
+        std::fs::write(&config2_path, config2).unwrap();
+        
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec![
+            config1_path.to_string_lossy().to_string(),
+            config2_path.to_string_lossy().to_string()
+        ];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.mcp_servers.contains_key("server1"));
+        assert!(config.mcp_servers.contains_key("server2"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_precedence() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = Context::new();
+        
+        // Create multiple configs with conflicting server names
+        let config1_path = temp_dir.path().join("config1.json");
+        let config1 = r#"{
+            "mcpServers": {
+                "shared-server": {
+                    "command": "node",
+                    "args": ["/path/to/server1.js"],
+                    "env": {
+                        "VERSION": "config1"
+                    }
+                }
+            }
+        }"#;
+        std::fs::write(&config1_path, config1).unwrap();
+        
+        let config2_path = temp_dir.path().join("config2.json");
+        let config2 = r#"{
+            "mcpServers": {
+                "shared-server": {
+                    "command": "python",
+                    "args": ["/path/to/server2.py"],
+                    "env": {
+                        "VERSION": "config2"
+                    }
+                }
+            }
+        }"#;
+        std::fs::write(&config2_path, config2).unwrap();
+        
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec![
+            config1_path.to_string_lossy().to_string(),
+            config2_path.to_string_lossy().to_string()
+        ];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.mcp_servers.contains_key("shared-server"));
+        
+        // Later config (config2) should override earlier config (config1)
+        let server_config = &config.mcp_servers["shared-server"];
+        assert_eq!(server_config.command, "python");
+        assert_eq!(server_config.env.as_ref().unwrap()["VERSION"], "config2");
+        
+        // Check that warning was written to output
+        let output_str = String::from_utf8(output.into_inner()).unwrap();
+        assert!(output_str.contains("WARNING"));
+        assert!(output_str.contains("MCP configuration conflict"));
+        assert!(output_str.contains("shared-server"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_missing_file() {
+        let ctx = Context::new();
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec!["/nonexistent/path/config.json".to_string()];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        // Should succeed despite missing file
+        assert!(result.is_ok());
+        let _config = result.unwrap();
+        
+        // The config might contain global/workspace servers, but should not contain
+        // any servers from the missing additional file
+        // We can't assert empty because global/workspace configs might exist
+        
+        // Check that warning was written to output
+        let output_str = String::from_utf8(output.into_inner()).unwrap();
+        assert!(output_str.contains("WARNING"));
+        assert!(output_str.contains("Could not read MCP configuration"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_invalid_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = Context::new();
+        
+        // Create a file with invalid JSON
+        let invalid_config_path = temp_dir.path().join("invalid.json");
+        let invalid_config = r#"{
+            "mcpServers": {
+                "invalid-server": {
+                    "command": "node",
+                    "args": ["/path/to/server.js"
+                    // Missing closing bracket and brace - invalid JSON
+                }
+            }
+        }"#;
+        std::fs::write(&invalid_config_path, invalid_config).unwrap();
+        
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec![invalid_config_path.to_string_lossy().to_string()];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        // Should succeed despite invalid JSON
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        
+        // Should not contain the invalid server, but might contain global/workspace servers
+        assert!(!config.mcp_servers.contains_key("invalid-server"));
+        
+        // Check that warning was written to output
+        let output_str = String::from_utf8(output.into_inner()).unwrap();
+        assert!(output_str.contains("WARNING"));
+        // The error comes from from_slice method, so check for that pattern
+        assert!(output_str.contains("Error reading additional"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_empty_string() {
+        let ctx = Context::new();
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec!["".to_string(), "   ".to_string()];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        // Should succeed and skip empty paths
+        assert!(result.is_ok());
+        let _config = result.unwrap();
+        
+        // Config might contain global/workspace servers, but that's expected
+        // The important thing is that empty paths don't cause errors
+        
+        // No warnings should be generated for empty paths
+        let output_str = String::from_utf8(output.into_inner()).unwrap();
+        assert!(!output_str.contains("WARNING"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_tilde_expansion() {
+        let ctx = Context::new();
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec!["~/nonexistent-config.json".to_string()];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        // Should succeed despite missing file (tilde expansion should work)
+        assert!(result.is_ok());
+        let _config = result.unwrap();
+        
+        // Config might contain global/workspace servers, but that's expected
+        
+        // Check that warning mentions expanded path (not tilde path)
+        let output_str = String::from_utf8(output.into_inner()).unwrap();
+        assert!(output_str.contains("WARNING"));
+        assert!(!output_str.contains("~/"));  // Should be expanded
+    }
+
+    #[tokio::test]
+    async fn test_load_config_relative_paths() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = Context::new();
+        
+        // Change to temp directory to test relative paths
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&temp_dir).unwrap();
+        
+        // Create a config file in the current directory
+        let config_content = r#"{
+            "mcpServers": {
+                "relative-server": {
+                    "command": "node",
+                    "args": ["./relative-server.js"]
+                }
+            }
+        }"#;
+        std::fs::write("relative-config.json", config_content).unwrap();
+        
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec!["./relative-config.json".to_string()];
+        
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        // Restore original directory
+        std::env::set_current_dir(original_dir).unwrap();
+        
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.mcp_servers.contains_key("relative-server"));
+    }
+
+    #[tokio::test]
+    async fn test_load_config_precedence_order() {
+        let temp_dir = TempDir::new().unwrap();
+        let ctx = Context::new();
+        
+        // Create global config (would be loaded first in real scenario)
+        let _global_config = r#"{
+            "mcpServers": {
+                "global-server": {
+                    "command": "node",
+                    "args": ["/path/to/global-server.js"]
+                },
+                "shared-server": {
+                    "command": "node",
+                    "args": ["/path/to/global-shared.js"],
+                    "env": {
+                        "SOURCE": "global"
+                    }
+                }
+            }
+        }"#;
+        
+        // Create workspace config (would override global)
+        let _workspace_config = r#"{
+            "mcpServers": {
+                "workspace-server": {
+                    "command": "python",
+                    "args": ["/path/to/workspace-server.py"]
+                },
+                "shared-server": {
+                    "command": "python",
+                    "args": ["/path/to/workspace-shared.py"],
+                    "env": {
+                        "SOURCE": "workspace"
+                    }
+                }
+            }
+        }"#;
+        
+        // Create additional config (should override both global and workspace)
+        let additional_config_path = temp_dir.path().join("additional.json");
+        let additional_config = r#"{
+            "mcpServers": {
+                "additional-server": {
+                    "command": "go",
+                    "args": ["/path/to/additional-server"]
+                },
+                "shared-server": {
+                    "command": "go",
+                    "args": ["/path/to/additional-shared"],
+                    "env": {
+                        "SOURCE": "additional"
+                    }
+                }
+            }
+        }"#;
+        std::fs::write(&additional_config_path, additional_config).unwrap();
+        
+        let mut output = Cursor::new(Vec::new());
+        let additional_paths = vec![additional_config_path.to_string_lossy().to_string()];
+        
+        // Note: This test simulates the precedence but doesn't actually test
+        // global/workspace loading since that requires file system setup
+        let result = McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            Some(&additional_paths)
+        ).await;
+        
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.mcp_servers.contains_key("additional-server"));
+        assert!(config.mcp_servers.contains_key("shared-server"));
+        
+        // Additional config should be present
+        let server_config = &config.mcp_servers["shared-server"];
+        assert_eq!(server_config.command, "go");
+        assert_eq!(server_config.env.as_ref().unwrap()["SOURCE"], "additional");
     }
 }

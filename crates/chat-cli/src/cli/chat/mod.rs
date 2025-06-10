@@ -205,6 +205,13 @@ pub struct ChatArgs {
     /// '--trust-tools=fs_read,fs_write', trust no tools: '--trust-tools='
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
+    /// Additional MCP configuration files (paths separated by OS path separator)
+    #[arg(
+        long,
+        value_delimiter = if cfg!(windows) { ';' } else { ':' },
+        value_name = "PATHS"
+    )]
+    pub mcp_config_paths: Option<Vec<String>>,
 }
 
 impl ChatArgs {
@@ -233,7 +240,13 @@ impl ChatArgs {
             _ => StreamingClient::new(database).await?,
         };
 
-        let mcp_server_configs = match McpServerConfig::load_config(&mut output).await {
+        let mcp_server_configs = match McpServerConfig::load_config(
+            &ctx,
+            &mut output,
+            self.mcp_config_paths.as_deref(),
+        )
+        .await
+        {
             Ok(config) => {
                 if interactive && !database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false) {
                     execute!(

@@ -357,6 +357,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                mcp_config_paths: None,
             })),
             verbose: 2,
             help_all: false,
@@ -397,6 +398,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                mcp_config_paths: None,
             })
         );
     }
@@ -414,6 +416,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                mcp_config_paths: None,
             })
         );
     }
@@ -431,6 +434,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                mcp_config_paths: None,
             })
         );
     }
@@ -448,6 +452,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                mcp_config_paths: None,
             })
         );
         assert_parse!(
@@ -461,6 +466,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                mcp_config_paths: None,
             })
         );
     }
@@ -478,6 +484,7 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
+                mcp_config_paths: None,
             })
         );
     }
@@ -495,6 +502,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["".to_string()]),
+                mcp_config_paths: None,
             })
         );
     }
@@ -512,6 +520,70 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["fs_read".to_string(), "fs_write".to_string()]),
+                mcp_config_paths: None,
+            })
+        );
+    }
+
+    #[test]
+    fn test_chat_with_mcp_config_paths_single() {
+        assert_parse!(
+            ["chat", "--mcp-config-paths=/path/to/config.json"],
+            RootSubcommand::Chat(ChatArgs {
+                accept_all: false,
+                no_interactive: false,
+                resume: false,
+                input: None,
+                profile: None,
+                model: None,
+                trust_all_tools: false,
+                trust_tools: None,
+                mcp_config_paths: Some(vec!["/path/to/config.json".to_string()]),
+            })
+        );
+    }
+
+    #[test]
+    fn test_chat_with_mcp_config_paths_multiple() {
+        // Use the platform-appropriate path separator
+        #[cfg(windows)]
+        let paths_arg = "--mcp-config-paths=/path/to/config1.json;/path/to/config2.json";
+        #[cfg(not(windows))]
+        let paths_arg = "--mcp-config-paths=/path/to/config1.json:/path/to/config2.json";
+
+        assert_parse!(
+            ["chat", paths_arg],
+            RootSubcommand::Chat(ChatArgs {
+                accept_all: false,
+                no_interactive: false,
+                resume: false,
+                input: None,
+                profile: None,
+                model: None,
+                trust_all_tools: false,
+                trust_tools: None,
+                mcp_config_paths: Some(vec![
+                    "/path/to/config1.json".to_string(),
+                    "/path/to/config2.json".to_string()
+                ]),
+            })
+        );
+    }
+
+    #[test]
+    fn test_chat_with_mcp_config_paths_and_other_args() {
+        assert_parse!(
+            ["chat", "--mcp-config-paths=/path/to/config.json", "--trust-all-tools", "Hello"],
+            RootSubcommand::Chat(ChatArgs {
+                accept_all: false,
+                no_interactive: false,
+                resume: false,
+                input: Some("Hello".to_string()),
+                profile: None,
+                model: None,
+                trust_all_tools: true,
+                trust_tools: None,
+                mcp_config_paths: Some(vec!["/path/to/config.json".to_string()]),
             })
         );
     }
