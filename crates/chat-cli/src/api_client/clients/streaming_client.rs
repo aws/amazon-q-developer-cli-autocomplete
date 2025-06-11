@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
+use amzn_qdeveloper_streaming_client::Client as QDeveloperStreamingClient;
 use aws_types::request_id::RequestId;
 use tracing::{
     debug,
@@ -43,12 +44,14 @@ mod inner {
     };
 
     use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
+    use amzn_qdeveloper_streaming_client::Client as QDeveloperStreamingClient;
 
     use crate::api_client::model::ChatResponseStream;
 
     #[derive(Clone, Debug)]
     pub enum Inner {
         Codewhisperer(CodewhispererStreamingClient),
+        QDeveloper(QDeveloperStreamingClient),
         Mock(Arc<Mutex<std::vec::IntoIter<Vec<ChatResponseStream>>>>),
     }
 }
@@ -61,8 +64,14 @@ pub struct StreamingClient {
 
 impl StreamingClient {
     pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
-        // Default to bearer token authentication
-        Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
+        // If Q_USE_SENDMESSAGE is true, use Q developer client
+        // TODO: When do we use the Q dev client (sigv4) vs the default client?
+        if std::env::var("Q_USE_SENDMESSAGE").is_ok_and(|v| !v.is_empty()) {
+            Self::new_qdeveloper_client(database, &Endpoint::load_q(database)).await
+        } else {
+            // Default to CodeWhisperer client
+            Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
+        }
     }
 
     pub fn mock(events: Vec<Vec<ChatResponseStream>>) -> Self {
@@ -101,11 +110,11 @@ impl StreamingClient {
     }
     
     // Add SigV4 client creation method
-    pub async fn new_sigv4_client(
+    pub async fn new_qdeveloper_client(
         database: &Database,
         endpoint: &Endpoint,
     ) -> Result<Self, ApiClientError> {
-        let conf_builder: amzn_codewhisperer_streaming_client::config::Builder =
+        let conf_builder: amzn_qdeveloper_streaming_client::config::Builder =
             (&sigv4_sdk_config(database, endpoint).await?).into();
         let conf = conf_builder
             .http_client(crate::aws_common::http_client::client())
@@ -115,9 +124,9 @@ impl StreamingClient {
             .endpoint_url(endpoint.url())
             .stalled_stream_protection(stalled_stream_protection_config())
             .build();
-        let client = CodewhispererStreamingClient::from_conf(conf);
+        let client = QDeveloperStreamingClient::from_conf(conf);
         Ok(Self {
-            inner: inner::Inner::Codewhisperer(client),
+            inner: inner::Inner::QDeveloper(client),
             profile: None,
         })
     }
@@ -200,6 +209,46 @@ impl StreamingClient {
                     },
                 }
             },
+            inner::Inner::QDeveloper(client) => {
+                let conversation_state = amzn_qdeveloper_streaming_client::types::ConversationState::builder()
+                    .set_conversation_id(conversation_id)
+                    .current_message(amzn_qdeveloper_streaming_client::types::ChatMessage::UserInputMessage(
+                        user_input_message.into(),
+                    ))
+                    .chat_trigger_type(amzn_qdeveloper_streaming_client::types::ChatTriggerType::Manual)
+                    .set_history(
+                        history
+                            .map(|v| v.into_iter().map(|i| i.try_into()).collect::<Result<Vec<_>, _>>())
+                            .transpose()?,
+                    )
+                    .build()
+                    .expect("building conversation_state should not fail");
+
+                let response = client
+                    .send_message()
+                    .conversation_state(conversation_state)
+                    .send()
+                    .await;
+
+                match response {
+                    Ok(resp) => Ok(SendMessageOutput::QDeveloper(resp)),
+                    Err(e) => {
+                        let is_quota_breach = e.raw_response().is_some_and(|resp| resp.status().as_u16() == 429);
+                        let is_context_window_overflow = e.as_service_error().is_some_and(|err| {
+                            matches!(err, err if err.meta().code() == Some("ValidationException")
+                                && err.meta().message() == Some("Input is too long."))
+                        });
+
+                        if is_quota_breach {
+                            Err(ApiClientError::QuotaBreach("quota has reached its limit"))
+                        } else if is_context_window_overflow {
+                            Err(ApiClientError::ContextWindowOverflow)
+                        } else {
+                            Err(e.into())
+                        }
+                    },
+                }
+            },
             inner::Inner::Mock(events) => {
                 let mut new_events = events.lock().unwrap().next().unwrap_or_default().clone();
                 new_events.reverse();
@@ -214,6 +263,7 @@ pub enum SendMessageOutput {
     Codewhisperer(
         amzn_codewhisperer_streaming_client::operation::generate_assistant_response::GenerateAssistantResponseOutput,
     ),
+    QDeveloper(amzn_qdeveloper_streaming_client::operation::send_message::SendMessageOutput),
     Mock(Vec<ChatResponseStream>),
 }
 
@@ -221,6 +271,7 @@ impl SendMessageOutput {
     pub fn request_id(&self) -> Option<&str> {
         match self {
             SendMessageOutput::Codewhisperer(output) => output.request_id(),
+            SendMessageOutput::QDeveloper(output) => output.request_id(),
             SendMessageOutput::Mock(_) => None,
         }
     }
@@ -229,6 +280,11 @@ impl SendMessageOutput {
         match self {
             SendMessageOutput::Codewhisperer(output) => Ok(output
                 .generate_assistant_response_response
+                .recv()
+                .await?
+                .map(|s| s.into())),
+            SendMessageOutput::QDeveloper(output) => Ok(output
+                .send_message_response
                 .recv()
                 .await?
                 .map(|s| s.into())),
@@ -241,6 +297,7 @@ impl RequestId for SendMessageOutput {
     fn request_id(&self) -> Option<&str> {
         match self {
             SendMessageOutput::Codewhisperer(output) => output.request_id(),
+            SendMessageOutput::QDeveloper(output) => output.request_id(),
             SendMessageOutput::Mock(_) => Some("<mock-request-id>"),
         }
     }
@@ -262,6 +319,7 @@ mod tests {
 
         let _ = StreamingClient::new(&mut database).await;
         let _ = StreamingClient::new_codewhisperer_client(&mut database, &endpoint).await;
+        let _ = StreamingClient::new_qdeveloper_client(&database, &endpoint).await;
     }
 
     #[tokio::test]
