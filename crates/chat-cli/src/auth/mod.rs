@@ -9,18 +9,13 @@ use aws_sdk_ssooidc::operation::register_client::RegisterClientError;
 use aws_sdk_ssooidc::operation::start_device_authorization::StartDeviceAuthorizationError;
 use crate::database::settings;
 pub async fn logout(database: &mut Database) -> Result<(), AuthError> {
-    // Clear SigV4 settings if present
+    // Clear any custom AWS profile settings
     let mut settings = match settings::Settings::new().await {
         Ok(s) => s,
         Err(e) => return Err(e.into()),
     };
     
-    if let Some(serde_json::Value::String(auth_strategy)) = settings.get(settings::Setting::AuthStrategy) {
-        if auth_strategy == "sigv4" {
-            let _ = settings.remove(settings::Setting::AuthStrategy).await;
-            let _ = settings.remove_custom("aws.profile").await;
-        }
-    }
+    let _ = settings.remove_custom("aws.profile").await;
     
     // Also clear builder_id token
     builder_id::logout(database).await?;
@@ -66,19 +61,7 @@ pub enum AuthError {
 }
 
 pub async fn is_logged_in(database: &mut Database) -> bool {
-    // Check if using SigV4 auth
-    let settings = match settings::Settings::new().await {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    
-    if let Some(serde_json::Value::String(auth_strategy)) = settings.get(settings::Setting::AuthStrategy) {
-        if auth_strategy == "sigv4" {
-            return true;
-        }
-    }
-    
-    // Otherwise check for builder_id token
+    // Check for builder_id token
     matches!(builder_id::BuilderIdToken::load(database).await, Ok(Some(_)))
 }
 

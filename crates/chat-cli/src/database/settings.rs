@@ -32,7 +32,6 @@ pub enum Setting {
     McpNoInteractiveTimeout,
     McpLoadedBefore,
     ChatDefaultModel,
-    AuthStrategy,
 }
 
 impl AsRef<str> for Setting {
@@ -52,11 +51,7 @@ impl AsRef<str> for Setting {
             Self::McpInitTimeout => "mcp.initTimeout",
             Self::McpNoInteractiveTimeout => "mcp.noInteractiveTimeout",
             Self::McpLoadedBefore => "mcp.loadedBefore",
-<<<<<<< HEAD
             Self::ChatDefaultModel => "chat.defaultModel",
-=======
-            Self::AuthStrategy => "auth.strategy",
->>>>>>> 52b1aab (Initial Commit for Q CLI changes)
         }
     }
 }
@@ -87,7 +82,6 @@ impl TryFrom<&str> for Setting {
             "mcp.noInteractiveTimeout" => Ok(Self::McpNoInteractiveTimeout),
             "mcp.loadedBefore" => Ok(Self::McpLoadedBefore),
             "chat.defaultModel" => Ok(Self::ChatDefaultModel),
-            "auth.strategy" => Ok(Self::AuthStrategy),
             _ => Err(DatabaseError::InvalidSetting(value.to_string())),
         }
     }
@@ -255,15 +249,4 @@ mod test {
     }
 }
 
-// Add a function to get the default auth strategy
-pub fn get_default_auth_strategy(settings: &Settings) -> crate::cli::shared::AuthStrategy {
-    match settings.get(Setting::AuthStrategy) {
-        Some(Value::String(s)) => match s.as_str() {
-            "sigv4" => crate::cli::shared::AuthStrategy::SigV4,
-            "bearer" => crate::cli::shared::AuthStrategy::BearerToken,
-            "auto" => crate::cli::shared::AuthStrategy::Auto,
-            _ => crate::cli::shared::AuthStrategy::default(),
-        },
-        _ => crate::cli::shared::AuthStrategy::default(),
-    }
-}
+

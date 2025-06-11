@@ -14,7 +14,6 @@ use crate::api_client::{
     Endpoint,
 };
 use crate::aws_common::behavior_version;
-use crate::cli::shared::AuthStrategy;
 use crate::database::Database;
 use crate::database::settings::Setting;
 

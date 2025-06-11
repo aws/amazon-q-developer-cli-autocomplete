@@ -29,7 +29,6 @@ use crate::aws_common::{
     UserAgentOverrideInterceptor,
     app_name,
 };
-use crate::cli::shared::AuthStrategy;
 use crate::database::{
     AuthProfile,
     Database,
@@ -61,36 +60,9 @@ pub struct StreamingClient {
 }
 
 impl StreamingClient {
-    pub async fn new(database: &mut Database, auth_strategy: Option<AuthStrategy>) -> Result<Self, ApiClientError> {
-        // First check if there's a strategy specified in the function call
-        let mut strategy = auth_strategy.unwrap_or_default();
-        
-        // If no strategy is specified in the function call, check the settings
-        if strategy == AuthStrategy::BearerToken {
-            if let Ok(settings) = settings::Settings::new().await {
-                if let Some(serde_json::Value::String(saved_strategy)) = settings.get(settings::Setting::AuthStrategy) {
-                    if saved_strategy == "sigv4" {
-                        strategy = AuthStrategy::SigV4;
-                    }
-                }
-            }
-        }
-        
-        match strategy {
-            AuthStrategy::SigV4 => {
-                Self::new_sigv4_client(database, &Endpoint::load_codewhisperer(database)).await
-            },
-            AuthStrategy::BearerToken => {
-                Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
-            },
-            AuthStrategy::Auto => {
-                // Try SigV4 first, fall back to bearer token
-                match Self::new_sigv4_client(database, &Endpoint::load_codewhisperer(database)).await {
-                    Ok(client) => Ok(client),
-                    Err(_) => Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await,
-                }
-            }
-        }
+    pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
+        // Default to bearer token authentication
+        Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
     }
 
     pub fn mock(events: Vec<Vec<ChatResponseStream>>) -> Self {

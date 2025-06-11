@@ -110,6 +110,8 @@ impl ReasonCode for ApiClientError {
             ApiClientError::AuthError(_) => "AuthError".to_string(),
             ApiClientError::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
             ApiClientError::MonthlyLimitReached => "MonthlyLimitReached".to_string(),
+            ApiClientError::Credentials(_) => "CredentialsError".to_string(),
+            ApiClientError::Other(_) => "OtherError".to_string(),
         }
     }
 }
