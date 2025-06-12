@@ -4,6 +4,7 @@ mod context;
 mod conversation_state;
 mod hooks;
 mod input_source;
+mod error_formatter;
 mod message;
 mod parse;
 mod parser;
@@ -2813,8 +2814,7 @@ impl ChatContext {
                                 style::Print("\n"),
                                 style::SetForegroundColor(Color::Red),
                                 style::Print(
-                                    serde_json::to_string_pretty(&to_display)
-                                        .unwrap_or_else(|_| format!("{:?}", &to_display))
+                                    self::error_formatter::format_mcp_error(&to_display)
                                 ),
                                 style::SetForegroundColor(Color::Reset),
                                 style::Print("\n"),
