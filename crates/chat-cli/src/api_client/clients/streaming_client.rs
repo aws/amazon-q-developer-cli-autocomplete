@@ -5,6 +5,7 @@ use std::sync::{
 
 use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
 use amzn_qdeveloper_streaming_client::Client as QDeveloperStreamingClient;
+use amzn_qdeveloper_streaming_client::types::Origin;
 use aws_types::request_id::RequestId;
 use tracing::{
     debug,
@@ -64,9 +65,8 @@ pub struct StreamingClient {
 
 impl StreamingClient {
     pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
-        // If Q_USE_SENDMESSAGE is true, use Q developer client
-        // TODO: When do we use the Q dev client (sigv4) vs the default client?
-        if std::env::var("Q_USE_SENDMESSAGE").is_ok_and(|v| !v.is_empty()) {
+        // If SIGV4_AUTH_ENABLED is true, use Q developer client
+        if std::env::var("SIGV4_AUTH_ENABLED").is_ok_and(|v| !v.is_empty()) {
             Self::new_qdeveloper_client(database, &Endpoint::load_q(database)).await
         } else {
             // Default to CodeWhisperer client
@@ -227,6 +227,7 @@ impl StreamingClient {
                 let response = client
                     .send_message()
                     .conversation_state(conversation_state)
+                    .set_source(Some(Origin::from("CLI")))
                     .send()
                     .await;
 
