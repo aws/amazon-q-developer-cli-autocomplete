@@ -107,7 +107,7 @@ impl LoginArgs {
                     AuthMethod::IdentityCenter
                 } else {
                     // --license is not specified, prompt the user to choose
-                    let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter, AuthMethod::SigV4];
+                    let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter];
                     let i = match choose("Select login method", &options)? {
                         Some(i) => i,
                         None => bail!("No login method selected"),
@@ -118,23 +118,6 @@ impl LoginArgs {
         };
 
         match login_method {
-            AuthMethod::SigV4 => {
-                // Prompt for AWS profile if not provided
-                let profile = match self.aws_profile.clone() {
-                    Some(p) => p,
-                    None => input("Enter AWS profile name (optional)", None)?,
-                };
-                
-                if !profile.is_empty() {
-                    // Use the new set_custom method to save the profile
-                    let mut settings = settings::Settings::new().await?;
-                    settings.set_custom("aws.profile", profile.as_str()).await?;
-                    println!("Using AWS profile: {}", profile);
-                }
-                
-                println!("Using AWS credentials for authentication");
-                telemetry.send_user_logged_in().ok();
-            },
             AuthMethod::BuilderId | AuthMethod::IdentityCenter => {
                 let (start_url, region) = match login_method {
                     AuthMethod::BuilderId => (None, None),
@@ -155,8 +138,7 @@ impl LoginArgs {
                         let _ = database.set_idc_region(region.clone());
 
                         (Some(start_url), Some(region))
-                    },
-                    AuthMethod::SigV4 => unreachable!(), // Already handled above
+                    }
                 };
 
                 // Remote machine won't be able to handle browser opening and redirects,
@@ -317,17 +299,14 @@ enum AuthMethod {
     /// Builder ID (free)
     BuilderId,
     /// IdC (enterprise)
-    IdentityCenter,
-    /// AWS SigV4
-    SigV4,
+    IdentityCenter
 }
 
 impl Display for AuthMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AuthMethod::BuilderId => write!(f, "Use for Free with Builder ID"),
-            AuthMethod::IdentityCenter => write!(f, "Use with Pro license"),
-            AuthMethod::SigV4 => write!(f, "Use with AWS credentials (SigV4)"),
+            AuthMethod::IdentityCenter => write!(f, "Use with Pro license")
         }
     }
 }
