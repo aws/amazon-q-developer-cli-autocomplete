@@ -12,6 +12,22 @@
     },
     {
       "type": "release",
+      "date": "2025-06-11",
+      "version": "1.12.0",
+      "title": "Version 1.12.0",
+      "changes": [
+        {
+          "type": "added",
+          "description": "Support for upgrading to a pro subscription with `/subscribe` in `q chat` - [#143](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/143)"
+        },
+        {
+          "type": "fixed",
+          "description": "`q chat` failing to launch in some Linux installations - [#169](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/169)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-06-04",
       "version": "1.11.0",
       "title": "Version 1.11.0",
