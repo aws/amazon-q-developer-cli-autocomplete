@@ -33,10 +33,6 @@ use super::{
     sanitize_path_tool_arg,
     supports_truecolor,
 };
-use crate::cli::chat::{
-    CONTINUATION_LINE,
-    PURPOSE_ARROW,
-};
 use crate::platform::Context;
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
@@ -194,19 +190,7 @@ impl FsWrite {
                 print_diff(updates, &prev, &new, 1)?;
 
                 // Display summary if available after the diff
-                if let Some(summary) = self.get_summary() {
-                    queue!(
-                        updates,
-                        style::Print(CONTINUATION_LINE),
-                        style::Print("\n"),
-                        style::Print(PURPOSE_ARROW),
-                        style::SetForegroundColor(Color::Blue),
-                        style::Print("Summary of Change: "),
-                        style::ResetColor,
-                        style::Print(summary),
-                        style::Print("\n\n"),
-                    )?;
-                }
+                super::display_summary(self.get_summary(), updates)?;
 
                 Ok(())
             },
@@ -234,19 +218,7 @@ impl FsWrite {
                 print_diff(updates, &old, &new, start_line)?;
 
                 // Display summary if available after the diff
-                if let Some(summary) = self.get_summary() {
-                    queue!(
-                        updates,
-                        style::Print(CONTINUATION_LINE),
-                        style::Print("\n"),
-                        style::Print(PURPOSE_ARROW),
-                        style::SetForegroundColor(Color::Blue),
-                        style::Print("Summary of Change: "),
-                        style::ResetColor,
-                        style::Print(summary),
-                        style::Print("\n"),
-                    )?;
-                }
+                super::display_summary(self.get_summary(), updates)?;
 
                 Ok(())
             },
@@ -264,19 +236,7 @@ impl FsWrite {
                 print_diff(updates, &old_str, &new_str, start_line)?;
 
                 // Display summary if available after the diff
-                if let Some(summary) = self.get_summary() {
-                    queue!(
-                        updates,
-                        style::Print(CONTINUATION_LINE),
-                        style::Print("\n"),
-                        style::Print(PURPOSE_ARROW),
-                        style::SetForegroundColor(Color::Blue),
-                        style::Print("Summary of Change: "),
-                        style::ResetColor,
-                        style::Print(summary),
-                        style::Print("\n"),
-                    )?;
-                }
+                super::display_summary(self.get_summary(), updates)?;
 
                 Ok(())
             },
@@ -287,19 +247,7 @@ impl FsWrite {
                 print_diff(updates, &Default::default(), &file, start_line)?;
 
                 // Display summary if available after the diff
-                if let Some(summary) = self.get_summary() {
-                    queue!(
-                        updates,
-                        style::Print(CONTINUATION_LINE),
-                        style::Print("\n"),
-                        style::Print(PURPOSE_ARROW),
-                        style::SetForegroundColor(Color::Blue),
-                        style::Print("Summary of Change: "),
-                        style::ResetColor,
-                        style::Print(summary),
-                        style::Print("\n"),
-                    )?;
-                }
+                super::display_summary(self.get_summary(), updates)?;
 
                 Ok(())
             },
