@@ -9,6 +9,8 @@ use crate::api_client::consts::{
     PROD_CODEWHISPERER_ENDPOINT_URL,
     PROD_CODEWHISPERER_FRA_ENDPOINT_REGION,
     PROD_CODEWHISPERER_FRA_ENDPOINT_URL,
+    PROD_Q_ENDPOINT_REGION,
+    PROD_Q_ENDPOINT_URL,
 };
 use crate::database::Database;
 use crate::database::settings::Setting;
@@ -27,6 +29,10 @@ impl Endpoint {
     pub const DEFAULT_ENDPOINT: Self = Self {
         url: Cow::Borrowed(PROD_CODEWHISPERER_ENDPOINT_URL),
         region: PROD_CODEWHISPERER_ENDPOINT_REGION,
+    };
+    pub const Q_ENDPOINT: Self = Self {
+        url: Cow::Borrowed(PROD_Q_ENDPOINT_URL),
+        region: PROD_Q_ENDPOINT_REGION,
     };
 
     pub fn load_codewhisperer(database: &Database) -> Self {
@@ -63,6 +69,24 @@ impl Endpoint {
         }
     }
 
+    pub fn load_q(database: &Database) -> Self {
+        match database.settings.get(Setting::ApiQService) {
+            Some(Value::Object(o)) => {
+                let endpoint = o.get("endpoint").and_then(|v| v.as_str());
+                let region = o.get("region").and_then(|v| v.as_str());
+
+                match (endpoint, region) {
+                    (Some(endpoint), Some(region)) => Self {
+                        url: endpoint.to_owned().into(),
+                        region: Region::new(region.to_owned()),
+                    },
+                    _ => Endpoint::Q_ENDPOINT,
+                }
+            },
+            _ => Endpoint::Q_ENDPOINT,
+        }
+    }
+
     pub(crate) fn url(&self) -> &str {
         &self.url
     }
@@ -82,6 +106,7 @@ mod tests {
     async fn test_endpoints() {
         let database = Database::new().await.unwrap();
         let _ = Endpoint::load_codewhisperer(&database);
+        let _ = Endpoint::load_q(&database);
 
         let prod = &Endpoint::DEFAULT_ENDPOINT;
         Url::parse(prod.url()).unwrap();

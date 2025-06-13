@@ -87,6 +87,7 @@ use message::{
     ToolUseResult,
     ToolUseResultBlock,
 };
+use crate::api_client::clients::StreamingClient;
 use parse::{
     ParseState,
     interpret_markdown,
@@ -157,7 +158,6 @@ use crate::api_client::model::{
 use crate::api_client::{
     ApiClientError,
     Client,
-    StreamingClient,
 };
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
@@ -205,6 +205,9 @@ pub struct ChatArgs {
     /// '--trust-tools=fs_read,fs_write', trust no tools: '--trust-tools='
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
+    /// AWS profile to use for authentication
+    #[arg(long)]
+    pub aws_profile: Option<String>,
 }
 
 impl ChatArgs {
