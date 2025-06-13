@@ -26,7 +26,7 @@ pub type ContextMap = HashMap<ContextId, Arc<Mutex<SemanticContext>>>;
 
 /// A memory context containing semantic information
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryContext {
+pub struct KnowledgeContext {
     /// Unique identifier for the context
     pub id: String,
 
@@ -52,7 +52,7 @@ pub struct MemoryContext {
     pub item_count: usize,
 }
 
-impl MemoryContext {
+impl KnowledgeContext {
     /// Create a new memory context
     pub fn new(
         id: String,

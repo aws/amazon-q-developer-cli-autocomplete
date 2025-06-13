@@ -30,7 +30,7 @@ use crate::types::{
     ContextId,
     ContextMap,
     DataPoint,
-    MemoryContext,
+    KnowledgeContext,
     ProgressStatus,
     SearchResults,
 };
@@ -63,13 +63,15 @@ pub struct SemanticSearchClient {
     /// Short-term (volatile) memory contexts
     volatile_contexts: ContextMap,
     /// Long-term (persistent) memory contexts
-    persistent_contexts: HashMap<ContextId, MemoryContext>,
+    persistent_contexts: HashMap<ContextId, KnowledgeContext>,
     /// Text embedder for generating embeddings
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     embedder: Box<dyn TextEmbedderTrait>,
     /// Text embedder for generating embeddings (Linux only)
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     embedder: Box<dyn TextEmbedderTrait>,
+    /// Configuration for the client
+    config: crate::config::SemanticSearchConfig,
 }
 impl SemanticSearchClient {
     /// Create a new semantic search client
@@ -96,6 +98,25 @@ impl SemanticSearchClient {
     ///
     /// A new SemanticSearchClient instance
     pub fn with_embedding_type(base_dir: impl AsRef<Path>, embedding_type: EmbeddingType) -> Result<Self> {
+        Self::with_config_and_embedding_type(base_dir, crate::config::SemanticSearchConfig::default(), embedding_type)
+    }
+
+    /// Create a new semantic search client with custom configuration and embedding type
+    ///
+    /// # Arguments
+    ///
+    /// * `base_dir` - Base directory for storing persistent contexts
+    /// * `config` - Configuration for the client
+    /// * `embedding_type` - Type of embedding engine to use
+    ///
+    /// # Returns
+    ///
+    /// A new SemanticSearchClient instance
+    pub fn with_config_and_embedding_type(
+        base_dir: impl AsRef<Path>,
+        config: crate::config::SemanticSearchConfig,
+        embedding_type: EmbeddingType,
+    ) -> Result<Self> {
         let base_dir = base_dir.as_ref().to_path_buf();
         fs::create_dir_all(&base_dir)?;
 
@@ -120,6 +141,7 @@ impl SemanticSearchClient {
             volatile_contexts: HashMap::new(),
             persistent_contexts,
             embedder,
+            config,
         };
 
         // Now load all persistent contexts
@@ -131,6 +153,20 @@ impl SemanticSearchClient {
         }
 
         Ok(client)
+    }
+
+    /// Create a new semantic search client with custom configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `base_dir` - Base directory for storing persistent contexts
+    /// * `config` - Configuration for the client
+    ///
+    /// # Returns
+    ///
+    /// A new SemanticSearchClient instance
+    pub fn with_config(base_dir: impl AsRef<Path>, config: crate::config::SemanticSearchConfig) -> Result<Self> {
+        Self::with_config_and_embedding_type(base_dir, config, EmbeddingType::default())
     }
 
     /// Get the default base directory for memory bank
@@ -373,6 +409,14 @@ impl SemanticSearchClient {
         // Count files and notify progress
         let file_count = Self::count_files_in_directory(dir_path, &progress_callback)?;
 
+        // Check if file count exceeds the configured limit
+        if file_count > self.config.max_files {
+            return Err(SemanticSearchError::InvalidArgument(format!(
+                "Directory contains {} files, which exceeds the maximum limit of {} files. Please choose a smaller directory or increase the max_files limit in the configuration.",
+                file_count, self.config.max_files
+            )));
+        }
+
         // Process files
         let items = Self::process_directory_files(dir_path, file_count, &progress_callback)?;
 
@@ -532,7 +576,7 @@ impl SemanticSearchClient {
         }
 
         // Create the context metadata
-        let context = MemoryContext::new(id.to_string(), name, description, persistent, source_path, item_count);
+        let context = KnowledgeContext::new(id.to_string(), name, description, persistent, source_path, item_count);
 
         // Store the context
         if persistent {
@@ -667,7 +711,7 @@ impl SemanticSearchClient {
     /// # Returns
     ///
     /// A vector of all contexts (both volatile and persistent)
-    pub fn get_all_contexts(&self) -> Vec<MemoryContext> {
+    pub fn get_all_contexts(&self) -> Vec<KnowledgeContext> {
         let mut contexts = Vec::new();
 
         // Add persistent contexts
@@ -679,7 +723,7 @@ impl SemanticSearchClient {
         for id in self.volatile_contexts.keys() {
             if !self.persistent_contexts.contains_key(id) {
                 // Create a temporary context object for volatile contexts
-                let context = MemoryContext::new(
+                let context = KnowledgeContext::new(
                     id.clone(),
                     "Volatile Context",
                     "Temporary memory context",
@@ -810,7 +854,7 @@ impl SemanticSearchClient {
     /// # Returns
     ///
     /// A vector of memory contexts
-    pub fn get_contexts(&self) -> Vec<MemoryContext> {
+    pub fn get_contexts(&self) -> Vec<KnowledgeContext> {
         self.persistent_contexts.values().cloned().collect()
     }
 
@@ -859,7 +903,7 @@ impl SemanticSearchClient {
         utils::save_json_to_file(&data_path, context_guard.get_data_points())?;
 
         // Create the context metadata
-        let context_meta = MemoryContext::new(
+        let context_meta = KnowledgeContext::new(
             context_id.to_string(),
             context_name,
             context_description,
