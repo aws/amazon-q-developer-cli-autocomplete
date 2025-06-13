@@ -207,14 +207,14 @@ where
                 // figterm
                 InsertTextRequest(request) => event_handler.insert_text(request!(request)).await,
                 // fs
-                ReadFileRequest(request) => fs::read_file(request, ctx.env(), ctx.fs()).await,
-                WriteFileRequest(request) => fs::write_file(request, ctx.env(), ctx.fs()).await,
-                AppendToFileRequest(request) => fs::append_to_file(request, ctx.env()).await,
+                ReadFileRequest(request) => fs::read_file(request, ctx.env, ctx.fs).await,
+                WriteFileRequest(request) => fs::write_file(request, ctx.env, ctx.fs).await,
+                AppendToFileRequest(request) => fs::append_to_file(request, ctx.env).await,
                 DestinationOfSymbolicLinkRequest(request) => {
-                    requests::fs::destination_of_symbolic_link(request, ctx.env()).await
+                    requests::fs::destination_of_symbolic_link(request, ctx.env).await
                 },
-                ContentsOfDirectoryRequest(request) => fs::contents_of_directory(request, ctx.env()).await,
-                CreateDirectoryRequest(request) => fs::create_directory_request(request, ctx.env(), ctx.fs()).await,
+                ContentsOfDirectoryRequest(request) => fs::contents_of_directory(request, ctx.env).await,
+                CreateDirectoryRequest(request) => fs::create_directory_request(request, ctx.env, ctx.fs).await,
                 // notifications
                 NotificationRequest(request) => event_handler.notification(request!(request)).await,
                 // process

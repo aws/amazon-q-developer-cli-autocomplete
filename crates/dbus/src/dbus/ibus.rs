@@ -52,7 +52,7 @@ pub enum AddressError {
 ///
 /// Reference: <https://ibus.github.io/docs/ibus-1.5/ibus-ibusshare.html#ibus-get-address>
 pub async fn connect_to_ibus_daemon(ctx: &Context) -> Result<Connection, AddressError> {
-    let (fs, env) = (ctx.fs(), ctx.env());
+    let (fs, env) = (ctx.fs, ctx.env);
 
     match env.get("IBUS_ADDRESS") {
         Ok(address) => {

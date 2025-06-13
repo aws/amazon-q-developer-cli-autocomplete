@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::Write as _;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -26,7 +26,6 @@ use crate::cli::chat::tools::custom_tool::{
     CustomToolConfig,
     default_timeout,
 };
-use crate::cli::chat::util::shared_writer::SharedWriter;
 use crate::platform::Context;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -60,16 +59,15 @@ pub enum McpSubcommand {
 }
 
 impl McpSubcommand {
-    pub async fn execute(self) -> Result<ExitCode> {
+    pub async fn execute(self, output: &mut impl Write) -> Result<ExitCode> {
         let ctx = Context::new();
-        let mut output = SharedWriter::stdout();
 
         match self {
-            Self::Add(args) => args.execute(&ctx, &mut output).await?,
-            Self::Remove(args) => args.execute(&ctx, &mut output).await?,
-            Self::List(args) => args.execute(&ctx, &mut output).await?,
-            Self::Import(args) => args.execute(&ctx, &mut output).await?,
-            Self::Status(args) => args.execute(&ctx, &mut output).await?,
+            Self::Add(args) => args.execute(&ctx, output).await?,
+            Self::Remove(args) => args.execute(&ctx, output).await?,
+            Self::List(args) => args.execute(&ctx, output).await?,
+            Self::Import(args) => args.execute(&ctx, output).await?,
+            Self::Status(args) => args.execute(&ctx, output).await?,
         }
 
         output.flush()?;
@@ -100,7 +98,7 @@ pub struct AddArgs {
 }
 
 impl AddArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
 
@@ -148,11 +146,11 @@ pub struct RemoveArgs {
 }
 
 impl RemoveArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
 
-        if !ctx.fs().exists(&config_path) {
+        if !ctx.fs.exists(&config_path) {
             writeln!(output, "\nNo MCP server configurations found.\n")?;
             return Ok(());
         }
@@ -190,7 +188,7 @@ pub struct ListArgs {
 }
 
 impl ListArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let configs = get_mcp_server_configs(ctx, self.scope).await?;
         if configs.is_empty() {
             writeln!(output, "No MCP server configurations found.\n")?;
@@ -229,7 +227,7 @@ pub struct ImportArgs {
 }
 
 impl ImportArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let scope: Scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
         let mut dst_cfg = ensure_config_file(ctx, &config_path, output).await?;
@@ -273,7 +271,7 @@ pub struct StatusArgs {
 }
 
 impl StatusArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let configs = get_mcp_server_configs(ctx, None).await?;
         let mut found = false;
 
@@ -319,7 +317,7 @@ async fn get_mcp_server_configs(
     let mut results = Vec::new();
     for sc in targets {
         let path = resolve_scope_profile(ctx, Some(sc))?;
-        let cfg_opt = if ctx.fs().exists(&path) {
+        let cfg_opt = if ctx.fs.exists(&path) {
             match McpServerConfig::load_from_file(ctx, &path).await {
                 Ok(cfg) => Some(cfg),
                 Err(e) => {
@@ -353,18 +351,18 @@ fn expand_path(ctx: &Context, p: &str) -> Result<PathBuf> {
     let p = shellexpand::tilde(p);
     let mut path = PathBuf::from(p.as_ref() as &str);
     if path.is_relative() {
-        path = ctx.env().current_dir()?.join(path);
+        path = ctx.env.current_dir()?.join(path);
     }
     Ok(path)
 }
 
-async fn ensure_config_file(ctx: &Context, path: &PathBuf, out: &mut SharedWriter) -> Result<McpServerConfig> {
-    if !ctx.fs().exists(path) {
+async fn ensure_config_file(ctx: &Context, path: &PathBuf, output: &mut impl Write) -> Result<McpServerConfig> {
+    if !ctx.fs.exists(path) {
         if let Some(parent) = path.parent() {
-            ctx.fs().create_dir_all(parent).await?;
+            ctx.fs.create_dir_all(parent).await?;
         }
         McpServerConfig::default().save_to_file(ctx, path).await?;
-        writeln!(out, "\n📁 Created MCP config in '{}'", path.display())?;
+        writeln!(output, "\n📁 Created MCP config in '{}'", path.display())?;
     }
 
     load_cfg(ctx, path).await
@@ -391,7 +389,7 @@ fn parse_env_vars(arg: &str) -> Result<HashMap<String, String>> {
 }
 
 async fn load_cfg(ctx: &Context, p: &PathBuf) -> Result<McpServerConfig> {
-    Ok(if ctx.fs().exists(p) {
+    Ok(if ctx.fs.exists(p) {
         McpServerConfig::load_from_file(ctx, p).await?
     } else {
         McpServerConfig::default()
@@ -459,7 +457,7 @@ mod tests {
 
         let cfg_path = workspace_mcp_config_path(&ctx).unwrap();
         let cfg: McpServerConfig =
-            serde_json::from_str(&ctx.fs().read_to_string(cfg_path.clone()).await.unwrap()).unwrap();
+            serde_json::from_str(&ctx.fs.read_to_string(cfg_path.clone()).await.unwrap()).unwrap();
         assert!(cfg.mcp_servers.len() == 1);
 
         // 2. remove
@@ -471,7 +469,7 @@ mod tests {
         .await
         .unwrap();
 
-        let cfg: McpServerConfig = serde_json::from_str(&ctx.fs().read_to_string(cfg_path).await.unwrap()).unwrap();
+        let cfg: McpServerConfig = serde_json::from_str(&ctx.fs.read_to_string(cfg_path).await.unwrap()).unwrap();
         assert!(cfg.mcp_servers.is_empty());
     }
 

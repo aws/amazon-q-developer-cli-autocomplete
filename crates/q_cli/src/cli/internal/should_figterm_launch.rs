@@ -55,7 +55,7 @@ impl Status {
 
 fn parent_status(ctx: &Context, current_pid: fig_os_shim::process_info::Pid) -> Status {
     use fig_util::env_var::Q_TERM;
-    let env = ctx.env();
+    let env = ctx.env;
 
     let parent_pid = match current_pid.parent() {
         Some(pid) => pid,
@@ -209,7 +209,7 @@ pub fn should_figterm_launch_exit_status(ctx: &Context, quiet: bool) -> u8 {
         Q_PARENT,
     };
 
-    let env = ctx.env();
+    let env = ctx.env;
 
     if env.get_os(Q_FORCE_FIGTERM_LAUNCH).is_some() {
         if !quiet {

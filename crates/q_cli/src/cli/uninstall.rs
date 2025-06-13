@@ -69,7 +69,7 @@ async fn uninstall_linux_minimal(ctx: std::sync::Arc<fig_os_shim::Context>) -> R
     use eyre::bail;
     use tracing::error;
 
-    let exe_path = ctx.fs().canonicalize(ctx.env().current_exe()?.canonicalize()?).await?;
+    let exe_path = ctx.fs.canonicalize(ctx.env.current_exe()?.canonicalize()?).await?;
     let Some(exe_name) = exe_path.file_name().and_then(|s| s.to_str()) else {
         bail!("Failed to get name of current executable: {exe_path:?}")
     };

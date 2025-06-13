@@ -38,7 +38,7 @@ where
         OnboardingAction::InstallationScript => {
             let mut errs: Vec<String> = vec![];
             for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
-                match shell.get_shell_integrations(ctx.env()) {
+                match shell.get_shell_integrations(ctx.env) {
                     Ok(integrations) => {
                         for integration in integrations {
                             if let Err(err) = integration.install().await {

@@ -34,12 +34,12 @@ impl Thinking {
     }
 
     /// Queues up a description of the think tool for the user
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         // Only show a description if there's actual thought content
         if !self.thought.trim().is_empty() {
             // Show a preview of the thought that will be displayed
             queue!(
-                updates,
+                output,
                 style::SetForegroundColor(Color::Blue),
                 style::Print("I'll share my reasoning process: "),
                 style::SetForegroundColor(Color::Reset),
@@ -52,7 +52,7 @@ impl Thinking {
 
     /// Invokes the think tool. This doesn't actually perform any system operations,
     /// it's purely for the model's internal reasoning process.
-    pub async fn invoke(&self, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, _updates: impl Write) -> Result<InvokeOutput> {
         // The think tool always returns an empty output because:
         // 1. When enabled with content: We've already shown the thought in queue_description
         // 2. When disabled or empty: Nothing should be shown

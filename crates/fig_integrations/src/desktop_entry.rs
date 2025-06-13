@@ -36,7 +36,7 @@ pub fn local_entry_path<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<Path
 /// Path to the global [PRODUCT_NAME] desktop entry installed under `/usr/share/applications`
 pub fn global_entry_path<Ctx: FsProvider>(ctx: &Ctx) -> PathBuf {
     // Using chroot_path for test code.
-    ctx.fs()
+    ctx.fs
         .chroot_path(format!("/usr/share/applications/{}", DESKTOP_ENTRY_NAME))
 }
 
@@ -143,7 +143,7 @@ where
             },
         };
 
-        let fs = self.ctx.fs();
+        let fs = self.ctx.fs;
 
         let to_entry_path = local_entry_path(self.ctx)?;
         let to_icon_path = local_icon_path(self.ctx)?;
@@ -171,7 +171,7 @@ where
     }
 
     async fn uninstall(&self) -> Result<()> {
-        let fs = self.ctx.fs();
+        let fs = self.ctx.fs;
         let to_entry_path = local_entry_path(self.ctx)?;
         let to_icon_path = local_icon_path(self.ctx)?;
         if fs.exists(&to_entry_path) {
@@ -184,7 +184,7 @@ where
     }
 
     async fn is_installed(&self) -> Result<()> {
-        let fs = self.ctx.fs();
+        let fs = self.ctx.fs;
         let to_entry_path = local_entry_path(self.ctx)?;
         let to_icon_path = local_icon_path(self.ctx)?;
 
@@ -293,7 +293,7 @@ where
     /// Creates a new [AutostartIntegration] that links to a local desktop entry if in an AppImage,
     /// and a global desktop entry otherwise.
     pub fn new(ctx: &'a Ctx) -> Result<Self> {
-        if ctx.env().in_appimage() {
+        if ctx.env.in_appimage() {
             Self::to_local(ctx)
         } else {
             Ok(Self::to_global(ctx))
@@ -336,7 +336,7 @@ where
             return Ok(());
         }
 
-        let fs = self.ctx.fs();
+        let fs = self.ctx.fs;
         let to_autostart_path = local_autostart_path(self.ctx)?;
         create_parent(fs, &to_autostart_path).await?;
         if fs.symlink_exists(&to_autostart_path).await {
@@ -347,7 +347,7 @@ where
     }
 
     async fn uninstall(&self) -> Result<()> {
-        let fs = self.ctx.fs();
+        let fs = self.ctx.fs;
         let to_autostart_path = local_autostart_path(self.ctx)?;
         if fs.symlink_exists(&to_autostart_path).await {
             fs.remove_file(&to_autostart_path).await?;
@@ -356,7 +356,7 @@ where
     }
 
     async fn is_installed(&self) -> Result<()> {
-        let fs = self.ctx.fs();
+        let fs = self.ctx.fs;
         let to_autostart_path = local_autostart_path(self.ctx)?;
         if !fs.exists(&to_autostart_path) {
             return Err(Error::FileDoesNotExist(to_autostart_path.clone().into()));
@@ -415,7 +415,7 @@ Type=Application"#;
     }
 
     async fn make_test_local_desktop_entry(ctx: &Context) -> DesktopEntryIntegration<'_, Context> {
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         fs.write("/app.desktop", TEST_DESKTOP_ENTRY).await.unwrap();
         fs.write("/app.png", "image").await.unwrap();
         DesktopEntryIntegration::new(ctx, Some("/app.desktop"), Some("/app.png"), Some(TEST_EXEC_VALUE))
@@ -424,7 +424,7 @@ Type=Application"#;
     #[tokio::test]
     async fn test_desktop_entry_integration_install_and_uninstall() {
         let ctx = ContextBuilder::new().with_test_home().await.unwrap().build();
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         let integration = make_test_local_desktop_entry(&ctx).await;
         assert!(integration.is_installed().await.is_err());
 
@@ -434,7 +434,7 @@ Type=Application"#;
         // Validating it was installed.
         assert!(integration.is_installed().await.is_ok());
         let installed_entry_path = local_entry_path(&ctx).unwrap();
-        let installed_icon_path = local_icon_path(ctx.fs()).unwrap();
+        let installed_icon_path = local_icon_path(ctx.fs).unwrap();
         assert!(
             fs.exists(&installed_entry_path),
             "desktop entry should have been created"
@@ -495,10 +495,10 @@ Type=Application"#;
         {
             let local_path = local_entry_path(&ctx).unwrap();
             let global_path = global_entry_path(&ctx);
-            ctx.fs().create_dir_all(local_path.parent().unwrap()).await.unwrap();
-            ctx.fs().write(local_path, "[Desktop Entry]").await.unwrap();
-            ctx.fs().create_dir_all(global_path.parent().unwrap()).await.unwrap();
-            ctx.fs().write(global_path, "[Desktop Entry]").await.unwrap();
+            ctx.fs.create_dir_all(local_path.parent().unwrap()).await.unwrap();
+            ctx.fs.write(local_path, "[Desktop Entry]").await.unwrap();
+            ctx.fs.create_dir_all(global_path.parent().unwrap()).await.unwrap();
+            ctx.fs.write(global_path, "[Desktop Entry]").await.unwrap();
         }
 
         let local_autostart = AutostartIntegration::to_local(&ctx).unwrap();
@@ -515,14 +515,14 @@ Type=Application"#;
         let local_desktop_entry = local_entry_path(&ctx).unwrap();
         let installed_autostart_path = local_autostart_path(&ctx).unwrap();
         assert_eq!(
-            ctx.fs().read_link(&installed_autostart_path).await.unwrap(),
+            ctx.fs.read_link(&installed_autostart_path).await.unwrap(),
             local_desktop_entry
         );
 
         // Test installing globally will overwrite the local install.
         global_autostart.install().await.unwrap();
         assert_eq!(
-            ctx.fs().read_link(&installed_autostart_path).await.unwrap(),
+            ctx.fs.read_link(&installed_autostart_path).await.unwrap(),
             global_entry_path(&ctx)
         );
         assert!(global_autostart.is_installed().await.is_ok());
@@ -531,7 +531,7 @@ Type=Application"#;
         // Test uninstall.
         global_autostart.uninstall().await.unwrap();
         assert!(global_autostart.is_installed().await.is_err());
-        assert!(!ctx.fs().symlink_exists(&installed_autostart_path).await);
+        assert!(!ctx.fs.symlink_exists(&installed_autostart_path).await);
         assert!(
             global_autostart.uninstall().await.is_ok(),
             "should be able to uninstall repeatedly without erroring"

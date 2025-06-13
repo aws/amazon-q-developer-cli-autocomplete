@@ -73,7 +73,7 @@ where
         (InstallComponent::Dotfiles, action) => {
             let mut errs: Vec<String> = vec![];
             for shell in Shell::all() {
-                match shell.get_shell_integrations(ctx.env()) {
+                match shell.get_shell_integrations(ctx.env) {
                     Ok(integrations) => {
                         for integration in integrations {
                             let res = match action {
@@ -218,12 +218,12 @@ where
             }
         },
         (InstallComponent::DesktopEntry, action) => {
-            if !ctx.env().in_appimage() {
+            if !ctx.env.in_appimage() {
                 integration_result(Err(
                     "Desktop entry installation is only supported for AppImage bundles.",
                 ))
             } else {
-                let exec_path = ctx.env().get("APPIMAGE").map_err(super::Error::from_std)?;
+                let exec_path = ctx.env.get("APPIMAGE").map_err(super::Error::from_std)?;
                 let entry_path = ctx
                     .env()
                     .current_dir()
@@ -405,7 +405,7 @@ mod tests {
             .unwrap()
             .with_env_var("APPIMAGE", "/test.appimage")
             .build();
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         let entry_path = appimage_desktop_entry_path(&ctx).unwrap();
         let icon_path = appimage_desktop_entry_icon_path(&ctx).unwrap();
         fs.create_dir_all(entry_path.parent().unwrap()).await.unwrap();
@@ -444,8 +444,8 @@ mod tests {
         // Create global desktop entry
         {
             let global_path = global_entry_path(&ctx);
-            ctx.fs().create_dir_all(global_path.parent().unwrap()).await.unwrap();
-            ctx.fs().write(global_path, "[Desktop Entry]").await.unwrap();
+            ctx.fs.create_dir_all(global_path.parent().unwrap()).await.unwrap();
+            ctx.fs.write(global_path, "[Desktop Entry]").await.unwrap();
         }
         let ctx = TestContext {
             ctx,
@@ -490,9 +490,9 @@ mod tests {
 
         let zip_path = bundled_gnome_extension_zip_path(ctx, uuid).unwrap();
         let version_path = bundled_gnome_extension_version_path(ctx, uuid).unwrap();
-        ctx.fs().create_dir_all(zip_path.parent().unwrap()).await.unwrap();
-        ctx.fs().write(&zip_path, version.to_string()).await.unwrap();
-        ctx.fs().write(&version_path, version.to_string()).await.unwrap();
+        ctx.fs.create_dir_all(zip_path.parent().unwrap()).await.unwrap();
+        ctx.fs.write(&zip_path, version.to_string()).await.unwrap();
+        ctx.fs.write(&version_path, version.to_string()).await.unwrap();
     }
 
     #[cfg(target_os = "linux")]

@@ -405,7 +405,7 @@ async fn run_linux_install(ctx: Arc<Context>, settings: Arc<fig_settings::Settin
     use fig_util::system_info::linux::get_display_server;
 
     // install binaries under home local bin
-    if ctx.env().in_appimage() {
+    if ctx.env.in_appimage() {
         let ctx_clone = Arc::clone(&ctx);
         tokio::spawn(async move {
             install_appimage_binaries(&ctx_clone)
@@ -508,7 +508,7 @@ where
         return Ok(());
     }
 
-    let fs = ctx.fs();
+    let fs = ctx.fs;
     let extension_uuid = shell_extensions.extension_uuid().await?;
     let bundled_version: u32 = fs
         .read_to_string(bundled_gnome_extension_version_path(ctx, &extension_uuid)?)
@@ -581,7 +581,7 @@ async fn install_desktop_entry(ctx: &Context, state: &fig_settings::State) -> an
         return Ok(());
     }
 
-    let exec_path = ctx.env().get("APPIMAGE")?;
+    let exec_path = ctx.env.get("APPIMAGE")?;
     let entry_path = appimage_desktop_entry_path(ctx)?;
     let icon_path = appimage_desktop_entry_icon_path(ctx)?;
     DesktopEntryIntegration::new(ctx, Some(entry_path), Some(icon_path), Some(exec_path.into()))
@@ -623,7 +623,7 @@ async fn install_appimage_binaries(ctx: &Context) -> anyhow::Result<()> {
     use tokio::process::Command;
 
     if !home_local_bin_ctx(ctx)?.exists() {
-        ctx.fs().create_dir_all(home_local_bin_ctx(ctx)?).await?;
+        ctx.fs.create_dir_all(home_local_bin_ctx(ctx)?).await?;
     }
 
     // Extract and install the CLI + PTY under home local bin, if required.
@@ -679,14 +679,14 @@ async fn copy_binary_from_appimage_mount(
     use anyhow::Context;
     use tracing::debug;
 
-    let cwd = ctx.env().current_dir()?;
+    let cwd = ctx.env.current_dir()?;
     let binary_path = cwd.join(format!("bin/{binary_name}"));
     debug!(
         "Copying {} to {}",
         binary_path.to_string_lossy(),
         destination.as_ref().to_string_lossy()
     );
-    ctx.fs()
+    ctx.fs
         .copy(&binary_path, destination)
         .await
         .context(format!("Unable to copy {binary_name}"))?;
@@ -899,7 +899,7 @@ mod test {
         /// Writes a test script for the CLI/PTY binaries to `directory` that prints
         /// `"<binaryname> version"`.
         async fn write_test_binaries(ctx: &Context, version: &str, destination: impl AsRef<Path>) {
-            let fs = ctx.fs();
+            let fs = ctx.fs;
             if !fs.exists(&destination) {
                 fs.create_dir_all(&destination).await.unwrap();
             }
@@ -922,13 +922,13 @@ echo "{binary_name} {version}"
         async fn assert_binaries_installed(ctx: &Context, expected_version: &str) {
             for binary_name in &[CLI_BINARY_NAME, PTY_BINARY_NAME, CHAT_BINARY_NAME] {
                 let binary_path = home_local_bin_ctx(ctx).unwrap().join(binary_name);
-                let stdout = Command::new(ctx.fs().chroot_path(binary_path))
+                let stdout = Command::new(ctx.fs.chroot_path(binary_path))
                     .output()
                     .await
                     .unwrap()
                     .stdout;
                 let stdout = std::str::from_utf8(&stdout).unwrap();
-                assert!(ctx.fs().exists(home_local_bin_ctx(ctx).unwrap().join(binary_name)));
+                assert!(ctx.fs.exists(home_local_bin_ctx(ctx).unwrap().join(binary_name)));
                 assert_eq!(parse_version(stdout), expected_version);
             }
         }
@@ -1001,9 +1001,9 @@ echo "{binary_name} {version}"
         async fn write_extension_bundle(ctx: &Context, uuid: &str, version: u32) {
             let zip_path = bundled_gnome_extension_zip_path(ctx, uuid).unwrap();
             let version_path = bundled_gnome_extension_version_path(ctx, uuid).unwrap();
-            ctx.fs().create_dir_all(zip_path.parent().unwrap()).await.unwrap();
-            ctx.fs().write(&zip_path, version.to_string()).await.unwrap();
-            ctx.fs().write(&version_path, version.to_string()).await.unwrap();
+            ctx.fs.create_dir_all(zip_path.parent().unwrap()).await.unwrap();
+            ctx.fs.write(&zip_path, version.to_string()).await.unwrap();
+            ctx.fs.write(&version_path, version.to_string()).await.unwrap();
         }
 
         #[tokio::test]
@@ -1130,7 +1130,7 @@ echo "{binary_name} {version}"
                 .unwrap()
                 .with_env_var("APPIMAGE", "/test.appimage")
                 .build_fake();
-            let fs = ctx.fs();
+            let fs = ctx.fs;
             let entry_path = appimage_desktop_entry_path(&ctx).unwrap();
             let icon_path = appimage_desktop_entry_icon_path(&ctx).unwrap();
             fs.create_dir_all(&entry_path.parent().unwrap()).await.unwrap();
@@ -1155,7 +1155,7 @@ echo "{binary_name} {version}"
                 .unwrap()
                 .with_env_var("APPIMAGE", "/test.appimage")
                 .build_fake();
-            let fs = ctx.fs();
+            let fs = ctx.fs;
             let entry_path = appimage_desktop_entry_path(&ctx).unwrap();
             let icon_path = appimage_desktop_entry_icon_path(&ctx).unwrap();
             fs.create_dir_all(&entry_path.parent().unwrap()).await.unwrap();
@@ -1180,7 +1180,7 @@ echo "{binary_name} {version}"
                 .unwrap()
                 .with_env_var("APPIMAGE", "/test.appimage")
                 .build_fake();
-            let fs = ctx.fs();
+            let fs = ctx.fs;
             fs.create_dir_all(local_entry_path(&ctx).unwrap().parent().unwrap())
                 .await
                 .unwrap();

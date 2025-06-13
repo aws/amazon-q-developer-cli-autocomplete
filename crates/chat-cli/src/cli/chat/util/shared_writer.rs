@@ -53,7 +53,7 @@ impl Write for SharedWriter {
 }
 
 #[derive(Debug, Clone)]
-pub struct NullWriter {}
+pub struct NullWriter;
 
 impl Write for NullWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

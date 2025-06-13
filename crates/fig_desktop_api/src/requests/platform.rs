@@ -48,7 +48,7 @@ where
     } else {
         None
     };
-    let app_bundle_type = if os == Os::Linux && ctx.env().in_appimage() {
+    let app_bundle_type = if os == Os::Linux && ctx.env.in_appimage() {
         Some(AppBundleType::Appimage.into())
     } else {
         None

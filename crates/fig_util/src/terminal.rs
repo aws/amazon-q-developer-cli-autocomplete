@@ -224,7 +224,7 @@ impl Terminal {
     ///
     /// Note that "special" pseudoterminals like tmux or ssh will not be returned.
     pub fn parent_terminal(ctx: &Context) -> Option<Self> {
-        let env = ctx.env();
+        let env = ctx.env;
 
         #[cfg(target_os = "macos")]
         {

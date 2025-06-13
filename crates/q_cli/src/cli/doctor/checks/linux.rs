@@ -115,7 +115,7 @@ impl DoctorCheck<LinuxContext> for IBusEnvCheck {
             expected: Cow<'static, str>,
         }
 
-        let env = ctx.env();
+        let env = ctx.env;
         let mut checks = vec![("QT_IM_MODULE", "ibus"), ("XMODIFIERS", "@im=ibus")];
         let mut warnings: Vec<String> = vec![];
         let mut errors: Vec<EnvErr> = vec![];

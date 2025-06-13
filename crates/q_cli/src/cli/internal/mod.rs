@@ -914,14 +914,14 @@ async fn remove_data_dir(ctx: Arc<OsContext>, force: bool) -> Result<ExitCode> {
     }
 
     let data_dir = directories::fig_data_dir_ctx(&ctx)?;
-    match ctx.fs().remove_dir_all(&data_dir).await {
+    match ctx.fs.remove_dir_all(&data_dir).await {
         Ok(_) => (),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => (),
         Err(err) => bail!("Failed to remove data dir: {:?}", err),
     }
 
     let webview_dir = directories::local_webview_data_dir(&ctx)?;
-    match ctx.fs().remove_dir_all(&webview_dir).await {
+    match ctx.fs.remove_dir_all(&webview_dir).await {
         Ok(_) => (),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => (),
         Err(err) => bail!("Failed to remove data dir: {:?}", err),
@@ -990,7 +990,7 @@ mod tests {
         );
 
         // Verify that data dir is created and deleted correctly.
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         let data_dir = directories::fig_data_dir_ctx(&ctx).unwrap();
         fs.create_dir_all(&data_dir).await.unwrap();
         assert!(fs.exists(&data_dir), "data dir exists prior");

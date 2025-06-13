@@ -54,21 +54,21 @@ impl FsRead {
         }
     }
 
-    pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         match self {
-            FsRead::Line(fs_line) => fs_line.queue_description(ctx, updates).await,
-            FsRead::Directory(fs_directory) => fs_directory.queue_description(updates),
-            FsRead::Search(fs_search) => fs_search.queue_description(updates),
-            FsRead::Image(fs_image) => fs_image.queue_description(updates),
+            FsRead::Line(fs_line) => fs_line.queue_description(ctx, output).await,
+            FsRead::Directory(fs_directory) => fs_directory.queue_description(output),
+            FsRead::Search(fs_search) => fs_search.queue_description(output),
+            FsRead::Image(fs_image) => fs_image.queue_description(output),
         }
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            FsRead::Line(fs_line) => fs_line.invoke(ctx, updates).await,
-            FsRead::Directory(fs_directory) => fs_directory.invoke(ctx, updates).await,
-            FsRead::Search(fs_search) => fs_search.invoke(ctx, updates).await,
-            FsRead::Image(fs_image) => fs_image.invoke(ctx, updates).await,
+            FsRead::Line(fs_line) => fs_line.invoke(ctx, output).await,
+            FsRead::Directory(fs_directory) => fs_directory.invoke(ctx, output).await,
+            FsRead::Search(fs_search) => fs_search.invoke(ctx, output).await,
+            FsRead::Image(fs_image) => fs_image.invoke(ctx, output).await,
         }
     }
 }
@@ -88,7 +88,7 @@ impl FsImage {
                 if !is_supported_image_type(&processed_path) {
                     bail!("'{}' is not a supported image type", &processed_path);
                 }
-                let is_file = ctx.fs().symlink_metadata(&processed_path).await?.is_file();
+                let is_file = ctx.fs.symlink_metadata(&processed_path).await?.is_file();
                 if !is_file {
                     bail!("'{}' is not a file", &processed_path);
                 }
@@ -99,17 +99,17 @@ impl FsImage {
         Ok(())
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
         let pre_processed_paths: Vec<String> = self.image_paths.iter().map(|path| pre_process(ctx, path)).collect();
-        let valid_images = handle_images_from_paths(updates, &pre_processed_paths);
+        let valid_images = handle_images_from_paths(output, &pre_processed_paths);
         Ok(InvokeOutput {
             output: OutputKind::Images(valid_images),
         })
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         queue!(
-            updates,
+            output,
             style::Print("Reading images: \n"),
             style::SetForegroundColor(Color::Green),
             style::Print(&self.image_paths.join("\n")),
@@ -136,18 +136,18 @@ impl FsLine {
         if !path.exists() {
             bail!("'{}' does not exist", self.path);
         }
-        let is_file = ctx.fs().symlink_metadata(&path).await?.is_file();
+        let is_file = ctx.fs.symlink_metadata(&path).await?.is_file();
         if !is_file {
             bail!("'{}' is not a file", self.path);
         }
         Ok(())
     }
 
-    pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let line_count = ctx.fs().read_to_string(&path).await?.lines().count();
+        let line_count = ctx.fs.read_to_string(&path).await?.lines().count();
         queue!(
-            updates,
+            output,
             style::Print("Reading file: "),
             style::SetForegroundColor(Color::Green),
             style::Print(&self.path),
@@ -158,9 +158,9 @@ impl FsLine {
         let start = convert_negative_index(line_count, self.start_line()) + 1;
         let end = convert_negative_index(line_count, self.end_line()) + 1;
         match (start, end) {
-            _ if start == 1 && end == line_count => Ok(queue!(updates, style::Print("all lines".to_string()))?),
+            _ if start == 1 && end == line_count => Ok(queue!(output, style::Print("all lines".to_string()))?),
             _ if end == line_count => Ok(queue!(
-                updates,
+                output,
                 style::Print("from line "),
                 style::SetForegroundColor(Color::Green),
                 style::Print(start),
@@ -168,7 +168,7 @@ impl FsLine {
                 style::Print(" to end of file"),
             )?),
             _ => Ok(queue!(
-                updates,
+                output,
                 style::Print("from line "),
                 style::SetForegroundColor(Color::Green),
                 style::Print(start),
@@ -181,10 +181,10 @@ impl FsLine {
         }
     }
 
-    pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
         debug!(?path, "Reading");
-        let file = ctx.fs().read_to_string(&path).await?;
+        let file = ctx.fs.read_to_string(&path).await?;
         let line_count = file.lines().count();
         let (start, end) = (
             convert_negative_index(line_count, self.start_line()),
@@ -248,11 +248,11 @@ impl FsSearch {
 
     pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let relative_path = format_path(ctx.env().current_dir()?, &path);
+        let relative_path = format_path(ctx.env.current_dir()?, &path);
         if !path.exists() {
             bail!("File not found: {}", relative_path);
         }
-        if !ctx.fs().symlink_metadata(path).await?.is_file() {
+        if !ctx.fs.symlink_metadata(path).await?.is_file() {
             bail!("Path is not a file: {}", relative_path);
         }
         if self.pattern.is_empty() {
@@ -261,9 +261,9 @@ impl FsSearch {
         Ok(())
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         queue!(
-            updates,
+            output,
             style::Print("Searching: "),
             style::SetForegroundColor(Color::Green),
             style::Print(&self.path),
@@ -276,12 +276,12 @@ impl FsSearch {
         Ok(())
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
         let file_path = sanitize_path_tool_arg(ctx, &self.path);
         let pattern = &self.pattern;
-        let relative_path = format_path(ctx.env().current_dir()?, &file_path);
+        let relative_path = format_path(ctx.env.current_dir()?, &file_path);
 
-        let file_content = ctx.fs().read_to_string(&file_path).await?;
+        let file_content = ctx.fs.read_to_string(&file_path).await?;
         let lines: Vec<&str> = LinesWithEndings::from(&file_content).collect();
 
         let mut results = Vec::new();
@@ -313,7 +313,7 @@ impl FsSearch {
         }
 
         queue!(
-            updates,
+            output,
             style::SetForegroundColor(Color::Yellow),
             style::ResetColor,
             style::Print(format!(
@@ -346,19 +346,19 @@ impl FsDirectory {
 
     pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let relative_path = format_path(ctx.env().current_dir()?, &path);
+        let relative_path = format_path(ctx.env.current_dir()?, &path);
         if !path.exists() {
             bail!("Directory not found: {}", relative_path);
         }
-        if !ctx.fs().symlink_metadata(path).await?.is_dir() {
+        if !ctx.fs.symlink_metadata(path).await?.is_dir() {
             bail!("Path is not a directory: {}", relative_path);
         }
         Ok(())
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         queue!(
-            updates,
+            output,
             style::Print("Reading directory: "),
             style::SetForegroundColor(Color::Green),
             style::Print(&self.path),
@@ -367,12 +367,12 @@ impl FsDirectory {
         )?;
         let depth = self.depth.unwrap_or_default();
         Ok(queue!(
-            updates,
+            output,
             style::Print(format!("with maximum depth of {}", depth))
         )?)
     }
 
-    pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
         let max_depth = self.depth();
         debug!(?path, max_depth, "Reading directory at path with depth");
@@ -383,7 +383,7 @@ impl FsDirectory {
             if depth > max_depth {
                 break;
             }
-            let mut read_dir = ctx.fs().read_dir(path).await?;
+            let mut read_dir = ctx.fs.read_dir(path).await?;
 
             #[cfg(windows)]
             while let Some(ent) = read_dir.next_entry().await? {
@@ -546,7 +546,7 @@ mod tests {
     /// ```
     async fn setup_test_directory() -> Arc<Context> {
         let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
         fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
         fs.create_dir_all("/aaaa2").await.unwrap();

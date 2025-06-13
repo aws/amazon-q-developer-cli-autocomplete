@@ -80,10 +80,10 @@ pub fn home_dir() -> Result<PathBuf> {
 }
 
 pub fn home_dir_ctx<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    if ctx.env().is_real() {
+    if ctx.env.is_real() {
         home_dir()
     } else {
-        ctx.env()
+        ctx.env
             .get("HOME")
             .map_err(|_err| DirectoryError::NoHomeDirectory)
             .and_then(|h| {
@@ -94,7 +94,7 @@ pub fn home_dir_ctx<Ctx: FsProvider + EnvProvider>(ctx: &Ctx) -> Result<PathBuf>
                 }
             })
             .map(PathBuf::from)
-            .map(|p| ctx.fs().chroot_path(p))
+            .map(|p| ctx.fs.chroot_path(p))
     }
 }
 
@@ -163,7 +163,7 @@ pub fn fig_data_dir_ctx(fs: &impl FsProvider) -> Result<PathBuf> {
 /// - MacOS: `$HOME/Library/Application Support`
 /// - Windows: `%LOCALAPPDATA%`
 pub fn local_data_dir<Ctx: FsProvider + EnvProvider + PlatformProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    let env = ctx.env();
+    let env = ctx.env;
     match ctx.platform().os() {
         Os::Linux => {
             if let Some(path) = env.get_os("XDG_DATA_HOME") {
@@ -417,7 +417,7 @@ pub fn resources_path_ctx<Ctx: EnvProvider + PlatformProvider>(ctx: &Ctx) -> Res
     match os {
         fig_os_shim::Os::Mac => Ok(crate::app_bundle_path().join(crate::macos::BUNDLE_CONTENTS_RESOURCE_PATH)),
         fig_os_shim::Os::Linux => {
-            if ctx.env().in_appimage() {
+            if ctx.env.in_appimage() {
                 Ok(ctx
                     .env()
                     .current_dir()?
@@ -452,7 +452,7 @@ pub fn manifest_path() -> Result<PathBuf> {
 /// resources directory from the AppImage mount, known only by the AppImage itself (ie, the desktop
 /// binary).
 pub fn bundle_metadata_path<Ctx: EnvProvider + PlatformProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    if let Some(path) = ctx.env().get_os(Q_BUNDLE_METADATA_PATH) {
+    if let Some(path) = ctx.env.get_os(Q_BUNDLE_METADATA_PATH) {
         return Ok(path.into());
     }
     Ok(resources_path_ctx(ctx)?.join("bundle-metadata").join("metadata.json"))
@@ -517,17 +517,17 @@ pub fn bundled_gnome_extension_version_path<Ctx: EnvProvider + PlatformProvider>
 ///
 /// Only applicable to the desktop app binary when ran as an AppImage.
 pub fn appimage_desktop_entry_path<Ctx: EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    if !ctx.env().in_appimage() {
+    if !ctx.env.in_appimage() {
         return Err(DirectoryError::NotAppImage);
     }
-    Ok(ctx.env().current_dir()?.join("share/applications/q-desktop.desktop"))
+    Ok(ctx.env.current_dir()?.join("share/applications/q-desktop.desktop"))
 }
 
 /// The path to the icon bundled with the AppImage to be used for the desktop entry file.
 ///
 /// Only applicable to the desktop app binary when ran as an AppImage.
 pub fn appimage_desktop_entry_icon_path<Ctx: EnvProvider>(ctx: &Ctx) -> Result<PathBuf> {
-    if !ctx.env().in_appimage() {
+    if !ctx.env.in_appimage() {
         return Err(DirectoryError::NotAppImage);
     }
     Ok(ctx

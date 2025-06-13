@@ -1,15 +1,15 @@
 use std::ops::Deref;
 
-use super::conversation_state::{
-    BackendConversationState,
-    ConversationSize,
-};
 use super::message::{
     AssistantMessage,
     ToolUseResult,
     ToolUseResultBlock,
     UserMessage,
     UserMessageContent,
+};
+use crate::cli::chat::conversation::{
+    BackendConversationState,
+    ConversationSize,
 };
 
 #[derive(Debug, Clone, Copy)]

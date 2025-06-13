@@ -59,7 +59,7 @@ where
     /// Returns a bool indicating whether or not the extension was uninstalled.
     pub async fn uninstall_manually(&self) -> Result<bool> {
         let extension_path = self.shell_extensions.local_extension_directory().await?;
-        match self.ctx.fs().remove_dir_all(&extension_path).await {
+        match self.ctx.fs.remove_dir_all(&extension_path).await {
             Ok(_) => Ok(true),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(err) => Err(err.into()),

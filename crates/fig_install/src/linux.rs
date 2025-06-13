@@ -209,7 +209,7 @@ async fn update_full_ctx(
     _interactive: bool,
     _relaunch_dashboard: bool,
 ) -> Result<(), Error> {
-    if !ctx.env().in_appimage() {
+    if !ctx.env.in_appimage() {
         return Err(Error::UpdateFailed(
             "Updating is only supported from the AppImage".into(),
         ));
@@ -224,7 +224,7 @@ async fn update_full_ctx(
 
     // Download the updated AppImage to a temporary location.
 
-    let temp_dir = ctx.fs().create_tempdir().await?;
+    let temp_dir = ctx.fs.create_tempdir().await?;
     let file_name = download_url
         .path_segments()
         .and_then(|path| path.last())
@@ -232,7 +232,7 @@ async fn update_full_ctx(
     let download_path = temp_dir.path().join(file_name);
 
     // Security: set the permissions to 700 so that only the user can read and write
-    ctx.fs()
+    ctx.fs
         .set_permissions(temp_dir.path(), std::fs::Permissions::from_mode(0o700))
         .await?;
 
@@ -247,12 +247,12 @@ async fn update_full_ctx(
 
     tx.send(UpdateStatus::Message("Installing update...".into())).await.ok();
 
-    ctx.fs()
+    ctx.fs
         .set_permissions(&download_path, std::fs::Permissions::from_mode(0o755))
         .await?;
 
     debug!(?download_path, ?current_appimage_path, "Replacing the current AppImage");
-    ctx.fs().rename(&download_path, &current_appimage_path).await?;
+    ctx.fs.rename(&download_path, &current_appimage_path).await?;
     debug!("Successfully swapped the AppImage");
 
     tx.send(UpdateStatus::Message("Relaunching...".into())).await.ok();
@@ -261,8 +261,8 @@ async fn update_full_ctx(
 
     let lock_file_path = fig_util::directories::update_lock_path(ctx)?;
     debug!(?lock_file_path, "Removing lock file");
-    if ctx.fs().exists(&lock_file_path) {
-        ctx.fs()
+    if ctx.fs.exists(&lock_file_path) {
+        ctx.fs
             .remove_file(&lock_file_path)
             .await
             .map_err(|err| error!(?err, "Unable to remove the lock file"))
@@ -292,7 +292,7 @@ pub(crate) async fn uninstall_desktop_entries(ctx: &Context) -> Result<(), Error
 }
 
 pub(crate) async fn uninstall_desktop(ctx: &Context) -> Result<(), Error> {
-    let fs = ctx.fs();
+    let fs = ctx.fs;
     let data_dir_path = fig_data_dir_ctx(fs)?;
     if fs.exists(&data_dir_path) {
         fs.remove_dir_all(&data_dir_path)
@@ -371,7 +371,7 @@ mod tests {
             .unwrap()
             .with_os(Os::Linux)
             .build_fake();
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         let data_dir_path = fig_data_dir_ctx(fs).unwrap();
         fs.create_dir_all(&data_dir_path).await.unwrap();
 
@@ -386,13 +386,13 @@ mod tests {
 
         // Given
         let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let current_appimage_path = ctx.fs().chroot_path("/app.appimage");
-        unsafe { ctx.env().set_var("APPIMAGE", &current_appimage_path) };
+        let current_appimage_path = ctx.fs.chroot_path("/app.appimage");
+        unsafe { ctx.env.set_var("APPIMAGE", &current_appimage_path) };
 
         let test_version = "9.9.9"; // update version
         let test_fname = "new.exe"; // file name to be downloaded
         let test_download_path = format!("/{}/{}", test_version, test_fname);
-        let test_script_output_path = ctx.fs().chroot_path("/version");
+        let test_script_output_path = ctx.fs.chroot_path("/version");
         let test_file = format!(
             "#!/usr/bin/env sh\necho -n '{}' > '{}'",
             test_version,
@@ -425,17 +425,17 @@ mod tests {
         // Then
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         assert_eq!(
-            ctx.fs().read_to_string(&current_appimage_path).await.unwrap(),
+            ctx.fs.read_to_string(&current_appimage_path).await.unwrap(),
             test_file,
             "The path to the current app image should have been replaced with the update file"
         );
         assert_eq!(
-            ctx.fs().read_to_string(&test_script_output_path).await.unwrap(),
+            ctx.fs.read_to_string(&test_script_output_path).await.unwrap(),
             test_version,
             "Expected the downloaded file to be executed"
         );
         assert!(
-            !ctx.fs().exists(fig_util::directories::update_lock_path(&ctx).unwrap()),
+            !ctx.fs.exists(fig_util::directories::update_lock_path(&ctx).unwrap()),
             "Lock file should have been deleted"
         );
     }

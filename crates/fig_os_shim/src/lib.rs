@@ -210,8 +210,8 @@ mod tests {
     #[test]
     fn context_builder_returns_real_impls_by_default() {
         let ctx = ContextBuilder::new().build();
-        assert!(ctx.fs().is_real());
-        assert!(ctx.env().is_real());
+        assert!(ctx.fs.is_real());
+        assert!(ctx.env.is_real());
         assert!(ctx.process_info().is_real());
         assert!(ctx.platform().is_real());
         assert!(ctx.sysinfo().is_real());
@@ -225,8 +225,8 @@ mod tests {
             .unwrap()
             .with_env_var("hello", "world")
             .build();
-        assert!(ctx.fs().try_exists("/home/testuser").await.unwrap());
-        assert_eq!(ctx.env().get("HOME").unwrap(), "/home/testuser");
-        assert_eq!(ctx.env().get("hello").unwrap(), "world");
+        assert!(ctx.fs.try_exists("/home/testuser").await.unwrap());
+        assert_eq!(ctx.env.get("HOME").unwrap(), "/home/testuser");
+        assert_eq!(ctx.env.get("hello").unwrap(), "world");
     }
 }

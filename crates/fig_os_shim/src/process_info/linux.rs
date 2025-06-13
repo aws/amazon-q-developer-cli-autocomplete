@@ -17,7 +17,7 @@ pub fn current(ctx: Weak<Context>) -> Pid {
 
 pub fn parent(ctx: Weak<Context>, pid: &RawPid) -> Option<Box<Pid>> {
     if let Some(ctx) = ctx.upgrade() {
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         let raw_pid = fs
             .read_to_string_sync(format!("/proc/{pid}/status"))
             .ok()
@@ -41,7 +41,7 @@ pub fn exe(_: Weak<Context>, pid: &RawPid) -> Option<PathBuf> {
 
 pub fn cmdline(ctx: Weak<Context>, pid: &RawPid) -> Option<String> {
     if let Some(ctx) = ctx.upgrade() {
-        let fs = ctx.fs();
+        let fs = ctx.fs;
         fs.read_to_string_sync(format!("/proc/{pid}/cmdline"))
             .ok()
             .map(|s| s.replace('\0', " "))

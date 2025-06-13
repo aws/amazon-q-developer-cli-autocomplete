@@ -259,7 +259,7 @@ pub async fn bundle_metadata_json<Ctx: FsProvider + EnvProvider + PlatformProvid
         (fig_os_shim::Os::Linux, Variant::Full) => {
             let metadata_path = bundle_metadata_path(ctx)?;
             debug!("Reading metadata at path: {:?}", &metadata_path);
-            Ok(Some(ctx.fs().read_to_string(bundle_metadata_path(ctx)?).await?))
+            Ok(Some(ctx.fs.read_to_string(bundle_metadata_path(ctx)?).await?))
         },
         _ => Ok(None),
     }

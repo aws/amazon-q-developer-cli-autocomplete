@@ -5,7 +5,6 @@ pub mod diagnostics;
 mod env;
 mod fs;
 mod os;
-mod providers;
 mod sysinfo;
 
 use std::sync::Arc;
@@ -16,11 +15,6 @@ pub use os::{
     Os,
     Platform,
 };
-pub use providers::{
-    EnvProvider,
-    FsProvider,
-    SysInfoProvider,
-};
 pub use sysinfo::SysInfo;
 
 /// Struct that contains the interface to every system related IO operation.
@@ -30,49 +24,38 @@ pub use sysinfo::SysInfo;
 /// code paths in unit tests.
 #[derive(Debug, Clone)]
 pub struct Context {
-    fs: Fs,
-    env: Env,
-    sysinfo: SysInfo,
-    platform: Platform,
+    pub fs: Fs,
+    pub env: Env,
+    pub sysinfo: SysInfo,
+    pub platform: Platform,
 }
 
 impl Context {
-    /// Returns a new [Context] with real implementations of each OS shim.
-    pub fn new() -> Arc<Self> {
-        match cfg!(test) {
-            true => Arc::new(Self {
-                fs: Fs::new(),
-                env: Env::new(),
-                sysinfo: SysInfo::new(),
-                platform: Platform::new(),
-            }),
-            false => Arc::new_cyclic(|_| Self {
-                fs: Default::default(),
-                env: Default::default(),
-                sysinfo: SysInfo::default(),
-                platform: Platform::new(),
-            }),
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn builder() -> ContextBuilder {
         ContextBuilder::new()
     }
+}
 
-    pub fn fs(&self) -> &Fs {
-        &self.fs
-    }
-
-    pub fn env(&self) -> &Env {
-        &self.env
-    }
-
-    pub fn sysinfo(&self) -> &SysInfo {
-        &self.sysinfo
-    }
-
-    pub fn platform(&self) -> &Platform {
-        &self.platform
+impl Default for Context {
+    fn default() -> Self {
+        match cfg!(test) {
+            true => Self {
+                fs: Fs::new(),
+                env: Env::new(),
+                sysinfo: SysInfo::new(),
+                platform: Platform::new(),
+            },
+            false => Self {
+                fs: Default::default(),
+                env: Default::default(),
+                sysinfo: SysInfo::default(),
+                platform: Platform::new(),
+            },
+        }
     }
 }
 
@@ -113,17 +96,17 @@ impl ContextBuilder {
     }
 
     /// Builds an immutable [Context] using fake implementations for each field by default.
-    pub fn build_fake(self) -> Arc<Context> {
+    pub fn build_fake(self) -> Context {
         let fs = self.fs.unwrap_or_default();
         let env = self.env.unwrap_or_default();
         let sysinfo = self.sysinfo.unwrap_or_default();
         let platform = self.platform.unwrap_or_default();
-        Arc::new_cyclic(|_| Context {
+        Context {
             fs,
             env,
             sysinfo,
             platform,
-        })
+        }
     }
 
     pub fn with_env(mut self, env: Env) -> Self {
@@ -185,15 +168,15 @@ mod tests {
 
         #[cfg(windows)]
         {
-            assert!(ctx.fs().try_exists(WINDOWS_USER_HOME).await.unwrap());
-            assert_eq!(ctx.env().get("USERPROFILE").unwrap(), WINDOWS_USER_HOME);
+            assert!(ctx.fs.try_exists(WINDOWS_USER_HOME).await.unwrap());
+            assert_eq!(ctx.env.get("USERPROFILE").unwrap(), WINDOWS_USER_HOME);
         }
         #[cfg(not(windows))]
         {
-            assert!(ctx.fs().try_exists(UNIX_USER_HOME).await.unwrap());
-            assert_eq!(ctx.env().get("HOME").unwrap(), UNIX_USER_HOME);
+            assert!(ctx.fs.try_exists(UNIX_USER_HOME).await.unwrap());
+            assert_eq!(ctx.env.get("HOME").unwrap(), UNIX_USER_HOME);
         }
 
-        assert_eq!(ctx.env().get("hello").unwrap(), "world");
+        assert_eq!(ctx.env.get("hello").unwrap(), "world");
     }
 }

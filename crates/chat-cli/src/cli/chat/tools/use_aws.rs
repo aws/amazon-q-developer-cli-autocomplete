@@ -134,37 +134,37 @@ impl UseAws {
         }
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         queue!(
-            updates,
+            output,
             style::Print("Running aws cli command:\n\n"),
             style::Print(format!("Service name: {}\n", self.service_name)),
             style::Print(format!("Operation name: {}\n", self.operation_name)),
         )?;
         if let Some(parameters) = &self.parameters {
-            queue!(updates, style::Print("Parameters: \n".to_string()))?;
+            queue!(output, style::Print("Parameters: \n".to_string()))?;
             for (name, value) in parameters {
                 match value {
                     serde_json::Value::String(s) if s.is_empty() => {
-                        queue!(updates, style::Print(format!("- {}\n", name)))?;
+                        queue!(output, style::Print(format!("- {}\n", name)))?;
                     },
                     _ => {
-                        queue!(updates, style::Print(format!("- {}: {}\n", name, value)))?;
+                        queue!(output, style::Print(format!("- {}: {}\n", name, value)))?;
                     },
                 }
             }
         }
 
         if let Some(ref profile_name) = self.profile_name {
-            queue!(updates, style::Print(format!("Profile name: {}\n", profile_name)))?;
+            queue!(output, style::Print(format!("Profile name: {}\n", profile_name)))?;
         } else {
-            queue!(updates, style::Print("Profile name: default\n".to_string()))?;
+            queue!(output, style::Print("Profile name: default\n".to_string()))?;
         }
 
-        queue!(updates, style::Print(format!("Region: {}", self.region)))?;
+        queue!(output, style::Print(format!("Region: {}", self.region)))?;
 
         if let Some(ref label) = self.label {
-            queue!(updates, style::Print(format!("\nLabel: {}", label)))?;
+            queue!(output, style::Print(format!("\nLabel: {}", label)))?;
         }
         Ok(())
     }
