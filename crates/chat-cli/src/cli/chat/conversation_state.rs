@@ -665,6 +665,57 @@ impl ConversationState {
         }
     }
 
+    /// Replace history with summary using two-phase compaction approach
+    /// This method handles both standard and aggressive compaction internally
+    pub async fn replace_history_with_summary_two_phase(&mut self, summary: String) -> (bool, f64) {
+        // Extract tool results for intermediate representation before any compaction
+        let intermediate_tool_data = if let Some((user, _)) = self.history.back() {
+            if let Some(tool_results) = user.tool_use_results() {
+                let original_prompt = match &user.content {
+                    UserMessageContent::CancelledToolUses { prompt, .. } => prompt.clone(),
+                    _ => None,
+                };
+                Some((tool_results.to_vec(), original_prompt))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Apply standard compaction first (existing behavior)
+        self.replace_history_with_summary(summary);
+
+        // Check if we need aggressive compaction
+        let total_request_size = self.calculate_total_request_size().await;
+        let context_window_limit = 200_000; // 200k tokens
+        let usage_percentage = (*total_request_size.total_chars() as f64 / context_window_limit as f64) * 100.0;
+
+        if usage_percentage > 95.0 {
+            // Apply aggressive compaction using intermediate representation
+            if let Some((_tool_results, original_prompt)) = intermediate_tool_data {
+                if let Some((user, _)) = self.history.back_mut() {
+                    // Remove tool results entirely and restore original prompt if it exists
+                    if let Some(prompt) = original_prompt {
+                        user.content = UserMessageContent::Prompt { prompt };
+                    } else {
+                        user.content = UserMessageContent::Prompt {
+                            prompt: "Tool execution completed.".to_string(),
+                        };
+                    }
+                }
+            }
+
+            // Recalculate size after aggressive compaction
+            let final_size = self.calculate_total_request_size().await;
+            let final_percentage = (*final_size.total_chars() as f64 / context_window_limit as f64) * 100.0;
+
+            (true, final_percentage) // aggressive compaction applied
+        } else {
+            (false, usage_percentage) // standard compaction sufficient
+        }
+    }
+
     /// Returns pairs of user and assistant messages to include as context in the message history
     /// including both summaries and context files if available, and the dropped context files.
     ///
@@ -742,6 +793,40 @@ impl ConversationState {
             TokenWarningLevel::Critical
         } else {
             TokenWarningLevel::None
+        }
+    }
+
+    /// This provides a more accurate estimate of the actual API request size
+    pub async fn calculate_total_request_size(&mut self) -> TotalRequestSize {
+        // Get the current backend state to ensure we have up-to-date context
+        let backend_state = self.backend_conversation_state(false, true).await;
+        let conversation_size = backend_state.calculate_conversation_size();
+
+        // Estimate tools size (name + description + schema for each tool)
+        let tools_chars = self
+            .tools
+            .values()
+            .map(|tools| {
+                tools
+                    .iter()
+                    .map(|tool| match tool {
+                        Tool::ToolSpecification(spec) => {
+                            spec.name.len()
+                                + spec.description.len()
+                                + serde_json::to_string(&spec.input_schema).unwrap_or_default().len()
+                        },
+                    })
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+
+        // Calculate current user message size if present
+        let current_message_chars = self.next_message.as_ref().map_or(0, |msg| *msg.char_count());
+
+        TotalRequestSize {
+            conversation_size,
+            tools_chars: tools_chars.into(),
+            current_message_chars: current_message_chars.into(),
         }
     }
 
@@ -904,6 +989,25 @@ pub struct ConversationSize {
     pub context_messages: CharCount,
     pub user_messages: CharCount,
     pub assistant_messages: CharCount,
+}
+
+/// Reflects the total size of an API request including all components
+#[derive(Debug, Clone, Copy)]
+pub struct TotalRequestSize {
+    pub conversation_size: ConversationSize,
+    pub tools_chars: CharCount,
+    pub current_message_chars: CharCount,
+}
+
+impl TotalRequestSize {
+    /// Get the total character count across all components
+    pub fn total_chars(&self) -> CharCount {
+        self.conversation_size.context_messages
+            + self.conversation_size.user_messages
+            + self.conversation_size.assistant_messages
+            + self.tools_chars
+            + self.current_message_chars
+    }
 }
 
 /// Converts a list of user/assistant message pairs into a flattened list of ChatMessage.

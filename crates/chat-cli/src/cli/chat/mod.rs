@@ -1375,14 +1375,46 @@ impl ChatContext {
         self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
             .await;
 
-        self.conversation_state.replace_history_with_summary(summary.clone());
+        // Apply two-phase compaction (standard first, then aggressive if needed)
+        let (aggressive_applied, final_percentage) = self
+            .conversation_state
+            .replace_history_with_summary_two_phase(summary.clone())
+            .await;
+
+        // Determine appropriate user message based on compaction results
+        let compaction_message = if aggressive_applied {
+            if final_percentage > 95.0 {
+                "⚠ Conversation compacted but still large \n\
+            Consider using /clear to reset if you continue to experience issues"
+                    .to_string()
+            } else {
+                "✔ Conversation history has been aggressively compacted successfully!".to_string()
+            }
+        } else {
+            "✔ Conversation history has been compacted successfully!".to_string()
+        };
+
+        // Show intermediate message if aggressive compaction was applied
+        if aggressive_applied && self.interactive {
+            execute!(
+                self.output,
+                style::SetForegroundColor(Color::Yellow),
+                style::Print("Standard compaction insufficient, applying aggressive compaction...\n"),
+                style::SetForegroundColor(Color::Reset)
+            )?;
+        }
 
         // Print output to the user.
         {
+            let color = if final_percentage > 95.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
             execute!(
                 self.output,
-                style::SetForegroundColor(Color::Green),
-                style::Print("✔ Conversation history has been compacted successfully!\n\n"),
+                style::SetForegroundColor(color),
+                style::Print(&format!("{}\n\n", compaction_message)),
                 style::SetForegroundColor(Color::DarkGrey)
             )?;
 
@@ -2987,13 +3019,15 @@ impl ChatContext {
                     )?;
                 }
 
-                let data = state.calculate_conversation_size();
+                // Use the enhanced total request size calculation
+                let total_request_size = self.conversation_state.calculate_total_request_size().await;
+                let data = total_request_size.conversation_size;
 
                 let context_token_count: TokenCount = data.context_messages.into();
+                let tools_token_count: TokenCount = total_request_size.tools_chars.into();
                 let assistant_token_count: TokenCount = data.assistant_messages.into();
                 let user_token_count: TokenCount = data.user_messages.into();
-                let total_token_used: TokenCount =
-                    (data.context_messages + data.user_messages + data.assistant_messages).into();
+                let total_token_used: TokenCount = total_request_size.total_chars().into();
 
                 let window_width = self.terminal_width();
                 // set a max width for the progress bar for better aesthetic
@@ -3005,11 +3039,13 @@ impl ChatContext {
                     * progress_bar_width as f64) as usize;
                 let user_width = ((user_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
                     * progress_bar_width as f64) as usize;
+                let tools_width = ((tools_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
+                    * progress_bar_width as f64) as usize;
 
-                let left_over_width = progress_bar_width
-                    - std::cmp::min(context_width + assistant_width + user_width, progress_bar_width);
+                let total_component_width = context_width + assistant_width + user_width + tools_width;
+                let left_over_width = progress_bar_width - std::cmp::min(total_component_width, progress_bar_width);
 
-                let is_overflow = (context_width + assistant_width + user_width) > progress_bar_width;
+                let is_overflow = total_component_width > progress_bar_width;
 
                 if is_overflow {
                     queue!(
@@ -3045,6 +3081,13 @@ impl ChatContext {
                             0
                         })),
                         style::Print("█".repeat(context_width)),
+                        style::SetForegroundColor(Color::Yellow),
+                        style::Print("|".repeat(if tools_width == 0 && *tools_token_count > 0 {
+                            1
+                        } else {
+                            0
+                        })),
+                        style::Print("█".repeat(tools_width)),
                         style::SetForegroundColor(Color::Blue),
                         style::Print("|".repeat(if assistant_width == 0 && *assistant_token_count > 0 {
                             1
@@ -3078,6 +3121,14 @@ impl ChatContext {
                         "~{} tokens ({:.2}%)\n",
                         context_token_count,
                         (context_token_count.value() as f32 / CONTEXT_WINDOW_SIZE as f32) * 100.0
+                    )),
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print("█ Tool data: "),
+                    style::SetForegroundColor(Color::Reset),
+                    style::Print(format!(
+                        "    ~{} tokens ({:.2}%)\n",
+                        tools_token_count,
+                        (tools_token_count.value() as f32 / CONTEXT_WINDOW_SIZE as f32) * 100.0
                     )),
                     style::SetForegroundColor(Color::Blue),
                     style::Print("█ Q responses: "),
