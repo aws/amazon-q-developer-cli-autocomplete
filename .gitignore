@@ -49,3 +49,6 @@ book/
 .env*
 
 run-build.sh
+
+# Amazon Q MCP configuration used for testing
+crates/chat-cli/.amazonq/mcp.json

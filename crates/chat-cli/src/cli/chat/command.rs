@@ -36,6 +36,7 @@ pub enum Command {
     Context {
         subcommand: ContextSubcommand,
     },
+    #[cfg(not(windows))]
     PromptEditor {
         initial_text: Option<String>,
     },
@@ -488,6 +489,7 @@ impl Command {
                         subcommand: Some(ToolsSubcommand::TrustAll),
                     }
                 },
+                #[cfg(not(windows))]
                 "editor" => {
                     if parts.len() > 1 {
                         Self::PromptEditor {
