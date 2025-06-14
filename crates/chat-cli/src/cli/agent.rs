@@ -152,6 +152,10 @@ impl AgentCollection {
     }
 
     pub fn switch(&mut self, name: &str) -> eyre::Result<&Agent> {
+        if !self.agents.contains_key(name) {
+            eyre::bail!("No agent with name {name} found");
+        }
+        self.active_idx = name.to_string();
         self.agents
             .get(name)
             .ok_or(eyre::eyre!("No agent with name {name} found"))
@@ -203,19 +207,20 @@ impl AgentCollection {
 
     /// Migrated from [create_profile] from context.rs, which was creating profiles under the
     /// global directory. We shall preserve this implicit behavior for now until further notice.
-    pub async fn create_persona(&self, ctx: &Context, name: &str) -> eyre::Result<()> {
+    pub async fn create_persona(&mut self, ctx: &Context, name: &str) -> eyre::Result<()> {
         validate_persona_name(name)?;
 
         let persona_path = directories::chat_global_persona_path(ctx)?.join(format!("{name}.json"));
         if persona_path.exists() {
-            return Err(eyre::eyre!("Profile '{}' already exists", name));
+            return Err(eyre::eyre!("Persona '{}' already exists", name));
         }
 
-        let config = Agent {
-            path: persona_path.parent().map(PathBuf::from),
+        let agent = Agent {
+            name: name.to_string(),
+            path: Some(persona_path.clone()),
             ..Default::default()
         };
-        let contents = serde_json::to_string_pretty(&config)
+        let contents = serde_json::to_string_pretty(&agent)
             .map_err(|e| eyre::eyre!("Failed to serialize profile configuration: {}", e))?;
 
         if let Some(parent) = persona_path.parent() {
@@ -223,10 +228,12 @@ impl AgentCollection {
         }
         ctx.fs().write(&persona_path, contents).await?;
 
+        self.agents.insert(name.to_string(), agent);
+
         Ok(())
     }
 
-    pub async fn delete_persona(&self, ctx: &Context, name: &str) -> eyre::Result<()> {
+    pub async fn delete_persona(&mut self, ctx: &Context, name: &str) -> eyre::Result<()> {
         if name == self.active_idx.as_str() {
             eyre::bail!("Cannot delete the active persona. Switch to another persona first");
         }
@@ -237,10 +244,12 @@ impl AgentCollection {
             .ok_or(eyre::eyre!("Persona '{name}' does not exist"))?;
         match to_delete.path.as_ref() {
             Some(path) if path.exists() => {
-                ctx.fs().remove_dir_all(path).await?;
+                ctx.fs().remove_file(path).await?;
             },
             _ => eyre::bail!("Persona {name} does not have an associated path"),
         }
+
+        self.agents.remove(name);
 
         Ok(())
     }
@@ -301,8 +310,13 @@ impl AgentCollection {
 
         // Ensure that we always have a default persona under the global directory
         if !local_agents.iter().any(|a| a.name == "default") {
-            let mut default_agent = Agent::default();
-            default_agent.path = directories::chat_global_persona_path(ctx).ok();
+            let default_agent = Agent {
+                path: directories::chat_global_persona_path(ctx)
+                    .ok()
+                    .map(|p| p.join("default.json")),
+                ..Default::default()
+            };
+
             match serde_json::to_string_pretty(&default_agent) {
                 Ok(content) => {
                     if let Ok(path) = directories::chat_global_persona_path(ctx) {
@@ -407,6 +421,7 @@ pub trait AgentSubscriber {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::chat::util::shared_writer::SharedWriter;
 
     const INPUT: &str = r#"
             {
@@ -448,4 +463,260 @@ mod tests {
         assert!(agent.mcp_servers.mcp_servers.contains_key("fetch"));
         assert!(agent.mcp_servers.mcp_servers.contains_key("git"));
     }
+
+    #[test]
+    fn test_get_active() {
+        let mut collection = AgentCollection::default();
+        assert!(collection.get_active().is_none());
+
+        let agent = Agent::default();
+        collection.agents.insert("default".to_string(), agent);
+        collection.active_idx = "default".to_string();
+
+        assert!(collection.get_active().is_some());
+        assert_eq!(collection.get_active().unwrap().name, "default");
+    }
+
+    #[test]
+    fn test_get_active_mut() {
+        let mut collection = AgentCollection::default();
+        assert!(collection.get_active_mut().is_none());
+
+        let agent = Agent::default();
+        collection.agents.insert("default".to_string(), agent);
+        collection.active_idx = "default".to_string();
+
+        assert!(collection.get_active_mut().is_some());
+        let active = collection.get_active_mut().unwrap();
+        active.description = Some("Modified description".to_string());
+
+        assert_eq!(
+            collection.agents.get("default").unwrap().description,
+            Some("Modified description".to_string())
+        );
+    }
+
+    #[test]
+    fn test_switch() {
+        let mut collection = AgentCollection::default();
+
+        let default_agent = Agent::default();
+        let dev_agent = Agent {
+            name: "dev".to_string(),
+            description: Some("Developer agent".to_string()),
+            ..Default::default()
+        };
+
+        collection.agents.insert("default".to_string(), default_agent);
+        collection.agents.insert("dev".to_string(), dev_agent);
+        collection.active_idx = "default".to_string();
+
+        // Test successful switch
+        let result = collection.switch("dev");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().name, "dev");
+
+        // Test switch to non-existent agent
+        let result = collection.switch("nonexistent");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "No agent with name nonexistent found");
+    }
+
+    #[tokio::test]
+    async fn test_list_personas() {
+        let mut collection = AgentCollection::default();
+
+        // Add two agents
+        let default_agent = Agent::default();
+        let dev_agent = Agent {
+            name: "dev".to_string(),
+            description: Some("Developer agent".to_string()),
+            ..Default::default()
+        };
+
+        collection.agents.insert("default".to_string(), default_agent);
+        collection.agents.insert("dev".to_string(), dev_agent);
+
+        let result = collection.list_personas();
+        assert!(result.is_ok());
+
+        let personas = result.unwrap();
+        assert_eq!(personas.len(), 2);
+        assert!(personas.contains(&"default".to_string()));
+        assert!(personas.contains(&"dev".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_save_persona() {
+        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut output = SharedWriter::null();
+        let mut collection = AgentCollection::load(&ctx, None, &mut output).await;
+
+        struct ToolManager;
+        struct ContextManager;
+
+        #[async_trait::async_trait]
+        impl AgentSubscriber for ToolManager {
+            async fn receive(&self, _agent: Agent) {}
+
+            async fn upload(&self, agent: &mut Agent) {
+                // This is because default tools has "*" in the list to include all
+                agent.tools.clear();
+                agent.tools.push("tool".to_string());
+            }
+        }
+
+        #[async_trait::async_trait]
+        impl AgentSubscriber for ContextManager {
+            async fn receive(&self, _agent: Agent) {}
+
+            async fn upload(&self, agent: &mut Agent) {
+                agent.prompt_hooks = serde_json::to_value(vec!["prompt"]).expect("Failed to convert vector to value");
+            }
+        }
+
+        let tm = ToolManager;
+        let cm = ContextManager;
+
+        let result = collection.save_persona(&ctx, vec![&tm, &cm]).await;
+        assert!(result.is_ok());
+
+        let active = collection.get_active().expect("Active agent should exist");
+        assert_eq!(active.tools.len(), 1);
+        assert_eq!(active.tools[0], "tool");
+
+        let mut empty_collection = AgentCollection::default();
+        let result = empty_collection.save_persona(&ctx, vec![&tm, &cm]).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "No active persona selected");
+    }
+
+    #[tokio::test]
+    async fn test_create_persona() {
+        let mut collection = AgentCollection::default();
+        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+
+        let persona_name = "test_persona";
+        let result = collection.create_persona(&ctx, persona_name).await;
+        assert!(result.is_ok());
+        let persona_path = directories::chat_global_persona_path(&ctx)
+            .expect("Error obtaining global persona path")
+            .join(format!("{persona_name}.json"));
+        assert!(persona_path.exists());
+        assert!(collection.agents.contains_key(persona_name));
+
+        // Test with creating a persona with the same name
+        let result = collection.create_persona(&ctx, persona_name).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            format!("Persona '{persona_name}' already exists")
+        );
+
+        // Test invalid persona names
+        let result = collection.create_persona(&ctx, "").await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Persona name cannot be empty");
+
+        let result = collection.create_persona(&ctx, "123-invalid!").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_delete_persona() {
+        let mut collection = AgentCollection::default();
+        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+
+        let persona_name_one = "test_persona_one";
+        collection
+            .create_persona(&ctx, persona_name_one)
+            .await
+            .expect("Failed to create persona");
+        let persona_name_two = "test_persona_two";
+        collection
+            .create_persona(&ctx, persona_name_two)
+            .await
+            .expect("Failed to create persona");
+
+        collection.switch(persona_name_one).expect("Failed to switch persona");
+
+        // Should not be able to delete active persona
+        let active = collection
+            .get_active()
+            .expect("Failed to obtain active persona")
+            .name
+            .clone();
+        let result = collection.delete_persona(&ctx, &active).await;
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Cannot delete the active persona. Switch to another persona first"
+        );
+
+        // Should be able to delete inactive persona
+        let persona_two_path = collection
+            .agents
+            .get(persona_name_two)
+            .expect("Failed to obtain persona that's yet to be deleted")
+            .path
+            .clone()
+            .expect("Persona should have path");
+        let result = collection.delete_persona(&ctx, persona_name_two).await;
+        assert!(result.is_ok());
+        assert!(!collection.agents.contains_key(persona_name_two));
+        assert!(!persona_two_path.exists());
+
+        let result = collection.delete_persona(&ctx, "nonexistent").await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Persona 'nonexistent' does not exist");
+    }
+
+    #[test]
+    fn test_validate_persona_name() {
+        // Valid names
+        assert!(validate_persona_name("valid").is_ok());
+        assert!(validate_persona_name("valid123").is_ok());
+        assert!(validate_persona_name("valid-name").is_ok());
+        assert!(validate_persona_name("valid_name").is_ok());
+        assert!(validate_persona_name("123valid").is_ok());
+
+        // Invalid names
+        assert!(validate_persona_name("").is_err());
+        assert!(validate_persona_name("-invalid").is_err());
+        assert!(validate_persona_name("_invalid").is_err());
+        assert!(validate_persona_name("invalid!").is_err());
+        assert!(validate_persona_name("invalid space").is_err());
+    }
+
+    // #[test]
+    // fn test_agent_eval_perm() {
+    //     // Test with wildcard permission
+    //     let agent = Agent::default(); // Default has "*" in allowed_tools
+    //     let candidate = TestPermissionCandidate {
+    //         tool_name: "any_tool".to_string(),
+    //     };
+    //     assert!(matches!(agent.eval_perm(&candidate), PermissionEvalResult::Allow));
+
+    //     // Test with specific permissions
+    //     let mut agent = Agent::default();
+    //     agent.allowed_tools = {
+    //         let mut set = HashSet::new();
+    //         set.insert("fs_read".to_string());
+    //         set.insert("fs_write".to_string());
+    //         set
+    //     };
+
+    //     let allowed_candidate = TestPermissionCandidate {
+    //         tool_name: "fs_read".to_string(),
+    //     };
+    //     assert!(matches!(
+    //         agent.eval_perm(&allowed_candidate),
+    //         PermissionEvalResult::Allow
+    //     ));
+
+    //     let denied_candidate = TestPermissionCandidate {
+    //         tool_name: "execute_bash".to_string(),
+    //     };
+    //     assert!(matches!(agent.eval_perm(&denied_candidate), PermissionEvalResult::Deny));
+    // }
 }
