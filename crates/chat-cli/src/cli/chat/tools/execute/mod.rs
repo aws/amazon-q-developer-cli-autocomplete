@@ -14,10 +14,6 @@ use crate::cli::chat::tools::{
     OutputKind,
 };
 use crate::cli::chat::util::truncate_safe;
-use crate::cli::chat::{
-    CONTINUATION_LINE,
-    PURPOSE_ARROW,
-};
 use crate::platform::Context;
 
 // Platform-specific modules
@@ -130,18 +126,8 @@ impl ExecuteCommand {
         )?;
 
         // Add the summary if available
-        if let Some(summary) = &self.summary {
-            queue!(
-                updates,
-                style::Print(CONTINUATION_LINE),
-                style::Print("\n"),
-                style::Print(PURPOSE_ARROW),
-                style::SetForegroundColor(Color::Blue),
-                style::Print("Purpose: "),
-                style::ResetColor,
-                style::Print(summary),
-                style::Print("\n"),
-            )?;
+        if let Some(ref summary) = self.summary {
+            super::display_purpose(Some(summary), updates)?;
         }
 
         queue!(updates, style::Print("\n"))?;

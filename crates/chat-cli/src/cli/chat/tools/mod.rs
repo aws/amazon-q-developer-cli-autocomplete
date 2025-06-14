@@ -13,7 +13,12 @@ use std::path::{
     PathBuf,
 };
 
-use crossterm::style::Stylize;
+use crossterm::queue;
+use crossterm::style::{
+    self,
+    Color,
+    Stylize,
+};
 use custom_tool::CustomTool;
 use execute::ExecuteCommand;
 use eyre::Result;
@@ -373,6 +378,44 @@ fn supports_truecolor(ctx: &Context) -> bool {
     // Simple override to disable truecolor since shell_color doesn't use Context.
     !ctx.env().get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
         && shell_color::get_color_support().contains(shell_color::ColorSupport::TERM24BIT)
+}
+
+/// Helper function to display a summary if available
+/// This is used by multiple tools to provide consistent formatting of summaries
+pub fn display_summary(summary: Option<&String>, updates: &mut impl Write) -> Result<()> {
+    if let Some(summary) = summary {
+        queue!(
+            updates,
+            style::Print(super::CONTINUATION_LINE),
+            style::Print("\n"),
+            style::Print(super::PURPOSE_ARROW),
+            style::SetForegroundColor(Color::Blue),
+            style::Print("Summary of Change: "),
+            style::ResetColor,
+            style::Print(summary),
+            style::Print("\n"),
+        )?;
+    }
+    Ok(())
+}
+
+/// Helper function to display a purpose if available (for execute commands)
+/// Similar to display_summary but with a different label
+pub fn display_purpose(purpose: Option<&String>, updates: &mut impl Write) -> Result<()> {
+    if let Some(purpose) = purpose {
+        queue!(
+            updates,
+            style::Print(super::CONTINUATION_LINE),
+            style::Print("\n"),
+            style::Print(super::PURPOSE_ARROW),
+            style::SetForegroundColor(Color::Blue),
+            style::Print("Purpose: "),
+            style::ResetColor,
+            style::Print(purpose),
+            style::Print("\n"),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
