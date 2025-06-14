@@ -323,7 +323,7 @@ async fn get_mcp_server_configs(
             match McpServerConfig::load_from_file(ctx, &path).await {
                 Ok(cfg) => Some(cfg),
                 Err(e) => {
-                    warn!(?path, error = %e, "Invalid MCP config file—ignored, treated as null");
+                    warn!(?path, error = %e, "Invalid MCP configuration file—ignored, treated as null");
                     None
                 },
             }

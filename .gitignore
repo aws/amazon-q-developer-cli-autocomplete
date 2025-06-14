@@ -49,3 +49,5 @@ book/
 .env*
 
 run-build.sh
+# Ignore Amazon Q CLI context directory
+crates/chat-cli/.amazonq/
