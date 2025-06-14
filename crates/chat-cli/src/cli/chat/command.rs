@@ -16,6 +16,8 @@ use serde::{
     Serialize,
 };
 
+use super::knowledge::KnowledgeSubcommand;
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Ask {
@@ -35,6 +37,9 @@ pub enum Command {
     },
     Context {
         subcommand: ContextSubcommand,
+    },
+    Knowledge {
+        subcommand: KnowledgeSubcommand,
     },
     PromptEditor {
         initial_text: Option<String>,
@@ -451,6 +456,68 @@ impl Command {
             return Ok(match parts[0].to_lowercase().as_str() {
                 "clear" => Self::Clear,
                 "help" => Self::Help,
+                "knowledge" => {
+                    // Parse knowledge subcommand manually since we can't use clap parsing here
+                    if parts.len() < 2 {
+                        Self::Knowledge {
+                            subcommand: KnowledgeSubcommand::Help,
+                        }
+                    } else {
+                        match parts[1].to_lowercase().as_str() {
+                            "show" => Self::Knowledge {
+                                subcommand: KnowledgeSubcommand::Show,
+                            },
+                            "add" => {
+                                if parts.len() < 3 {
+                                    return Err("Missing path argument for /knowledge add".to_string());
+                                }
+                                let path = parts[2..].join(" ");
+                                Self::Knowledge {
+                                    subcommand: KnowledgeSubcommand::Add { path },
+                                }
+                            },
+                            "update" => {
+                                if parts.len() < 3 {
+                                    return Err("Missing path argument for /knowledge update".to_string());
+                                }
+                                let path = parts[2..].join(" ");
+                                Self::Knowledge {
+                                    subcommand: KnowledgeSubcommand::Update { path },
+                                }
+                            },
+                            "rm" | "remove" => {
+                                if parts.len() < 3 {
+                                    return Err("Missing path argument for /knowledge rm".to_string());
+                                }
+                                let path = parts[2..].join(" ");
+                                Self::Knowledge {
+                                    subcommand: KnowledgeSubcommand::Remove { path },
+                                }
+                            },
+                            "clear" => Self::Knowledge {
+                                subcommand: KnowledgeSubcommand::Clear,
+                            },
+                            "status" => Self::Knowledge {
+                                subcommand: KnowledgeSubcommand::Status,
+                            },
+                            "cancel" => {
+                                if parts.len() < 3 {
+                                    return Err("Missing operation_id argument for /knowledge cancel".to_string());
+                                }
+                                let operation_id = parts[2].to_string();
+                                Self::Knowledge {
+                                    subcommand: KnowledgeSubcommand::Cancel { operation_id },
+                                }
+                            },
+                            "help" => Self::Knowledge {
+                                subcommand: KnowledgeSubcommand::Help,
+                            },
+                            other => {
+                                return Err(format!("Unknown knowledge subcommand: {}", other));
+                            },
+                        }
+                    }
+                },
                 "compact" => {
                     let mut prompt = None;
                     let show_summary = true;

@@ -31,7 +31,7 @@ pub use error::{
 pub use types::{
     DataPoint,
     FileType,
-    MemoryContext,
+    KnowledgeContext,
     ProgressStatus,
     SearchResult,
 };
