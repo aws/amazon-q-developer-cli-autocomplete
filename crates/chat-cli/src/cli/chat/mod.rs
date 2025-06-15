@@ -3517,6 +3517,15 @@ impl ChatContext {
                         OutputKind::Images(ref image) => {
                             image_blocks.extend(image.clone());
                         },
+                        OutputKind::ExecuteCommand(ref command_string) => {
+                            debug!("Output is ExecuteCommand: {:?}", command_string);
+                            // Delegate all commands to existing HandleInput logic
+                            return Ok(ChatState::HandleInput {
+                                input: command_string.clone(),
+                                tool_uses: None,
+                                pending_tool_index: None,
+                            });
+                        },
                     }
 
                     debug!("tool result output: {:#?}", result);

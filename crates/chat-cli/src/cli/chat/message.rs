@@ -255,6 +255,7 @@ impl From<InvokeOutput> for ToolUseResultBlock {
             OutputKind::Text(text) => Self::Text(text),
             OutputKind::Json(value) => Self::Json(value),
             OutputKind::Images(_) => Self::Text("See images data supplied".to_string()),
+            OutputKind::ExecuteCommand(command_string) => Self::Text(format!("Executed command: {}", command_string)),
         }
     }
 }

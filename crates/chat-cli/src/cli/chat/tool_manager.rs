@@ -80,6 +80,7 @@ use crate::cli::chat::tools::execute::ExecuteCommand;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
 use crate::cli::chat::tools::gh_issue::GhIssue;
+use crate::cli::chat::tools::internal_command::InternalCommand;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
 use crate::cli::chat::tools::{
@@ -810,6 +811,12 @@ impl ToolManager {
                 tool_specs.remove("thinking");
             }
 
+            // Add internal_command tool dynamically
+            tool_specs.insert(
+                "internal_command".to_string(),
+                crate::cli::chat::tools::internal_command::get_tool_spec(),
+            );
+
             #[cfg(windows)]
             {
                 use serde_json::json;
@@ -954,6 +961,9 @@ impl ToolManager {
             "use_aws" => Tool::UseAws(serde_json::from_value::<UseAws>(value.args).map_err(map_err)?),
             "report_issue" => Tool::GhIssue(serde_json::from_value::<GhIssue>(value.args).map_err(map_err)?),
             "thinking" => Tool::Thinking(serde_json::from_value::<Thinking>(value.args).map_err(map_err)?),
+            "internal_command" => {
+                Tool::InternalCommand(serde_json::from_value::<InternalCommand>(value.args).map_err(map_err)?)
+            },
             // Note that this name is namespaced with server_name{DELIMITER}tool_name
             name => {
                 // Note: tn_map also has tools that underwent no transformation. In otherwords, if
