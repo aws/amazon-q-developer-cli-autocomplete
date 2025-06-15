@@ -58,7 +58,7 @@ pub struct AsyncSemanticSearchClient {
     /// Background job processor
     job_tx: mpsc::UnboundedSender<IndexingJob>,
     /// Active operations tracking
-    pub active_operations: Arc<Mutex<HashMap<Uuid, OperationHandle>>>,
+    pub active_operations: Arc<RwLock<HashMap<Uuid, OperationHandle>>>,
 }
 
 /// Handle for tracking active operations
@@ -75,11 +75,19 @@ pub struct OperationHandle {
 /// Type of operation being performed
 #[derive(Debug, Clone)]
 pub enum OperationType {
-    Indexing { name: String, path: String },
+    /// Indexing operation with name and path
+    Indexing {
+        /// Display name for the operation
+        name: String,
+        /// Path being indexed
+        path: String,
+    },
+    /// Clearing all contexts
     Clearing,
 }
 
 impl OperationType {
+    /// Get display name for the operation
     pub fn display_name(&self) -> String {
         match self {
             OperationType::Indexing { name, .. } => format!("Indexing '{}'", name),
@@ -88,12 +96,59 @@ impl OperationType {
     }
 }
 
+/// Status information for a single operation (data contract for UI)
+#[derive(Debug, Clone)]
+pub struct OperationStatus {
+    /// Full operation ID
+    pub id: String,
+    /// Short operation ID (first 8 characters)
+    pub short_id: String,
+    /// Type of operation being performed
+    pub operation_type: OperationType,
+    /// When the operation started
+    pub started_at: SystemTime,
+    /// Current progress count
+    pub current: u64,
+    /// Total items to process
+    pub total: u64,
+    /// Current status message
+    pub message: String,
+    /// Whether the operation was cancelled
+    pub is_cancelled: bool,
+    /// Whether the operation failed
+    pub is_failed: bool,
+    /// Whether the operation is waiting
+    pub is_waiting: bool,
+    /// Estimated time to completion
+    pub eta: Option<std::time::Duration>,
+}
+
+/// Overall status information (data contract for UI)
+#[derive(Debug, Clone)]
+pub struct SystemStatus {
+    /// Total number of contexts
+    pub total_contexts: usize,
+    /// Number of persistent contexts
+    pub persistent_contexts: usize,
+    /// Number of volatile contexts
+    pub volatile_contexts: usize,
+    /// List of current operations
+    pub operations: Vec<OperationStatus>,
+    /// Number of active operations
+    pub active_count: usize,
+    /// Number of waiting operations
+    pub waiting_count: usize,
+    /// Maximum concurrent operations allowed
+    pub max_concurrent: usize,
+}
+
 /// Progress information for operations
 #[derive(Debug, Clone)]
 pub struct ProgressInfo {
     pub current: u64,
     pub total: u64,
     pub message: String,
+    pub progress_started_at: Option<SystemTime>,
 }
 
 impl ProgressInfo {
@@ -102,13 +157,81 @@ impl ProgressInfo {
             current: 0,
             total: 0,
             message: "Initializing...".to_string(),
+            progress_started_at: None,
         }
     }
 
     pub fn update(&mut self, current: u64, total: u64, message: String) {
+        // Start tracking progress time when we first get meaningful progress
+        if self.progress_started_at.is_none() && current > 0 && total > 0 {
+            self.progress_started_at = Some(SystemTime::now());
+        }
+
         self.current = current;
         self.total = total;
         self.message = message;
+    }
+
+    /// Calculate ETA based on current progress rate
+    pub fn calculate_eta(&self) -> Option<std::time::Duration> {
+        if let Some(started_at) = self.progress_started_at {
+            if self.current > 0 && self.total > self.current {
+                if let Ok(elapsed) = started_at.elapsed() {
+                    let progress_rate = self.current as f64 / elapsed.as_secs_f64();
+                    if progress_rate > 0.0 {
+                        let remaining_items = self.total - self.current;
+                        let eta_seconds = remaining_items as f64 / progress_rate;
+                        return Some(std::time::Duration::from_secs_f64(eta_seconds));
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use std::thread;
+
+    use super::*;
+
+    #[test]
+    fn test_eta_calculation() {
+        let mut progress = ProgressInfo::new();
+
+        // No ETA initially
+        assert!(progress.calculate_eta().is_none());
+
+        // Set initial progress
+        progress.update(0, 100, "Starting".to_string());
+        assert!(progress.calculate_eta().is_none());
+
+        // Simulate some progress after a small delay
+        thread::sleep(std::time::Duration::from_millis(10));
+        progress.update(25, 100, "25% complete".to_string());
+
+        // Should have an ETA now
+        let eta = progress.calculate_eta();
+        assert!(eta.is_some());
+
+        // ETA should be reasonable (not zero, not too large)
+        if let Some(eta_duration) = eta {
+            assert!(eta_duration.as_secs() < 3600); // Less than an hour
+        }
+    }
+
+    #[test]
+    fn test_eta_edge_cases() {
+        let mut progress = ProgressInfo::new();
+
+        // Complete progress should have no ETA
+        progress.update(100, 100, "Complete".to_string());
+        assert!(progress.calculate_eta().is_none());
+
+        // Zero total should have no ETA
+        progress.update(50, 0, "Invalid".to_string());
+        assert!(progress.calculate_eta().is_none());
     }
 }
 
@@ -134,7 +257,7 @@ struct BackgroundWorker {
     job_rx: mpsc::UnboundedReceiver<IndexingJob>,
     contexts: Arc<RwLock<HashMap<ContextId, KnowledgeContext>>>,
     volatile_contexts: Arc<RwLock<HashMap<ContextId, Arc<Mutex<SemanticContext>>>>>,
-    active_operations: Arc<Mutex<HashMap<Uuid, OperationHandle>>>,
+    active_operations: Arc<RwLock<HashMap<Uuid, OperationHandle>>>,
     embedder: Box<dyn TextEmbedderTrait>,
     config: SemanticSearchConfig,
     base_dir: PathBuf,
@@ -193,7 +316,7 @@ impl AsyncSemanticSearchClient {
 
         let contexts = Arc::new(RwLock::new(persistent_contexts));
         let volatile_contexts = Arc::new(RwLock::new(HashMap::new()));
-        let active_operations = Arc::new(Mutex::new(HashMap::new()));
+        let active_operations = Arc::new(RwLock::new(HashMap::new()));
         let (job_tx, job_rx) = mpsc::unbounded_channel();
 
         // Start background worker - we'll need to create a new embedder for the worker
@@ -354,7 +477,7 @@ impl AsyncSemanticSearchClient {
 
     /// Cancel an operation by ID
     pub async fn cancel_operation(&self, operation_id: Uuid) -> Result<String> {
-        let mut operations = self.active_operations.lock().await;
+        let mut operations = self.active_operations.write().await;
 
         if let Some(handle) = operations.get_mut(&operation_id) {
             // Cancel the token
@@ -384,7 +507,7 @@ impl AsyncSemanticSearchClient {
 
     /// Cancel all active operations
     pub async fn cancel_all_operations(&self) -> Result<String> {
-        let mut operations = self.active_operations.lock().await;
+        let mut operations = self.active_operations.write().await;
         let count = operations.len();
 
         if count == 0 {
@@ -414,7 +537,7 @@ impl AsyncSemanticSearchClient {
 
     /// Find operation by short ID (first 8 characters)
     pub async fn find_operation_by_short_id(&self, short_id: &str) -> Option<Uuid> {
-        let operations = self.active_operations.lock().await;
+        let operations = self.active_operations.read().await;
         operations
             .iter()
             .find(|(id, _)| id.to_string().starts_with(short_id))
@@ -423,16 +546,16 @@ impl AsyncSemanticSearchClient {
 
     /// List all operation IDs for debugging
     pub async fn list_operation_ids(&self) -> Vec<String> {
-        let operations = self.active_operations.lock().await;
+        let operations = self.active_operations.read().await;
         operations
             .iter()
             .map(|(id, _)| format!("{} (short: {})", id, &id.to_string()[..8]))
             .collect()
     }
 
-    /// Get status of all active operations
-    pub async fn get_status(&self) -> Result<String> {
-        let mut operations = self.active_operations.lock().await;
+    /// Get status of all active operations (returns structured data)
+    pub async fn get_status_data(&self) -> Result<SystemStatus> {
+        let mut operations = self.active_operations.write().await;
         let contexts = self.contexts.read().await;
 
         // Clean up old cancelled operations
@@ -453,73 +576,58 @@ impl AsyncSemanticSearchClient {
             }
         });
 
-        let mut status_lines = Vec::new();
-
-        // Show context summary
+        // Collect context information
         let total_contexts = contexts.len();
         let persistent_contexts = contexts.values().filter(|c| c.persistent).count();
-        status_lines.push(format!(
-            "📚 Total contexts: {} ({} persistent, {} volatile)",
-            total_contexts,
-            persistent_contexts,
-            total_contexts - persistent_contexts
-        ));
+        let volatile_contexts = total_contexts - persistent_contexts;
 
-        if operations.is_empty() {
-            status_lines.push("✅ No active operations".to_string());
-            return Ok(status_lines.join("\n"));
-        }
-
-        status_lines.push("📊 Active Operations:".to_string());
+        // Collect operation information
+        let mut operation_statuses = Vec::new();
         let mut active_count = 0;
         let mut waiting_count = 0;
 
         for (id, handle) in operations.iter() {
             if let Ok(progress) = handle.progress.try_lock() {
-                let elapsed = handle.started_at.elapsed().unwrap_or_default();
                 let is_failed = progress.message.to_lowercase().contains("failed");
                 let is_cancelled = progress.message.to_lowercase().contains("cancelled");
                 let is_waiting = Self::is_operation_waiting(&progress);
 
-                let (status_icon, status_info) = if is_cancelled {
-                    // Don't count cancelled operations, they're cleaned up automatically
-                    ("🛑", "Cancelled".to_string())
-                } else if is_failed {
+                // Count operations
+                if is_cancelled {
+                    // Don't count cancelled operations
+                } else if is_failed || is_waiting {
                     waiting_count += 1;
-                    ("❌", progress.message.clone())
-                } else if is_waiting {
-                    waiting_count += 1;
-                    ("⏳", progress.message.clone())
-                } else if Self::should_show_progress_bar(&progress) {
-                    active_count += 1;
-                    ("🔄", Self::create_progress_bar_snapshot(&progress))
                 } else {
                     active_count += 1;
-                    ("🔄", progress.message.clone())
+                }
+
+                let operation_status = OperationStatus {
+                    id: id.to_string(),
+                    short_id: id.to_string()[..8].to_string(),
+                    operation_type: handle.operation_type.clone(),
+                    started_at: handle.started_at,
+                    current: progress.current,
+                    total: progress.total,
+                    message: progress.message.clone(),
+                    is_cancelled,
+                    is_failed,
+                    is_waiting,
+                    eta: progress.calculate_eta(),
                 };
 
-                let operation_desc = handle.operation_type.display_name();
-
-                status_lines.push(format!(
-                    "  {} {} | {} | {} | Elapsed: {}s",
-                    status_icon,
-                    &id.to_string()[..8],
-                    operation_desc,
-                    status_info,
-                    elapsed.as_secs()
-                ));
+                operation_statuses.push(operation_status);
             }
         }
 
-        status_lines.insert(
-            2, // Insert after context summary and "Active Operations:" header
-            format!(
-                "  📈 Queue Status: {} active, {} waiting (max {} concurrent)",
-                active_count, waiting_count, MAX_CONCURRENT_OPERATIONS
-            ),
-        );
-
-        Ok(status_lines.join("\n"))
+        Ok(SystemStatus {
+            total_contexts,
+            persistent_contexts,
+            volatile_contexts,
+            operations: operation_statuses,
+            active_count,
+            waiting_count,
+            max_concurrent: MAX_CONCURRENT_OPERATIONS,
+        })
     }
 
     /// Clear all contexts (async, cancellable)
@@ -580,7 +688,7 @@ impl AsyncSemanticSearchClient {
     async fn check_path_exists(&self, canonical_path: &Path) -> Result<()> {
         // Check if there's already an ACTIVE indexing operation for this exact path
         // (ignore cancelled, failed, or completed operations)
-        if let Ok(operations) = self.active_operations.try_lock() {
+        if let Ok(operations) = self.active_operations.try_read() {
             for handle in operations.values() {
                 if let OperationType::Indexing { path, name } = &handle.operation_type {
                     if let Ok(operation_canonical) = PathBuf::from(path).canonicalize() {
@@ -639,7 +747,7 @@ impl AsyncSemanticSearchClient {
             task_handle: None,
         };
 
-        let mut operations = self.active_operations.lock().await;
+        let mut operations = self.active_operations.write().await;
         operations.insert(operation_id, handle);
     }
 
@@ -695,35 +803,6 @@ impl AsyncSemanticSearchClient {
             || progress.message.contains("Initializing")
             || progress.message.contains("Starting")
             || (progress.current == 0 && progress.total == 0 && !progress.message.contains("complete"))
-    }
-
-    fn should_show_progress_bar(progress: &ProgressInfo) -> bool {
-        // Show progress bar if we have actual progress data (current/total values)
-        progress.total > 0
-            && (progress.current > 0
-                || progress.message.contains("Indexing")
-                || progress.message.contains("Generating"))
-    }
-
-    fn create_progress_bar_snapshot(progress: &ProgressInfo) -> String {
-        if progress.total == 0 {
-            return "░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░".to_string();
-        }
-
-        let percentage = (progress.current as f64 / progress.total as f64 * 100.0) as u8;
-        let filled = (progress.current as f64 / progress.total as f64 * 30.0) as usize;
-        let empty = 30 - filled;
-
-        let mut bar = String::new();
-        bar.push_str(&"█".repeat(filled));
-        if filled < 30 && progress.current < progress.total {
-            bar.push('▓');
-            bar.push_str(&"░".repeat(empty.saturating_sub(1)));
-        } else {
-            bar.push_str(&"░".repeat(empty));
-        }
-
-        format!("{} {}% ({}/{})", bar, percentage, progress.current, progress.total)
     }
 
     /// Remove context by ID
@@ -1164,7 +1243,7 @@ impl BackgroundWorker {
             let op_id = operation_id;
 
             // Use try_lock to avoid blocking - if we can't get the lock, skip this update
-            if let Ok(mut ops) = operations_clone.try_lock() {
+            if let Ok(mut ops) = operations_clone.try_write() {
                 if let Some(op) = ops.get_mut(&op_id) {
                     // Double-check cancellation before updating progress
                     if op.cancel_token.is_cancelled() {
@@ -1214,7 +1293,7 @@ impl BackgroundWorker {
     }
 
     async fn update_operation_status(&self, operation_id: Uuid, message: String) {
-        if let Ok(mut operations) = self.active_operations.try_lock() {
+        if let Ok(mut operations) = self.active_operations.try_write() {
             if let Some(operation) = operations.get_mut(&operation_id) {
                 if let Ok(mut progress) = operation.progress.try_lock() {
                     progress.message = message;
@@ -1224,7 +1303,7 @@ impl BackgroundWorker {
     }
 
     async fn update_operation_progress(&self, operation_id: Uuid, current: u64, total: u64, message: String) {
-        if let Ok(mut operations) = self.active_operations.try_lock() {
+        if let Ok(mut operations) = self.active_operations.try_write() {
             if let Some(operation) = operations.get_mut(&operation_id) {
                 if let Ok(mut progress) = operation.progress.try_lock() {
                     progress.update(current, total, message);
@@ -1234,14 +1313,14 @@ impl BackgroundWorker {
     }
 
     async fn mark_operation_completed(&self, operation_id: Uuid) {
-        if let Ok(mut operations) = self.active_operations.try_lock() {
+        if let Ok(mut operations) = self.active_operations.try_write() {
             operations.remove(&operation_id);
         }
         tracing::info!("Operation {} completed", operation_id);
     }
 
     async fn mark_operation_failed(&self, operation_id: Uuid, error: String) {
-        if let Ok(mut operations) = self.active_operations.try_lock() {
+        if let Ok(mut operations) = self.active_operations.try_write() {
             if let Some(operation) = operations.get_mut(&operation_id) {
                 if let Ok(mut progress) = operation.progress.try_lock() {
                     progress.message = error.clone();
@@ -1254,7 +1333,7 @@ impl BackgroundWorker {
     }
 
     async fn mark_operation_cancelled(&self, operation_id: Uuid) {
-        if let Ok(mut operations) = self.active_operations.try_lock() {
+        if let Ok(mut operations) = self.active_operations.try_write() {
             if let Some(operation) = operations.get_mut(&operation_id) {
                 if let Ok(mut progress) = operation.progress.try_lock() {
                     progress.message = "Operation cancelled by user".to_string();
@@ -1344,7 +1423,7 @@ impl BackgroundWorker {
                 // Check for cancellation every 100 files
                 if checked % 100 == 0 {
                     // Check if operation was cancelled
-                    if let Ok(operations) = active_operations.try_lock() {
+                    if let Ok(operations) = active_operations.try_read() {
                         if let Some(handle) = operations.get(&operation_id) {
                             if handle.cancel_token.is_cancelled() {
                                 return Err("Operation cancelled during file counting".to_string());

@@ -450,10 +450,15 @@ impl Knowledge {
                     Err(e) => format!("Failed to get knowledge base entries: {}", e),
                 }
             },
-            Knowledge::Status => store
-                .get_status()
-                .await
-                .unwrap_or_else(|e| format!("Failed to get status: {}", e)),
+            Knowledge::Status => {
+                match store.get_status_data().await {
+                    Ok(status_data) => {
+                        // Format the status data for display (same logic as knowledge command)
+                        Self::format_status_display(&status_data)
+                    },
+                    Err(e) => format!("Failed to get status: {}", e),
+                }
+            },
             Knowledge::Cancel(cancel) => store
                 .cancel_operation(Some(&cancel.operation_id))
                 .await
@@ -463,5 +468,76 @@ impl Knowledge {
         Ok(InvokeOutput {
             output: OutputKind::Text(result),
         })
+    }
+
+    /// Format status data for display (UI rendering responsibility)
+    fn format_status_display(status: &semantic_search_client::SystemStatus) -> String {
+        let mut status_lines = Vec::new();
+
+        // Show context summary
+        status_lines.push(format!(
+            "Total contexts: {} ({} persistent, {} volatile)",
+            status.total_contexts, status.persistent_contexts, status.volatile_contexts
+        ));
+
+        if status.operations.is_empty() {
+            status_lines.push("No active operations".to_string());
+            return status_lines.join("\n");
+        }
+
+        status_lines.push("Active Operations:".to_string());
+        status_lines.push(format!(
+            "Queue Status: {} active, {} waiting (max {} concurrent)",
+            status.active_count, status.waiting_count, status.max_concurrent
+        ));
+
+        for op in &status.operations {
+            let formatted_operation = Self::format_operation_display(op);
+            status_lines.push(formatted_operation);
+        }
+
+        status_lines.join("\n")
+    }
+
+    /// Format a single operation for display (LLM-friendly data format)
+    fn format_operation_display(op: &semantic_search_client::OperationStatus) -> String {
+        let elapsed = op.started_at.elapsed().unwrap_or_default();
+
+        let status_info = if op.is_cancelled {
+            "Status: Cancelled".to_string()
+        } else if op.is_failed {
+            format!("Status: Failed - {}", op.message)
+        } else if op.is_waiting {
+            format!("Status: Waiting - {}", op.message)
+        } else if op.total > 0 {
+            let percentage = (op.current as f64 / op.total as f64 * 100.0) as u8;
+            format!(
+                "Status: In Progress - {}% ({}/{}) - {}",
+                percentage, op.current, op.total, op.message
+            )
+        } else {
+            format!("Status: In Progress - {}", op.message)
+        };
+
+        let operation_desc = op.operation_type.display_name();
+
+        // Format with conditional elapsed time and ETA
+        if op.is_cancelled || op.is_failed {
+            format!(
+                "Operation ID: {} | Type: {} | {}",
+                op.short_id, operation_desc, status_info
+            )
+        } else {
+            let mut time_info = format!("Elapsed: {}s", elapsed.as_secs());
+
+            if let Some(eta) = op.eta {
+                time_info.push_str(&format!(" | ETA: {}s", eta.as_secs()));
+            }
+
+            format!(
+                "Operation ID: {} | Type: {} | {} | {}",
+                op.short_id, operation_desc, status_info, time_info
+            )
+        }
     }
 }

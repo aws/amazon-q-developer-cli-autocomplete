@@ -109,12 +109,12 @@ impl KnowledgeStore {
         Ok(flattened)
     }
 
-    /// Get status - delegates to async client
-    pub async fn get_status(&self) -> Result<String, String> {
+    /// Get status data - delegates to async client
+    pub async fn get_status_data(&self) -> Result<semantic_search_client::SystemStatus, String> {
         self.client
-            .get_status()
+            .get_status_data()
             .await
-            .map_err(|e| format!("Failed to get status: {}", e))
+            .map_err(|e| format!("Failed to get status data: {}", e))
     }
 
     /// Cancel operation - delegates to async client

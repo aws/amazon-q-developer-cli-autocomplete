@@ -7,7 +7,11 @@ use crossterm::style::{
     Color,
 };
 use eyre::Result;
-use semantic_search_client::KnowledgeContext;
+use semantic_search_client::{
+    KnowledgeContext,
+    OperationStatus,
+    SystemStatus,
+};
 
 use crate::cli::chat::tools::sanitize_path_tool_arg;
 use crate::cli::chat::{
@@ -310,10 +314,107 @@ impl KnowledgeSubcommand {
         let async_knowledge_store = KnowledgeStore::get_async_instance().await;
         let store = async_knowledge_store.lock().await;
 
-        match store.get_status().await {
-            Ok(status) => OperationResult::Info(status),
+        match store.get_status_data().await {
+            Ok(status_data) => {
+                let formatted_status = Self::format_status_display(&status_data);
+                OperationResult::Info(formatted_status)
+            },
             Err(e) => OperationResult::Error(format!("Failed to get status: {}", e)),
         }
+    }
+
+    /// Format status data for display (UI rendering responsibility)
+    fn format_status_display(status: &SystemStatus) -> String {
+        let mut status_lines = Vec::new();
+
+        // Show context summary
+        status_lines.push(format!(
+            "📚 Total contexts: {} ({} persistent, {} volatile)",
+            status.total_contexts, status.persistent_contexts, status.volatile_contexts
+        ));
+
+        if status.operations.is_empty() {
+            status_lines.push("✅ No active operations".to_string());
+            return status_lines.join("\n");
+        }
+
+        status_lines.push("📊 Active Operations:".to_string());
+        status_lines.push(format!(
+            "  📈 Queue Status: {} active, {} waiting (max {} concurrent)",
+            status.active_count, status.waiting_count, status.max_concurrent
+        ));
+
+        for op in &status.operations {
+            let formatted_operation = Self::format_operation_display(op);
+            status_lines.push(formatted_operation);
+        }
+
+        status_lines.join("\n")
+    }
+
+    /// Format a single operation for display
+    fn format_operation_display(op: &OperationStatus) -> String {
+        let elapsed = op.started_at.elapsed().unwrap_or_default();
+
+        let (status_icon, status_info) = if op.is_cancelled {
+            ("🛑", "Cancelled".to_string())
+        } else if op.is_failed {
+            ("❌", op.message.clone())
+        } else if op.is_waiting {
+            ("⏳", op.message.clone())
+        } else if Self::should_show_progress_bar(op.current, op.total) {
+            ("🔄", Self::create_progress_bar(op.current, op.total, &op.message))
+        } else {
+            ("🔄", op.message.clone())
+        };
+
+        let operation_desc = op.operation_type.display_name();
+
+        // Format with conditional elapsed time and ETA
+        if op.is_cancelled || op.is_failed {
+            format!(
+                "  {} {} | {}\n    {}",
+                status_icon, op.short_id, operation_desc, status_info
+            )
+        } else {
+            let mut time_info = format!("Elapsed: {}s", elapsed.as_secs());
+
+            if let Some(eta) = op.eta {
+                time_info.push_str(&format!(" | ETA: {}s", eta.as_secs()));
+            }
+
+            format!(
+                "  {} {} | {}\n    {} | {}",
+                status_icon, op.short_id, operation_desc, status_info, time_info
+            )
+        }
+    }
+
+    /// Check if progress bar should be shown
+    fn should_show_progress_bar(current: u64, total: u64) -> bool {
+        total > 0 && current <= total
+    }
+
+    /// Create progress bar display
+    fn create_progress_bar(current: u64, total: u64, message: &str) -> String {
+        if total == 0 {
+            return message.to_string();
+        }
+
+        let percentage = (current as f64 / total as f64 * 100.0) as u8;
+        let filled = (current as f64 / total as f64 * 30.0) as usize;
+        let empty = 30 - filled;
+
+        let mut bar = String::new();
+        bar.push_str(&"█".repeat(filled));
+        if filled < 30 && current < total {
+            bar.push('▓');
+            bar.push_str(&"░".repeat(empty.saturating_sub(1)));
+        } else {
+            bar.push_str(&"░".repeat(empty));
+        }
+
+        format!("{} {}% ({}/{}) {}", bar, percentage, current, total, message)
     }
 
     /// Handle cancel operation

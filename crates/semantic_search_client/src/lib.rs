@@ -22,7 +22,12 @@ pub mod types;
 /// Text embedding functionality
 pub mod embedding;
 
-pub use client::SemanticSearchClient;
+pub use client::{
+    OperationStatus,
+    OperationType,
+    SemanticSearchClient,
+    SystemStatus,
+};
 pub use config::SemanticSearchConfig;
 pub use error::{
     Result,
