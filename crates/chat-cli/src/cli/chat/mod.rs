@@ -4,6 +4,7 @@ mod context;
 mod conversation_state;
 mod hooks;
 mod input_source;
+mod knowledge;
 mod message;
 mod parse;
 mod parser;
@@ -1560,6 +1561,7 @@ impl ChatContext {
         let mut tool_uses: Vec<QueuedTool> = tool_uses.unwrap_or_default();
 
         Ok(match command {
+            Command::Knowledge { subcommand } => subcommand.execute(&self.ctx, database, &mut self.output).await?,
             Command::Ask { prompt } => {
                 // Check for a pending tool approval
                 if let Some(index) = pending_tool_index {

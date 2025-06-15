@@ -24,6 +24,7 @@ rayon.workspace = true
 tempfile.workspace = true
 once_cell.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 
 # Vector search library
 hnsw_rs = "0.3.1"
