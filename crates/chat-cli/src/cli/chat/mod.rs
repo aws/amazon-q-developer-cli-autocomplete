@@ -2,9 +2,9 @@ mod command;
 mod consts;
 mod context;
 mod conversation_state;
+mod error_formatter;
 mod hooks;
 mod input_source;
-mod error_formatter;
 mod message;
 mod parse;
 mod parser;
@@ -2813,9 +2813,7 @@ impl ChatContext {
                                 style::SetAttribute(Attribute::Reset),
                                 style::Print("\n"),
                                 style::SetForegroundColor(Color::Red),
-                                style::Print(
-                                    self::error_formatter::format_mcp_error(&to_display)
-                                ),
+                                style::Print(self::error_formatter::format_mcp_error(&to_display)),
                                 style::SetForegroundColor(Color::Reset),
                                 style::Print("\n"),
                             )?;
