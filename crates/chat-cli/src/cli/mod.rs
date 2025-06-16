@@ -5,7 +5,6 @@ mod feed;
 mod issue;
 mod mcp;
 mod settings;
-pub mod shared;
 mod user;
 
 use std::fmt::Display;

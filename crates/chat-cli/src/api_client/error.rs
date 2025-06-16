@@ -22,12 +22,6 @@ use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]
 pub enum ApiClientError {
-    #[error("failed to load credentials: {}", .0)]
-    Credentials(CredentialsError),
-
-    #[error("{0}")]
-    Other(String),
-
     // Generate completions errors
     #[error("{}", SdkErrorDisplay(.0))]
     GenerateCompletions(#[from] SdkError<GenerateCompletionsError, HttpResponse>),
@@ -88,6 +82,10 @@ pub enum ApiClientError {
         "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again."
     )]
     ModelOverloadedError { request_id: Option<String> },
+
+    // Credential errors
+    #[error("failed to load credentials: {}", .0)]
+    Credentials(CredentialsError),
 }
 
 impl ReasonCode for ApiClientError {
@@ -111,7 +109,6 @@ impl ReasonCode for ApiClientError {
             ApiClientError::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
             ApiClientError::MonthlyLimitReached => "MonthlyLimitReached".to_string(),
             ApiClientError::Credentials(_) => "CredentialsError".to_string(),
-            ApiClientError::Other(_) => "OtherError".to_string(),
         }
     }
 }
@@ -145,6 +142,7 @@ mod tests {
 
     fn all_errors() -> Vec<ApiClientError> {
         vec![
+            ApiClientError::Credentials(CredentialsError::unhandled("<unhandled>")),
             ApiClientError::GenerateCompletions(SdkError::service_error(
                 GenerateCompletionsError::unhandled("<unhandled>"),
                 response(),

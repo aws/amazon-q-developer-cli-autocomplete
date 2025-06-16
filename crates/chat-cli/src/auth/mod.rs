@@ -7,24 +7,12 @@ use aws_sdk_ssooidc::error::SdkError;
 use aws_sdk_ssooidc::operation::create_token::CreateTokenError;
 use aws_sdk_ssooidc::operation::register_client::RegisterClientError;
 use aws_sdk_ssooidc::operation::start_device_authorization::StartDeviceAuthorizationError;
-use crate::database::settings;
-pub async fn logout(database: &mut Database) -> Result<(), AuthError> {
-    // Clear any custom AWS profile settings
-    let mut settings = match settings::Settings::new().await {
-        Ok(s) => s,
-        Err(e) => return Err(e.into()),
-    };
-    
-    let _ = settings.remove_custom("aws.profile").await;
-    
-    // Also clear builder_id token
-    builder_id::logout(database).await?;
-    
-    Ok(())
-}
+pub use builder_id::{
+    is_logged_in,
+    logout,
+};
 pub use consts::START_URL;
 use thiserror::Error;
-use crate::database::Database;
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -58,11 +46,6 @@ pub enum AuthError {
     OAuthCustomError(String),
     #[error(transparent)]
     DatabaseError(#[from] crate::database::DatabaseError),
-}
-
-pub async fn is_logged_in(database: &mut Database) -> bool {
-    // Check for builder_id token
-    matches!(builder_id::BuilderIdToken::load(database).await, Ok(Some(_)))
 }
 
 impl From<aws_sdk_ssooidc::Error> for AuthError {

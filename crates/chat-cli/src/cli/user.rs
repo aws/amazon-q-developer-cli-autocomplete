@@ -29,8 +29,6 @@ use tracing::{
 
 use super::OutputFormat;
 use crate::api_client::list_available_profiles;
-use crate::database::settings;
-use serde_json;
 use crate::auth::builder_id::{
     BuilderIdToken,
     PollCreateToken,
@@ -75,10 +73,6 @@ pub struct LoginArgs {
     /// redirects cannot be handled.
     #[arg(long)]
     pub use_device_flow: bool,
-    
-    /// AWS profile to use for authentication
-    #[arg(long)]
-    pub aws_profile: Option<String>,
 }
 
 impl LoginArgs {
@@ -88,13 +82,6 @@ impl LoginArgs {
                 "Already logged in, please logout with {} first",
                 format!("{CLI_BINARY_NAME} logout").magenta()
             );
-        }
-
-        // If aws_profile is specified, save it
-        if let Some(profile) = &self.aws_profile {
-            let mut settings = settings::Settings::new().await?;
-            settings.set_custom("aws.profile", profile.as_str()).await?;
-            println!("Using AWS profile: {}", profile);
         }
 
         let login_method = match self.license {
@@ -176,8 +163,6 @@ impl LoginArgs {
                         },
                     }
                 }
-                
-                // No auth strategy to save anymore
             },
         };
 
@@ -210,28 +195,6 @@ pub struct WhoamiArgs {
 
 impl WhoamiArgs {
     pub async fn execute(self, database: &mut Database) -> Result<ExitCode> {
-        // Get AWS profile if set
-        let settings = settings::Settings::new().await?;
-        let aws_profile = settings.get_custom("aws.profile")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        
-        self.format.print(
-            || {
-                        let profile_info = aws_profile
-                            .as_ref()
-                    .map(|p| format!(" with profile '{}'", p))
-                    .unwrap_or_default();
-                format!("Using AWS credentials for authentication{}", profile_info)
-            },
-            || {
-                json!({
-                    "accountType": "AWS",
-                    "awsProfile": aws_profile,
-                })
-            },
-        );
-
         let builder_id = BuilderIdToken::load(database).await;
 
         match builder_id {

@@ -44,38 +44,6 @@ impl CredentialsChain {
 
         CredentialsChain { provider_chain }
     }
-
-    /// Create a credentials chain with a specific profile
-    pub async fn with_profile(profile_name: &str) -> Self {
-        let region = DefaultRegionChain::builder().build().region().await;
-        let config = ProviderConfig::default().with_region(region.clone());
-
-        // Create a profile provider with the specified profile
-        let profile_provider = ProfileFileCredentialsProvider::builder()
-            .configure(&config)
-            .profile_name(profile_name)
-            .build();
-            
-        // Create other providers as fallbacks
-        let env_provider = EnvironmentVariableCredentialsProvider::new();
-        let web_identity_token_provider = WebIdentityTokenCredentialsProvider::builder()
-            .configure(&config)
-            .build();
-        let imds_provider = ImdsCredentialsProvider::builder().configure(&config).build();
-        let ecs_provider = EcsCredentialsProvider::builder().configure(&config).build();
-
-        // Start with the profile provider since that's what was explicitly requested
-        let mut provider_chain = CredentialsProviderChain::first_try("Profile", profile_provider);
-
-        // Add other providers as fallbacks
-        provider_chain = provider_chain
-            .or_else("Environment", env_provider)
-            .or_else("WebIdentityToken", web_identity_token_provider)
-            .or_else("EcsContainer", ecs_provider)
-            .or_else("Ec2InstanceMetadata", imds_provider);
-
-        CredentialsChain { provider_chain }
-    }
     
     async fn credentials(&self) -> provider::Result {
         self.provider_chain

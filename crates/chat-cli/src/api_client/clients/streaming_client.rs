@@ -34,9 +34,7 @@ use crate::aws_common::{
 use crate::database::{
     AuthProfile,
     Database,
-    settings,
 };
-use serde_json;
 
 mod inner {
     use std::sync::{
@@ -66,7 +64,7 @@ pub struct StreamingClient {
 impl StreamingClient {
     pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
         // If SIGV4_AUTH_ENABLED is true, use Q developer client
-        if std::env::var("SIGV4_AUTH_ENABLED").is_ok_and(|v| !v.is_empty()) {
+        if std::env::var("SIGV4_AUTH_ENABLED").is_ok_and(|v| !v.is_empty() && v.to_lowercase() == "true") {
             Self::new_qdeveloper_client(database, &Endpoint::load_q(database)).await
         } else {
             // Default to CodeWhisperer client
