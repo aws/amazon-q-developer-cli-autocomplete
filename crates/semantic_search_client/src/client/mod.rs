@@ -10,11 +10,6 @@ pub mod semantic_context;
 pub mod utils;
 
 // Re-export types for external use
-pub use async_implementation::{
-    AsyncSemanticSearchClient,
-    OperationStatus,
-    OperationType,
-    SystemStatus,
-};
+pub use async_implementation::AsyncSemanticSearchClient;
 pub use implementation::SemanticSearchClient;
 pub use semantic_context::SemanticContext;

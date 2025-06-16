@@ -198,8 +198,8 @@
         "properties": {
           "command": {
             "type": "string",
-            "enum": ["show", "add", "remove", "clear", "search", "update"],
-            "description": "The knowledge operation to perform:\n- 'show': List all knowledge contexts (no additional parameters required)\n- 'add': Add content to knowledge base (requires 'name' and 'value')\n- 'remove': Remove content from knowledge base (requires one of: 'name', 'context_id', or 'path')\n- 'clear': Remove all knowledge contexts (requires 'confirm' = true)\n- 'search': Search across knowledge contexts (requires 'query', optional 'context_id')\n- 'update': Update existing context with new content (requires 'path' and one of: 'name', 'context_id')"
+            "enum": ["show", "add", "remove", "clear", "search", "update", "status", "cancel"],
+            "description": "The knowledge operation to perform:\n- 'show': List all knowledge contexts (no additional parameters required)\n- 'add': Add content to knowledge base (requires 'name' and 'value')\n- 'remove': Remove content from knowledge base (requires one of: 'name', 'context_id', or 'path')\n- 'clear': Remove all knowledge contexts.\n- 'search': Search across knowledge contexts (requires 'query', optional 'context_id')\n- 'update': Update existing context with new content (requires 'path' and one of: 'name', 'context_id')\n- 'status': Show background operation status and progress\n- 'cancel': Cancel background operations (optional 'operation_id' to cancel specific operation, or cancel all if not provided)"
           },
           "name": {
             "type": "string",
@@ -220,6 +220,10 @@
           "query": {
             "type": "string",
             "description": "The search query string. Required for 'search' operations. Performs semantic search across knowledge contexts to find relevant content."
+          },
+          "operation_id": {
+            "type": "string",
+            "description": "Optional operation ID to cancel a specific operation. Used with 'cancel' command. If not provided, all active operations will be cancelled. Can be either the full operation ID or the short 8-character ID."
           }
         },
         "required": ["command"]

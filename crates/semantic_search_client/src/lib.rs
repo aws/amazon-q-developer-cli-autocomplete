@@ -22,12 +22,7 @@ pub mod types;
 /// Text embedding functionality
 pub mod embedding;
 
-pub use client::{
-    OperationStatus,
-    OperationType,
-    SemanticSearchClient,
-    SystemStatus,
-};
+pub use client::SemanticSearchClient;
 pub use config::SemanticSearchConfig;
 pub use error::{
     Result,
@@ -37,6 +32,10 @@ pub use types::{
     DataPoint,
     FileType,
     KnowledgeContext,
+    OperationStatus,
+    OperationType,
+    ProgressInfo,
     ProgressStatus,
     SearchResult,
+    SystemStatus,
 };
