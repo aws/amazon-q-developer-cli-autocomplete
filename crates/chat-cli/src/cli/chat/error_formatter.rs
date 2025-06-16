@@ -1,5 +1,3 @@
-use serde_json;
-
 /// Formats an MCP error message to be more user-friendly.
 /// 
 /// This function extracts nested JSON from the error message and formats it
