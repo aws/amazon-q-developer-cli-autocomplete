@@ -36,6 +36,41 @@ pub struct SemanticSearchConfig {
 
     /// Base directory for storing persistent contexts
     pub base_dir: PathBuf,
+
+    /// Maximum number of files allowed for indexing (default: 5000)
+    pub max_files: usize,
+}
+
+impl SemanticSearchConfig {
+    /// Create a new configuration with custom max_files limit
+    ///
+    /// # Arguments
+    ///
+    /// * `max_files` - Maximum number of files allowed for indexing
+    ///
+    /// # Returns
+    ///
+    /// A new configuration with the specified max_files limit
+    pub fn with_max_files(max_files: usize) -> Self {
+        Self {
+            max_files,
+            ..Default::default()
+        }
+    }
+
+    /// Set the max_files limit for this configuration
+    ///
+    /// # Arguments
+    ///
+    /// * `max_files` - Maximum number of files allowed for indexing
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining
+    pub fn set_max_files(mut self, max_files: usize) -> Self {
+        self.max_files = max_files;
+        self
+    }
 }
 
 impl Default for SemanticSearchConfig {
@@ -47,6 +82,7 @@ impl Default for SemanticSearchConfig {
             model_name: "all-MiniLM-L6-v2".to_string(),
             timeout: 30000, // 30 seconds
             base_dir: get_default_base_dir(),
+            max_files: 5000, // Default limit of 5000 files
         }
     }
 }
@@ -246,6 +282,20 @@ mod tests {
         assert_eq!(config.chunk_overlap, 128);
         assert_eq!(config.default_results, 5);
         assert_eq!(config.model_name, "all-MiniLM-L6-v2");
+        assert_eq!(config.max_files, 5000);
+    }
+
+    #[test]
+    fn test_with_max_files() {
+        let config = SemanticSearchConfig::with_max_files(10000);
+        assert_eq!(config.max_files, 10000);
+        assert_eq!(config.chunk_size, 512); // Other defaults should remain
+    }
+
+    #[test]
+    fn test_set_max_files() {
+        let config = SemanticSearchConfig::default().set_max_files(15000);
+        assert_eq!(config.max_files, 15000);
     }
 
     #[test]
@@ -282,6 +332,7 @@ mod tests {
             model_name: "different-model".to_string(),
             timeout: 30000,
             base_dir: temp_dir.path().to_path_buf(),
+            max_files: 10000,
         };
 
         // Update the config
