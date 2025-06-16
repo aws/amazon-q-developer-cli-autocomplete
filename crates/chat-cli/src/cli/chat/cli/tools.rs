@@ -69,7 +69,7 @@ impl ToolsArgs {
         origin_tools.sort_by(|(origin_a, _), (origin_b, _)| match (origin_a, origin_b) {
             (ToolOrigin::Native, _) => std::cmp::Ordering::Less,
             (_, ToolOrigin::Native) => std::cmp::Ordering::Greater,
-            (ToolOrigin::McpServer(name_a), ToolOrigin::McpServer(name_b)) => name_a.cmp(&name_b),
+            (ToolOrigin::McpServer(name_a), ToolOrigin::McpServer(name_b)) => name_a.cmp(name_b),
         });
 
         for (origin, tools) in origin_tools.iter() {

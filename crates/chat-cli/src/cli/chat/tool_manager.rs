@@ -1046,7 +1046,6 @@ impl ToolManager {
         self.schema.extend(tool_specs);
     }
 
-    #[allow(clippy::await_holding_lock)]
     pub async fn get_prompt(
         &self,
         name: String,

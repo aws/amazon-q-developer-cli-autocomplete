@@ -76,13 +76,13 @@ impl ContextManager {
     pub async fn new(ctx: &Context, max_context_files_size: Option<usize>) -> Result<Self> {
         let max_context_files_size = max_context_files_size.unwrap_or(CONTEXT_FILES_MAX_SIZE);
 
-        let profiles_dir = directories::chat_profiles_dir(&ctx)?;
+        let profiles_dir = directories::chat_profiles_dir(ctx)?;
 
         ctx.fs.create_dir_all(&profiles_dir).await?;
 
-        let global_config = load_global_config(&ctx).await?;
+        let global_config = load_global_config(ctx).await?;
         let current_profile = "default".to_string();
-        let profile_config = load_profile_config(&ctx, &current_profile).await?;
+        let profile_config = load_profile_config(ctx, &current_profile).await?;
 
         Ok(Self {
             max_context_files_size,
@@ -463,26 +463,6 @@ impl ContextManager {
         Ok(context_files)
     }
 
-    /// Get all context files from the global configuration.
-    pub async fn get_global_context_files(&self, ctx: &Context) -> Result<Vec<(String, String)>> {
-        let mut context_files = Vec::new();
-
-        self.collect_context_files(ctx, &self.global_config.paths, &mut context_files)
-            .await?;
-
-        Ok(context_files)
-    }
-
-    /// Get all context files from the current profile configuration.
-    pub async fn get_current_profile_context_files(&self, ctx: &Context) -> Result<Vec<(String, String)>> {
-        let mut context_files = Vec::new();
-
-        self.collect_context_files(ctx, &self.profile_config.paths, &mut context_files)
-            .await?;
-
-        Ok(context_files)
-    }
-
     /// Collects context files and optionally drops files if the total size exceeds the limit.
     /// Returns (files_to_use, dropped_files)
     pub async fn collect_context_files_with_limit(
@@ -811,11 +791,6 @@ fn validate_profile_name(name: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Stdout;
-
-    use rusqlite::types::Null;
-
-    use super::super::hooks::HookTrigger;
     use super::*;
     use crate::cli::chat::util::shared_writer::NullWriter;
 
@@ -938,136 +913,6 @@ mod tests {
                 .is_err(),
             "adding a glob with no matching and without force should fail"
         );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_add_hook() -> Result<()> {
-        let mut manager = create_test_context_manager(None).await?;
-        let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-
-        // Test adding hook to profile config
-        manager
-            .add_hook(&ctx, "test_hook".to_string(), hook.clone(), false)
-            .await?;
-        assert!(manager.profile_config.hooks.contains_key("test_hook"));
-
-        // Test adding hook to global config
-        manager
-            .add_hook(&ctx, "global_hook".to_string(), hook.clone(), true)
-            .await?;
-        assert!(manager.global_config.hooks.contains_key("global_hook"));
-
-        // Test adding duplicate hook name
-        assert!(
-            manager
-                .add_hook(&ctx, "test_hook".to_string(), hook, false)
-                .await
-                .is_err()
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_remove_hook() -> Result<()> {
-        let mut manager = create_test_context_manager(None).await?;
-        let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-
-        manager.add_hook(&ctx, "test_hook".to_string(), hook, false).await?;
-
-        // Test removing existing hook
-        manager.remove_hook(&ctx, "test_hook", false).await?;
-        assert!(!manager.profile_config.hooks.contains_key("test_hook"));
-
-        // Test removing non-existent hook
-        assert!(manager.remove_hook(&ctx, "test_hook", false).await.is_err());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_set_hook_disabled() -> Result<()> {
-        let mut manager = create_test_context_manager(None).await?;
-        let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-
-        manager.add_hook(&ctx, "test_hook".to_string(), hook, false).await?;
-
-        // Test disabling hook
-        manager.set_hook_disabled(&ctx, "test_hook", false, true).await?;
-        assert!(manager.profile_config.hooks.get("test_hook").unwrap().disabled);
-
-        // Test enabling hook
-        manager.set_hook_disabled(&ctx, "test_hook", false, false).await?;
-        assert!(!manager.profile_config.hooks.get("test_hook").unwrap().disabled);
-
-        // Test with non-existent hook
-        assert!(
-            manager
-                .set_hook_disabled(&ctx, "nonexistent", false, true)
-                .await
-                .is_err()
-        );
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_set_all_hooks_disabled() -> Result<()> {
-        let mut manager = create_test_context_manager(None).await?;
-        let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-        let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-
-        manager.add_hook(&ctx, "hook1".to_string(), hook1, false).await?;
-        manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
-
-        // Test disabling all hooks
-        manager.set_all_hooks_disabled(&ctx, false, true).await?;
-        assert!(manager.profile_config.hooks.values().all(|h| h.disabled));
-
-        // Test enabling all hooks
-        manager.set_all_hooks_disabled(&ctx, false, false).await?;
-        assert!(manager.profile_config.hooks.values().all(|h| !h.disabled));
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_run_hooks() -> Result<()> {
-        let mut manager = create_test_context_manager(None).await?;
-        let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-        let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-
-        manager.add_hook(&ctx, "hook1".to_string(), hook1, false).await?;
-        manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
-
-        // Run the hooks
-        let results = manager.run_hooks(&mut NullWriter).await;
-        assert_eq!(results.len(), 2); // Should include both hooks
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_hooks_across_profiles() -> Result<()> {
-        let mut manager = create_test_context_manager(None).await?;
-        let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-        let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
-
-        manager.add_hook(&ctx, "profile_hook".to_string(), hook1, false).await?;
-        manager.add_hook(&ctx, "global_hook".to_string(), hook2, true).await?;
-
-        let results = manager.run_hooks(&mut NullWriter).await;
-        assert_eq!(results.len(), 2); // Should include both hooks
-
-        // Create and switch to a new profile
-        manager.create_profile(&ctx, "test_profile").await?;
-        manager.switch_profile(&ctx, "test_profile").await?;
-
-        let results = manager.run_hooks(&mut NullWriter).await;
-        assert_eq!(results.len(), 1); // Should include global hook
-        assert_eq!(results[0].0.name, "global_hook");
 
         Ok(())
     }

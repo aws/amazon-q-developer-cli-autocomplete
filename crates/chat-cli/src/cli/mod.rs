@@ -41,11 +41,13 @@ use crate::cli::user::{
     LoginArgs,
     WhoamiArgs,
 };
+use crate::database::Database;
 use crate::logging::{
     LogArgs,
     initialize_logging,
 };
 use crate::platform::Context;
+use crate::telemetry::TelemetryThread;
 use crate::util::directories::logs_dir;
 use crate::util::{
     CLI_BINARY_NAME,
@@ -124,6 +126,39 @@ impl RootSubcommand {
 
     pub fn requires_auth(&self) -> bool {
         matches!(self, Self::Chat(_) | Self::Profile)
+    }
+
+    pub async fn execute(
+        self,
+        ctx: &mut Context,
+        database: &mut Database,
+        telemetry: &TelemetryThread,
+    ) -> Result<ExitCode> {
+        // Check for auth on subcommands that require it.
+        if self.requires_auth() && !crate::auth::is_logged_in(database).await {
+            bail!(
+                "You are not logged in, please log in with {}",
+                format!("{CLI_BINARY_NAME} login").bold()
+            );
+        }
+
+        // Send executed telemetry.
+        if self.valid_for_telemetry() {
+            telemetry.send_cli_subcommand_executed(&self).ok();
+        }
+
+        match self {
+            Self::Diagnostic(args) => args.execute().await,
+            Self::Login(args) => args.execute(database, telemetry).await,
+            Self::Logout => user::logout(database).await,
+            Self::Whoami(args) => args.execute(database).await,
+            Self::Profile => user::profile(database, telemetry).await,
+            Self::Settings(settings_args) => settings_args.execute(ctx, database).await,
+            Self::Issue(args) => args.execute().await,
+            Self::Version { changelog } => Cli::print_version(changelog),
+            Self::Chat(args) => args.execute(ctx, database, telemetry).await,
+            Self::Mcp(args) => args.execute(&mut std::io::stderr()).await,
+        }
     }
 }
 
@@ -204,34 +239,9 @@ impl Cli {
         let mut database = crate::database::Database::new().await?;
         let telemetry = crate::telemetry::TelemetryThread::new(&ctx.env, &mut database).await?;
 
-        // Check for auth on subcommands that require it.
-        if subcommand.requires_auth() && !crate::auth::is_logged_in(&mut database).await {
-            bail!(
-                "You are not logged in, please log in with {}",
-                format!("{CLI_BINARY_NAME} login").bold()
-            );
-        }
-
-        // Send executed telemetry.
-        if subcommand.valid_for_telemetry() {
-            telemetry.send_cli_subcommand_executed(&subcommand).ok();
-        }
-
-        let result = match subcommand {
-            RootSubcommand::Diagnostic(args) => args.execute().await,
-            RootSubcommand::Login(args) => args.execute(&mut database, &telemetry).await,
-            RootSubcommand::Logout => user::logout(&mut database).await,
-            RootSubcommand::Whoami(args) => args.execute(&mut database).await,
-            RootSubcommand::Profile => user::profile(&mut database, &telemetry).await,
-            RootSubcommand::Settings(settings_args) => settings_args.execute(&ctx, &mut database).await,
-            RootSubcommand::Issue(args) => args.execute().await,
-            RootSubcommand::Version { changelog } => Self::print_version(changelog),
-            RootSubcommand::Chat(args) => args.execute(&mut ctx, &mut database, &telemetry).await,
-            RootSubcommand::Mcp(args) => args.execute(&mut std::io::stderr()).await,
-        };
+        let result = subcommand.execute(&mut ctx, &mut database, &telemetry).await;
 
         let telemetry_result = telemetry.finish().await;
-
         let exit_code = result?;
         telemetry_result?;
         Ok(exit_code)

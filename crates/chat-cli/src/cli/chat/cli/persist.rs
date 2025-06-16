@@ -74,7 +74,7 @@ impl PersistSubcommand {
             Self::Load { path } => {
                 let contents = tri!(ctx.fs.read_to_string(&path).await, "import from", &path);
                 let mut new_state: ConversationState = tri!(serde_json::from_str(&contents), "import from", &path);
-                new_state.reload_serialized_state(&ctx).await;
+                new_state.reload_serialized_state(ctx).await;
                 session.conversation = new_state;
 
                 execute!(

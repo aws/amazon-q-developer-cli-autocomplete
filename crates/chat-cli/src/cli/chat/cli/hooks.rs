@@ -41,7 +41,6 @@ use spinners::{
     Spinners,
 };
 
-use crate::cli::chat::context::ContextManager;
 use crate::cli::chat::util::truncate_safe;
 use crate::cli::chat::{
     ChatError,
@@ -406,15 +405,15 @@ pub struct HooksArgs {
 
 impl HooksArgs {
     pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+        if let Some(subcommand) = self.subcommand {
+            return subcommand.execute(ctx, session).await;
+        }
+
         let Some(context_manager) = &mut session.conversation.context_manager else {
             return Ok(ChatState::PromptUser {
                 skip_printing_tools: true,
             });
         };
-
-        if let Some(subcommand) = self.subcommand {
-            return subcommand.execute(ctx, session, context_manager).await;
-        }
 
         queue!(
             session.output,
@@ -531,12 +530,13 @@ pub enum HooksSubcommand {
 }
 
 impl HooksSubcommand {
-    pub async fn execute(
-        self,
-        ctx: &Context,
-        session: &mut ChatSession,
-        context_manager: &mut ContextManager,
-    ) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+        let Some(context_manager) = &mut session.conversation.context_manager else {
+            return Ok(ChatState::PromptUser {
+                skip_printing_tools: true,
+            });
+        };
+
         let scope = |g: bool| if g { "global" } else { "profile" };
 
         match self {
@@ -769,13 +769,142 @@ fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, tr
 
 #[cfg(test)]
 mod tests {
-    use std::io::Stdout;
     use std::time::Duration;
 
     use tokio::time::sleep;
 
     use super::*;
     use crate::cli::chat::util::shared_writer::NullWriter;
+
+    #[tokio::test]
+    async fn test_add_hook() -> Result<()> {
+        let mut manager = create_test_context_manager(None).await?;
+        let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+
+        // Test adding hook to profile config
+        manager
+            .add_hook(&ctx, "test_hook".to_string(), hook.clone(), false)
+            .await?;
+        assert!(manager.profile_config.hooks.contains_key("test_hook"));
+
+        // Test adding hook to global config
+        manager
+            .add_hook(&ctx, "global_hook".to_string(), hook.clone(), true)
+            .await?;
+        assert!(manager.global_config.hooks.contains_key("global_hook"));
+
+        // Test adding duplicate hook name
+        assert!(
+            manager
+                .add_hook(&ctx, "test_hook".to_string(), hook, false)
+                .await
+                .is_err()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_remove_hook() -> Result<()> {
+        let mut manager = create_test_context_manager(None).await?;
+        let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+
+        manager.add_hook(&ctx, "test_hook".to_string(), hook, false).await?;
+
+        // Test removing existing hook
+        manager.remove_hook(&ctx, "test_hook", false).await?;
+        assert!(!manager.profile_config.hooks.contains_key("test_hook"));
+
+        // Test removing non-existent hook
+        assert!(manager.remove_hook(&ctx, "test_hook", false).await.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_set_hook_disabled() -> Result<()> {
+        let mut manager = create_test_context_manager(None).await?;
+        let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+
+        manager.add_hook(&ctx, "test_hook".to_string(), hook, false).await?;
+
+        // Test disabling hook
+        manager.set_hook_disabled(&ctx, "test_hook", false, true).await?;
+        assert!(manager.profile_config.hooks.get("test_hook").unwrap().disabled);
+
+        // Test enabling hook
+        manager.set_hook_disabled(&ctx, "test_hook", false, false).await?;
+        assert!(!manager.profile_config.hooks.get("test_hook").unwrap().disabled);
+
+        // Test with non-existent hook
+        assert!(
+            manager
+                .set_hook_disabled(&ctx, "nonexistent", false, true)
+                .await
+                .is_err()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_set_all_hooks_disabled() -> Result<()> {
+        let mut manager = create_test_context_manager(None).await?;
+        let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+
+        manager.add_hook(&ctx, "hook1".to_string(), hook1, false).await?;
+        manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
+
+        // Test disabling all hooks
+        manager.set_all_hooks_disabled(&ctx, false, true).await?;
+        assert!(manager.profile_config.hooks.values().all(|h| h.disabled));
+
+        // Test enabling all hooks
+        manager.set_all_hooks_disabled(&ctx, false, false).await?;
+        assert!(manager.profile_config.hooks.values().all(|h| !h.disabled));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_run_hooks() -> Result<()> {
+        let mut manager = create_test_context_manager(None).await?;
+        let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+
+        manager.add_hook(&ctx, "hook1".to_string(), hook1, false).await?;
+        manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
+
+        // Run the hooks
+        let results = manager.run_hooks(&mut NullWriter).await;
+        assert_eq!(results.len(), 2); // Should include both hooks
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_hooks_across_profiles() -> Result<()> {
+        let mut manager = create_test_context_manager(None).await?;
+        let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+
+        manager.add_hook(&ctx, "profile_hook".to_string(), hook1, false).await?;
+        manager.add_hook(&ctx, "global_hook".to_string(), hook2, true).await?;
+
+        let results = manager.run_hooks(&mut NullWriter).await;
+        assert_eq!(results.len(), 2); // Should include both hooks
+
+        // Create and switch to a new profile
+        manager.create_profile(&ctx, "test_profile").await?;
+        manager.switch_profile(&ctx, "test_profile").await?;
+
+        let results = manager.run_hooks(&mut NullWriter).await;
+        assert_eq!(results.len(), 1); // Should include global hook
+        assert_eq!(results[0].0.name, "global_hook");
+
+        Ok(())
+    }
 
     #[test]
     fn test_hook_creation() {
@@ -803,7 +932,7 @@ mod tests {
 
         // First execution should run the command
         let mut output = Vec::new();
-        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await;
+        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].1.contains("test1"));
@@ -812,7 +941,7 @@ mod tests {
 
         // Second execution should use cache
         let mut output = Vec::new();
-        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await;
+        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].1.contains("test1"));
@@ -833,7 +962,7 @@ mod tests {
 
         // First execution should run the command
         let mut output = Vec::new();
-        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await;
+        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].1.contains("test1"));
@@ -842,7 +971,7 @@ mod tests {
 
         // Second execution should use cache
         let mut output = Vec::new();
-        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await;
+        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].1.contains("test1"));
@@ -861,7 +990,7 @@ mod tests {
 
         // First execution should run the command
         let mut output = Vec::new();
-        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await;
+        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].1.contains("test1"));
@@ -870,7 +999,7 @@ mod tests {
 
         // Second execution should use cache
         let mut output = Vec::new();
-        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await;
+        let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
         assert!(results[0].1.contains("test1"));
@@ -884,7 +1013,7 @@ mod tests {
         let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, "sleep 2".to_string());
         hook.timeout_ms = 100; // Set very short timeout
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await;
+        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
 
         assert_eq!(results.len(), 0); // Should fail due to timeout
     }
@@ -895,7 +1024,7 @@ mod tests {
         let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, "echo 'test'".to_string());
         hook.disabled = true;
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await;
+        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
 
         assert_eq!(results.len(), 0); // Disabled hook should not run
     }
@@ -907,14 +1036,14 @@ mod tests {
         hook.cache_ttl_seconds = 1;
 
         // First execution
-        let results1 = executor.run_hooks(vec![&hook], &mut NullWriter).await;
+        let results1 = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
         assert_eq!(results1.len(), 1);
 
         // Wait for cache to expire
         sleep(Duration::from_millis(1001)).await;
 
         // Second execution should run command again
-        let results2 = executor.run_hooks(vec![&hook], &mut NullWriter).await;
+        let results2 = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
         assert_eq!(results2.len(), 1);
     }
 
@@ -963,7 +1092,7 @@ mod tests {
         let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, command.to_string());
         hook.max_output_size = 100;
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await;
+        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
 
         assert!(results[0].1.len() <= hook.max_output_size + " ... truncated".len());
     }
@@ -981,7 +1110,7 @@ mod tests {
 
         let hook = Hook::new_inline_hook(HookTrigger::PerPrompt, command.to_string());
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await;
+        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
 
         assert_eq!(results.len(), 1, "Command execution should succeed");
 

@@ -520,8 +520,6 @@ fn format_mode(mode: u32) -> [char; 9] {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
 
     const TEST_FILE_CONTENTS: &str = "\
@@ -544,13 +542,15 @@ mod tests {
     /// /aaaa2/
     ///     .hidden
     /// ```
-    async fn setup_test_directory() -> Arc<Context> {
+    async fn setup_test_directory() -> Context {
         let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs;
-        fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
-        fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
-        fs.create_dir_all("/aaaa2").await.unwrap();
-        fs.write(TEST_HIDDEN_FILE_PATH, "this is a hidden file").await.unwrap();
+        ctx.fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
+        ctx.fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
+        ctx.fs.create_dir_all("/aaaa2").await.unwrap();
+        ctx.fs
+            .write(TEST_HIDDEN_FILE_PATH, "this is a hidden file")
+            .await
+            .unwrap();
         ctx
     }
 

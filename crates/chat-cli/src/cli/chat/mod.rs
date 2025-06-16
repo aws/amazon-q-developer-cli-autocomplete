@@ -2,7 +2,6 @@ mod cli;
 mod consts;
 mod context;
 mod conversation;
-mod hooks;
 mod input_source;
 mod message;
 mod parse;
@@ -29,7 +28,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use amzn_codewhisperer_client::types::SubscriptionStatus;
-use clap::Args;
+use clap::{
+    Args,
+    Parser,
+};
 use consts::DUMMY_TOOL_NAME;
 use context::ContextManager;
 pub use conversation::ConversationState;
@@ -119,6 +121,7 @@ use crate::api_client::{
 };
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
+use crate::cli::chat::cli::SlashCommand;
 use crate::cli::chat::cli::model::{
     DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
@@ -269,7 +272,7 @@ impl ChatArgs {
             }
         }
 
-        let result = ChatSession::new(
+        ChatSession::new(
             ctx,
             database,
             &conversation_id,
@@ -288,9 +291,7 @@ impl ChatArgs {
         .await?
         .spawn(ctx, database, telemetry)
         .await
-        .map(|_| ExitCode::SUCCESS);
-
-        result
+        .map(|_| ExitCode::SUCCESS)
     }
 }
 
@@ -599,8 +600,8 @@ impl ChatSession {
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(self.tool_uses.clone()) })
                 }
             },
-            ChatState::ExecuteTools(tool_uses) => {
-                let tool_uses_clone = tool_uses.clone();
+            ChatState::ExecuteTools => {
+                let tool_uses_clone = self.tool_uses.clone();
                 tokio::select! {
                     res = self.tool_use_execute(ctx, database, telemetry) => res,
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(tool_uses_clone) })
@@ -716,10 +717,7 @@ impl ChatSession {
                         }
                     );
                     self.conversation.append_transcript(err.clone());
-                    (
-                        "Amazon Q is having trouble responding right now",
-                        Report::from(eyre!(err)),
-                    )
+                    ("Amazon Q is having trouble responding right now", eyre!(err))
                 },
                 _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
             },
@@ -791,7 +789,7 @@ enum ChatState {
     /// Validate the list of tool uses provided by the model.
     ValidateTools(Vec<AssistantToolUse>),
     /// Execute the list of tools.
-    ExecuteTools(Vec<QueuedTool>),
+    ExecuteTools,
     /// Consume the response stream and display to the user.
     HandleResponseStream(SendMessageOutput),
     /// Compact the chat history.
@@ -1173,112 +1171,111 @@ impl ChatSession {
 
     async fn handle_input(
         &mut self,
-        ctx: &Context,
+        ctx: &mut Context,
         database: &mut Database,
         telemetry: &TelemetryThread,
-        user_input: String,
+        mut user_input: String,
     ) -> Result<ChatState, ChatError> {
-        let command_result = command::Command::parse(&user_input, &mut self.output);
+        let input = user_input.trim();
+        if let Some(args) = input.strip_prefix("/").map(|input| shlex::split(input)).flatten() {
+            match SlashCommand::try_parse_from(args) {
+                Ok(command) => {
+                    command.execute(ctx, database, telemetry, self).await;
 
-        if let Err(error_message) = &command_result {
-            // Display error message for command parsing errors
-            execute!(
-                self.output,
-                style::SetForegroundColor(Color::Red),
-                style::Print(format!("\nError: {}\n\n", error_message)),
-                style::SetForegroundColor(Color::Reset)
-            )?;
+                    Ok(ChatState::PromptUser {
+                        skip_printing_tools: false,
+                    })
+                },
+                Err(err) => {
+                    write!(self.output, "{}", err.render())?;
 
-            return Ok(ChatState::PromptUser {
-                skip_printing_tools: true,
-            });
-        }
+                    Ok(ChatState::PromptUser {
+                        skip_printing_tools: false,
+                    })
+                },
+            }
+        } else if let Some(command) = input.strip_prefix("!") {
+            queue!(self.output, style::Print('\n'))?;
 
-        let command = command_result.unwrap();
+            // Use platform-appropriate shell
+            let result = if cfg!(target_os = "windows") {
+                std::process::Command::new("cmd").args(["/C", &command]).status()
+            } else {
+                std::process::Command::new("bash").args(["-c", &command]).status()
+            };
 
-        Ok(match command {
-            Self::Ask { prompt } => {
-                // Check for a pending tool approval
-                if let Some(index) = pending_tool_index {
-                    let tool_use = &mut tool_uses[index];
-
-                    let is_trust = ["t", "T"].contains(&prompt.as_str());
-                    if ["y", "Y"].contains(&prompt.as_str()) || is_trust {
-                        if is_trust {
-                            self.tool_permissions.trust_tool(&tool_use.name);
-                        }
-                        tool_use.accepted = true;
-
-                        return Ok(ChatState::ExecuteTools(tool_uses));
-                    }
-                } else if !self.pending_prompts.is_empty() {
-                    let prompts = self.pending_prompts.drain(0..).collect();
-                    user_input = self
-                        .conversation
-                        .append_prompts(prompts)
-                        .ok_or(ChatError::Custom("Prompt append failed".into()))?;
-                }
-
-                // Otherwise continue with normal chat on 'n' or other responses
-                self.tool_use_status = ToolUseStatus::Idle;
-
-                if pending_tool_index.is_some() {
-                    self.conversation.abandon_tool_use(tool_uses, user_input);
-                } else {
-                    self.conversation.set_next_user_message(user_input).await;
-                }
-
-                let conv_state = self
-                    .conversation
-                    .as_sendable_conversation_state(ctx, &mut self.output, true)
-                    .await?;
-                self.send_tool_use_telemetry(telemetry).await;
-
-                queue!(self.output, style::SetForegroundColor(Color::Magenta))?;
-                queue!(self.output, style::SetForegroundColor(Color::Reset))?;
-                queue!(self.output, cursor::Hide)?;
-                execute!(self.output, style::Print("\n"))?;
-                self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
-
-                ChatState::HandleResponseStream(self.client.send_message(conv_state).await?)
-            },
-            Self::Execute { command } => {
-                queue!(self.output, style::Print('\n'))?;
-
-                // Use platform-appropriate shell
-                let result = if cfg!(target_os = "windows") {
-                    std::process::Command::new("cmd").args(["/C", &command]).status()
-                } else {
-                    std::process::Command::new("bash").args(["-c", &command]).status()
-                };
-
-                // Handle the result and provide appropriate feedback
-                match result {
-                    Ok(status) => {
-                        if !status.success() {
-                            queue!(
-                                self.output,
-                                style::SetForegroundColor(Color::Yellow),
-                                style::Print(format!("Self exited with status: {}\n", status)),
-                                style::SetForegroundColor(Color::Reset)
-                            )?;
-                        }
-                    },
-                    Err(e) => {
+            // Handle the result and provide appropriate feedback
+            match result {
+                Ok(status) => {
+                    if !status.success() {
                         queue!(
                             self.output,
-                            style::SetForegroundColor(Color::Red),
-                            style::Print(format!("Failed to execute command: {}\n", e)),
+                            style::SetForegroundColor(Color::Yellow),
+                            style::Print(format!("Self exited with status: {}\n", status)),
                             style::SetForegroundColor(Color::Reset)
                         )?;
-                    },
-                }
+                    }
+                },
+                Err(e) => {
+                    queue!(
+                        self.output,
+                        style::SetForegroundColor(Color::Red),
+                        style::Print(format!("Failed to execute command: {}\n", e)),
+                        style::SetForegroundColor(Color::Reset)
+                    )?;
+                },
+            }
 
-                ChatState::PromptUser {
-                    skip_printing_tools: false,
+            Ok(ChatState::PromptUser {
+                skip_printing_tools: false,
+            })
+        } else {
+            // Check for a pending tool approval
+            if let Some(index) = self.pending_tool_index {
+                let is_trust = ["t", "T"].contains(&input);
+                if ["y", "Y"].contains(&input) || is_trust {
+                    let tool_use = &mut self.tool_uses[index];
+
+                    if is_trust {
+                        self.tool_permissions.trust_tool(&tool_use.name);
+                    }
+                    tool_use.accepted = true;
+
+                    return Ok(ChatState::ExecuteTools);
                 }
-            },
-        })
+            } else if !self.pending_prompts.is_empty() {
+                let prompts = self.pending_prompts.drain(0..).collect();
+                user_input = self
+                    .conversation
+                    .append_prompts(prompts)
+                    .ok_or(ChatError::Custom("Prompt append failed".into()))?;
+            }
+
+            // Otherwise continue with normal chat on 'n' or other responses
+            self.tool_use_status = ToolUseStatus::Idle;
+
+            if self.pending_tool_index.is_some() {
+                self.conversation.abandon_tool_use(&self.tool_uses, user_input);
+            } else {
+                self.conversation.set_next_user_message(user_input).await;
+            }
+
+            let conv_state = self
+                .conversation
+                .as_sendable_conversation_state(ctx, &mut self.output, true)
+                .await?;
+            self.send_tool_use_telemetry(telemetry).await;
+
+            queue!(self.output, style::SetForegroundColor(Color::Magenta))?;
+            queue!(self.output, style::SetForegroundColor(Color::Reset))?;
+            queue!(self.output, cursor::Hide)?;
+            execute!(self.output, style::Print("\n"))?;
+            self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
+
+            Ok(ChatState::HandleResponseStream(
+                self.client.send_message(conv_state).await?,
+            ))
+        }
     }
 
     async fn tool_use_execute(
@@ -1288,7 +1285,9 @@ impl ChatSession {
         telemetry: &TelemetryThread,
     ) -> Result<ChatState, ChatError> {
         // Verify tools have permissions.
-        for (index, tool) in self.tool_uses.iter_mut().enumerate() {
+        for i in 0..self.tool_uses.len() {
+            let tool = &mut self.tool_uses[i];
+
             // Manually accepted by the user or otherwise verified already.
             if tool.accepted {
                 continue;
@@ -1307,7 +1306,10 @@ impl ChatSession {
                 play_notification_bell(!allowed);
             }
 
-            self.print_tool_description(ctx, tool, allowed).await?;
+            // TODO: Control flow is hacky here because of borrow rules
+            drop(tool);
+            self.print_tool_description(ctx, i, allowed).await?;
+            let tool = &mut self.tool_uses[i];
 
             if allowed {
                 tool.accepted = true;
@@ -1797,7 +1799,8 @@ impl ChatSession {
             return Ok(ChatState::HandleResponseStream(response));
         }
 
-        Ok(ChatState::ExecuteTools(queued_tools))
+        self.tool_uses = queued_tools;
+        Ok(ChatState::ExecuteTools)
     }
 
     async fn upgrade_to_pro(&mut self, database: &mut Database) -> Result<(), ChatError> {
@@ -1908,9 +1911,11 @@ impl ChatSession {
     async fn print_tool_description(
         &mut self,
         ctx: &Context,
-        tool_use: &QueuedTool,
+        tool_index: usize,
         trusted: bool,
     ) -> Result<(), ChatError> {
+        let tool_use = &self.tool_uses[tool_index];
+
         queue!(
             self.output,
             style::SetForegroundColor(Color::Magenta),

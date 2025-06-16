@@ -382,7 +382,6 @@ mod tests {
     use chat_cli::platform::ACTIVE_USER_HOME;
 
     use super::*;
-    use crate::platform::EnvProvider;
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
@@ -394,7 +393,7 @@ mod tests {
         let actual = sanitize_path_tool_arg(&ctx, "~/hello");
         assert_eq!(
             actual,
-            ctx.fs().chroot_path(expected_home.join("hello")),
+            ctx.fs.chroot_path(expected_home.join("hello")),
             "tilde should expand"
         );
         let actual = sanitize_path_tool_arg(&ctx, "/~");
@@ -409,9 +408,9 @@ mod tests {
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
             let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-            let fs = ctx.fs;
             let cwd = sanitize_path_tool_arg(&ctx, cwd);
             let path = sanitize_path_tool_arg(&ctx, path);
+            let fs = ctx.fs;
             fs.create_dir_all(&cwd).await.unwrap();
             fs.create_dir_all(&path).await.unwrap();
 

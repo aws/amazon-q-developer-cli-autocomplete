@@ -11,7 +11,7 @@ pub mod prompts;
 pub mod tools;
 pub mod usage;
 
-use clap::Subcommand;
+use clap::Parser;
 use clear::ClearArgs;
 use compact::CompactArgs;
 use context::ContextSubcommand;
@@ -24,7 +24,6 @@ use profile::ProfileSubcommand;
 use prompts::PromptsArgs;
 use tools::ToolsArgs;
 
-use crate::cli::RootSubcommand;
 use crate::cli::chat::cli::usage::UsageArgs;
 use crate::cli::chat::{
     ChatError,
@@ -37,7 +36,7 @@ use crate::telemetry::TelemetryThread;
 
 /// Q Chat slash commands
 #[deny(missing_docs)]
-#[derive(Debug, PartialEq, Subcommand)]
+#[derive(Debug, PartialEq, Parser)]
 pub enum SlashCommand {
     /// Exit the chat
     #[command(aliases = ["q", "exit"])]
@@ -59,8 +58,8 @@ pub enum SlashCommand {
     Model(ModelArgs),
     #[command(flatten)]
     Persist(PersistSubcommand),
-    #[command(flatten)]
-    Root(RootSubcommand),
+    // #[command(flatten)]
+    // Root(RootSubcommand),
 }
 
 impl SlashCommand {
@@ -83,9 +82,17 @@ impl SlashCommand {
             Self::Usage(args) => args.execute(ctx, session).await,
             Self::Mcp(args) => args.execute(session).await,
             Self::Model(args) => args.execute(session).await,
-            Self::Root(subcommand) => subcommand.execute().await,
             Self::Hooks(args) => args.execute(ctx, session).await,
             Self::Persist(subcommand) => subcommand.execute(ctx, session).await,
+            // Self::Root(subcommand) => {
+            //     if let Err(err) = subcommand.execute(ctx, database, telemetry).await {
+            //         return Err(ChatError::Custom(err.to_string().into()));
+            //     }
+            //
+            //     Ok(ChatState::PromptUser {
+            //         skip_printing_tools: true,
+            //     })
+            // },
         }
     }
 }
