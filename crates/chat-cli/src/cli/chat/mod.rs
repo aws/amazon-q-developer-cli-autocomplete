@@ -461,8 +461,6 @@ pub const MODEL_OPTIONS: [ModelOption; 3] = [
     },
 ];
 
-pub const DEFAULT_MODEL_ID: &str = "CLAUDE_SONNET_4_20250514_V1_0";
-
 const GREETING_BREAK_POINT: usize = 80;
 
 const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>  <green!>ctrl + j</green!> new lines  <em>•</em>  <green!>ctrl + s</green!> fuzzy search</black!>"};
@@ -649,19 +647,19 @@ impl ChatContext {
         let output_clone = output.clone();
 
         let mut existing_conversation = false;
-        let valid_model_id = match model_id {
-            Some(id) => Some(id),
-            None => database
-                .settings
-                .get_string(Setting::ChatDefaultModel)
-                .and_then(|model_name| {
-                    MODEL_OPTIONS
-                        .iter()
-                        .find(|opt| opt.name == model_name)
-                        .map(|opt| opt.model_id.to_owned())
-                })
-                .or_else(|| Some(DEFAULT_MODEL_ID.to_owned())),
-        };
+        let valid_model_id = model_id
+            .or_else(|| {
+                database
+                    .settings
+                    .get_string(Setting::ChatDefaultModel)
+                    .and_then(|model_name| {
+                        MODEL_OPTIONS
+                            .iter()
+                            .find(|opt| opt.name == model_name)
+                            .map(|opt| opt.model_id.to_owned())
+                    })
+            })
+            .unwrap_or_else(|| default_model_id(database).to_owned());
 
         let conversation_state = if resume_conversation {
             let prior = std::env::current_dir()
@@ -689,7 +687,7 @@ impl ChatContext {
                     profile,
                     Some(output_clone),
                     tool_manager,
-                    valid_model_id,
+                    Some(valid_model_id),
                 )
                 .await
             }
@@ -701,7 +699,7 @@ impl ChatContext {
                 profile,
                 Some(output_clone),
                 tool_manager,
-                valid_model_id,
+                Some(valid_model_id),
             )
             .await
         };
@@ -4241,6 +4239,14 @@ impl ChatContext {
             )
             .await
             .ok();
+    }
+}
+
+/// Currently, Sonnet 4 is set as the default model for non-FRA users.
+pub fn default_model_id(database: &Database) -> &'static str {
+    match database.get_auth_profile() {
+        Ok(Some(profile)) if profile.arn.split(':').nth(3) == Some("us-east-1") => "CLAUDE_SONNET_4_20250514_V1_0",
+        _ => "CLAUDE_3_7_SONNET_20250219_V1_0",
     }
 }
 
