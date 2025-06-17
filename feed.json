@@ -22,6 +22,10 @@
         },
         {
           "type": "added",
+          "description": "Support for passing arguments to MCP server configuration in the CLI - [#262](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/262)"
+        },
+        {
+          "type": "added",
           "description": "Support for disabling MCP servers with `disabled: true` - [#257](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/257)"
         },
         {
