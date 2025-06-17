@@ -76,6 +76,7 @@ use spinners::{
     Spinners,
 };
 use thiserror::Error;
+use time::OffsetDateTime;
 use token_counter::TokenCounter;
 use tokio::signal::ctrl_c;
 use tool_manager::{
@@ -138,7 +139,10 @@ use crate::telemetry::{
     TelemetryThread,
     get_error_reason,
 };
-use crate::util::system_info::is_remote;
+
+const LIMIT_REACHED_TEXT: &str = color_print::cstr! { "You've used all your free requests for this month. You have two options:
+1. Upgrade to a paid subscription for increased limits. See our Pricing page for what's included> <blue!>https://aws.amazon.com/q/developer/pricing/</blue!>
+2. Wait until next month when your limit automatically resets." };
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
 pub struct ChatArgs {
@@ -339,77 +343,10 @@ const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green
 <green!>ctrl + s</green!> fuzzy search
 </black!>"};
 
-const HELP_TEXT: &str = color_print::cstr! {"
-
-<magenta,em>q</magenta,em> (Amazon Q Chat)
-
-<cyan,em>Commands:</cyan,em>
-<em>/clear</em>        <black!>Clear the conversation history</black!>
-<em>/issue</em>        <black!>Report an issue or make a feature request</black!>
-<em>/editor</em>       <black!>Open $EDITOR (defaults to vi) to compose a prompt</black!>
-<em>/help</em>         <black!>Show this help dialogue</black!>
-<em>/quit</em>         <black!>Quit the application</black!>
-<em>/compact</em>      <black!>Summarize the conversation to free up context space</black!>
-  <em>help</em>        <black!>Show help for the compact command</black!>
-  <em>[prompt]</em>    <black!>Optional custom prompt to guide summarization</black!>
-<em>/tools</em>        <black!>View and manage tools and permissions</black!>
-  <em>help</em>        <black!>Show an explanation for the trust command</black!>
-  <em>trust</em>       <black!>Trust a specific tool or tools for the session</black!>
-  <em>untrust</em>     <black!>Revert a tool or tools to per-request confirmation</black!>
-  <em>trustall</em>    <black!>Trust all tools (equivalent to deprecated /acceptall)</black!>
-  <em>reset</em>       <black!>Reset all tools to default permission levels</black!>
-<em>/mcp</em>          <black!>See mcp server loaded</black!>
-<em>/model</em>        <black!>Select a model for the current conversation session</black!>
-<em>/profile</em>      <black!>Manage profiles</black!>
-  <em>help</em>        <black!>Show profile help</black!>
-  <em>list</em>        <black!>List profiles</black!>
-  <em>set</em>         <black!>Set the current profile</black!>
-  <em>create</em>      <black!>Create a new profile</black!>
-  <em>delete</em>      <black!>Delete a profile</black!>
-  <em>rename</em>      <black!>Rename a profile</black!>
-<em>/prompts</em>      <black!>View and retrieve prompts</black!>
-  <em>help</em>        <black!>Show prompts help</black!>
-  <em>list</em>        <black!>List or search available prompts</black!>
-  <em>get</em>         <black!>Retrieve and send a prompt</black!>
-<em>/context</em>      <black!>Manage context files and hooks for the chat session</black!>
-  <em>help</em>        <black!>Show context help</black!>
-  <em>show</em>        <black!>Display current context rules configuration [--expand]</black!>
-  <em>add</em>         <black!>Add file(s) to context [--global] [--force]</black!>
-  <em>rm</em>          <black!>Remove file(s) from context [--global]</black!>
-  <em>clear</em>       <black!>Clear all files from current context [--global]</black!>
-  <em>hooks</em>       <black!>View and manage context hooks</black!>
-<em>/usage</em>        <black!>Show current session's context window usage</black!>
-<em>/load</em>         <black!>Load conversation state from a JSON file</black!>
-<em>/save</em>         <black!>Save conversation state to a JSON file</black!>
-<em>/subscribe</em>    <black!>Upgrade to a Q Developer Pro subscription for increased query limits</black!>
-  <em>[--manage]</em>  <black!>View and manage your existing subscription on AWS</black!>
-
-<cyan,em>MCP:</cyan,em>
-<black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
-
-<cyan,em>Tips:</cyan,em>
-<em>!{command}</em>            <black!>Quickly execute a command in your current session</black!>
-<em>Ctrl(^) + j</em>           <black!>Insert new-line to provide multi-line prompt. Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
-<em>Ctrl(^) + s</em>           <black!>Fuzzy search commands and context files. Use Tab to select multiple items.</black!>
-                      <black!>Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)</black!>
-<em>chat.editMode</em>         <black!>Set editing mode (vim or emacs) using: q settings chat.editMode vi/emacs</black!>
-
-"};
-
 const RESPONSE_TIMEOUT_CONTENT: &str = "Response timed out - message took too long to generate";
 const TRUST_ALL_TEXT: &str = color_print::cstr! {"<green!>All tools are now trusted (<red!>!</red!>). Amazon Q will execute tools <bold>without</bold> asking for confirmation.\
 \nAgents can sometimes do unexpected things so understand the risks.</green!>
 \nLearn more at https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-chat-security.html#command-line-chat-trustall-safety"};
-
-const SUBSCRIBE_TITLE_TEXT: &str = color_print::cstr! { "<white!,bold>Subscribe to Q Developer Pro</white!,bold>" };
-
-const SUBSCRIBE_TEXT: &str = color_print::cstr! { "During the upgrade, you'll be asked to link your Builder ID to the AWS account that will be billed the monthly subscription fee.
-
-Need help? Visit our subscription support page> <blue!>https://docs.aws.amazon.com/console/amazonq/upgrade-builder-id</blue!>" };
-
-const LIMIT_REACHED_TEXT: &str = color_print::cstr! { "You've used all your free requests for this month. You have two options:
-1. Upgrade to a paid subscription for increased limits. See our Pricing page for what's included> <blue!>https://aws.amazon.com/q/developer/pricing/</blue!>
-2. Wait until next month when your limit automatically resets." };
 
 const TOOL_BULLET: &str = " ● ";
 const CONTINUATION_LINE: &str = " ⋮ ";
@@ -718,6 +655,61 @@ impl ChatSession {
                     );
                     self.conversation.append_transcript(err.clone());
                     ("Amazon Q is having trouble responding right now", eyre!(err))
+                },
+                ApiClientError::MonthlyLimitReached => {
+                    let subscription_status = get_subscription_status(database).await;
+                    if subscription_status.is_err() {
+                        execute!(
+                            self.output,
+                            style::SetForegroundColor(Color::Red),
+                            style::Print(format!(
+                                "Unable to verify subscription status: {}\n\n",
+                                subscription_status.as_ref().err().unwrap()
+                            )),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                    }
+
+                    execute!(
+                        self.output,
+                        style::SetForegroundColor(Color::Yellow),
+                        style::Print("Monthly request limit reached"),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+
+                    let limits_text = format!(
+                        "The limits reset on {:02}/01.",
+                        OffsetDateTime::now_utc().month().next() as u8
+                    );
+
+                    if subscription_status.is_err()
+                        || subscription_status.is_ok_and(|s| s == ActualSubscriptionStatus::None)
+                    {
+                        execute!(
+                            self.output,
+                            style::Print(format!("\n\n{LIMIT_REACHED_TEXT} {limits_text}")),
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print("\n\nUse "),
+                            style::SetForegroundColor(Color::Green),
+                            style::Print("/subscribe"),
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print(" to upgrade your subscription.\n\n"),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                    } else {
+                        execute!(
+                            self.output,
+                            style::SetForegroundColor(Color::Yellow),
+                            style::Print(format!(" - {limits_text}\n\n")),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                    }
+
+                    self.inner = Some(ChatState::PromptUser {
+                        skip_printing_tools: false,
+                    });
+
+                    return Ok(());
                 },
                 _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
             },
@@ -1176,32 +1168,38 @@ impl ChatSession {
         telemetry: &TelemetryThread,
         mut user_input: String,
     ) -> Result<ChatState, ChatError> {
+        queue!(self.output, style::Print('\n'))?;
+
         let input = user_input.trim();
-        if let Some(args) = input.strip_prefix("/").map(|input| shlex::split(input)).flatten() {
+        if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
+            args.insert(0, "q".to_owned());
             match SlashCommand::try_parse_from(args) {
                 Ok(command) => {
-                    command.execute(ctx, database, telemetry, self).await;
+                    if let Err(err) = command.execute(ctx, database, telemetry, self).await {
+                        queue!(
+                            self.output,
+                            style::SetForegroundColor(Color::Red),
+                            style::Print(format!("Failed to execute command: {}\n", err)),
+                            style::SetForegroundColor(Color::Reset)
+                        )?;
+                    }
 
-                    Ok(ChatState::PromptUser {
-                        skip_printing_tools: false,
-                    })
+                    writeln!(self.output)?;
                 },
                 Err(err) => {
-                    write!(self.output, "{}", err.render())?;
-
-                    Ok(ChatState::PromptUser {
-                        skip_printing_tools: false,
-                    })
+                    writeln!(self.output, "{}", err)?;
                 },
             }
-        } else if let Some(command) = input.strip_prefix("!") {
-            queue!(self.output, style::Print('\n'))?;
 
+            Ok(ChatState::PromptUser {
+                skip_printing_tools: false,
+            })
+        } else if let Some(command) = input.strip_prefix("!") {
             // Use platform-appropriate shell
             let result = if cfg!(target_os = "windows") {
-                std::process::Command::new("cmd").args(["/C", &command]).status()
+                std::process::Command::new("cmd").args(["/C", command]).status()
             } else {
-                std::process::Command::new("bash").args(["-c", &command]).status()
+                std::process::Command::new("bash").args(["-c", command]).status()
             };
 
             // Handle the result and provide appropriate feedback
@@ -1307,7 +1305,7 @@ impl ChatSession {
             }
 
             // TODO: Control flow is hacky here because of borrow rules
-            drop(tool);
+            let _ = tool;
             self.print_tool_description(ctx, i, allowed).await?;
             let tool = &mut self.tool_uses[i];
 
@@ -1803,93 +1801,6 @@ impl ChatSession {
         Ok(ChatState::ExecuteTools)
     }
 
-    async fn upgrade_to_pro(&mut self, database: &mut Database) -> Result<(), ChatError> {
-        queue!(self.output, style::Print("\n"),)?;
-
-        // Get current subscription status
-        match get_subscription_status_with_spinner(&mut self.output, database).await {
-            Ok(status) => {
-                if status == ActualSubscriptionStatus::Active {
-                    queue!(
-                        self.output,
-                        style::SetForegroundColor(Color::Yellow),
-                        style::Print("Your Builder ID already has a Q Developer Pro subscription.\n\n"),
-                        style::SetForegroundColor(Color::Reset),
-                    )?;
-                    return Ok(());
-                }
-            },
-            Err(e) => {
-                execute!(
-                    self.output,
-                    style::SetForegroundColor(Color::Red),
-                    style::Print(format!("{}\n\n", e)),
-                    style::SetForegroundColor(Color::Reset),
-                )?;
-                // Don't exit early here, the check isn't required to subscribe.
-            },
-        }
-
-        // Upgrade information
-        queue!(
-            self.output,
-            style::Print(SUBSCRIBE_TITLE_TEXT),
-            style::SetForegroundColor(Color::Grey),
-            style::Print(format!("\n\n{}\n\n", SUBSCRIBE_TEXT)),
-            style::SetForegroundColor(Color::Reset),
-            cursor::Show
-        )?;
-
-        let prompt = format!(
-            "{}{}{}{}{}",
-            "Would you like to open the AWS console to upgrade? [".dark_grey(),
-            "y".green(),
-            "/".dark_grey(),
-            "n".green(),
-            "]: ".dark_grey(),
-        );
-
-        let user_input = self.read_user_input(&prompt, true);
-        queue!(self.output, style::SetForegroundColor(Color::Reset), style::Print("\n"),)?;
-
-        if !user_input.is_some_and(|i| ["y", "Y"].contains(&i.as_str())) {
-            execute!(
-                self.output,
-                style::SetForegroundColor(Color::Red),
-                style::Print("Upgrade cancelled.\n\n"),
-                style::SetForegroundColor(Color::Reset),
-            )?;
-            return Ok(());
-        }
-
-        // Create a subscription token and open the webpage
-        let url = with_spinner(&mut self.output, "Preparing to upgrade...", || async {
-            let r = Client::new(database, None).await?.create_subscription_token().await?;
-            Ok::<String, ChatError>(r.encoded_verification_url().to_string())
-        })
-        .await?;
-
-        if is_remote() || crate::util::open::open_url_async(&url).await.is_err() {
-            queue!(
-                self.output,
-                style::SetForegroundColor(Color::DarkGrey),
-                style::Print(format!(
-                    "{} Having issues opening the AWS console? Try copy and pasting the URL > {}\n\n",
-                    "?".magenta(),
-                    url.blue()
-                )),
-                style::SetForegroundColor(Color::Reset),
-            )?;
-        }
-
-        execute!(
-            self.output,
-            style::Print("Once upgraded, type a new prompt to continue your work, or type /quit to exit the chat.\n\n")
-        )?;
-
-        Ok(())
-    }
-
     /// Apply program context to tools that Q may not have.
     // We cannot attach this any other way because Tools are constructed by deserializing
     // output from Amazon Q.
@@ -2229,7 +2140,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow() {
         // let _ = tracing_subscriber::fmt::try_init();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         let test_client = create_stream(serde_json::json!([
             [
                 "Sure, I'll create a file for you",
@@ -2255,8 +2166,8 @@ mod tests {
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
-        ChatState::new(
-            Arc::clone(&ctx),
+        ChatSession::new(
+            &mut ctx,
             &mut database,
             "fake_conv_id",
             SharedWriter::stdout(),
@@ -2266,7 +2177,6 @@ mod tests {
                 "y".to_string(),
                 "exit".to_string(),
             ]),
-            true,
             false,
             test_client,
             || Some(80),
@@ -2278,7 +2188,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .try_chat(&mut database, &telemetry)
+        .next(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2288,7 +2198,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow_tool_permissions() {
         // let _ = tracing_subscriber::fmt::try_init();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         let test_client = create_stream(serde_json::json!([
             [
                 "Ok",
@@ -2389,8 +2299,8 @@ mod tests {
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
-        ChatState::new(
-            Arc::clone(&ctx),
+        ChatSession::new(
+            &mut ctx,
             &mut database,
             "fake_conv_id",
             SharedWriter::stdout(),
@@ -2413,7 +2323,6 @@ mod tests {
                 "n".to_string(),             // cancel
                 "exit".to_string(),
             ]),
-            true,
             false,
             test_client,
             || Some(80),
@@ -2425,7 +2334,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .try_chat(&mut database, &telemetry)
+        .next(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2439,7 +2348,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow_multiple_tools() {
         // let _ = tracing_subscriber::fmt::try_init();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         let test_client = create_stream(serde_json::json!([
             [
                 "Sure, I'll create a file for you",
@@ -2498,8 +2407,8 @@ mod tests {
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
-        ChatState::new(
-            Arc::clone(&ctx),
+        ChatSession::new(
+            &mut ctx,
             &mut database,
             "fake_conv_id",
             SharedWriter::stdout(),
@@ -2513,7 +2422,6 @@ mod tests {
                 "y".to_string(),
                 "exit".to_string(),
             ]),
-            true,
             false,
             test_client,
             || Some(80),
@@ -2525,7 +2433,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .try_chat(&mut database, &telemetry)
+        .next(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2538,7 +2446,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow_tools_trust_all() {
         // let _ = tracing_subscriber::fmt::try_init();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         let test_client = create_stream(serde_json::json!([
             [
                 "Sure, I'll create a file for you",
@@ -2579,8 +2487,8 @@ mod tests {
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
-        ChatState::new(
-            Arc::clone(&ctx),
+        ChatSession::new(
+            &mut ctx,
             &mut database,
             "fake_conv_id",
             SharedWriter::stdout(),
@@ -2592,7 +2500,6 @@ mod tests {
                 "create a new file".to_string(),
                 "exit".to_string(),
             ]),
-            true,
             false,
             test_client,
             || Some(80),
@@ -2604,7 +2511,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .try_chat(&mut database, &telemetry)
+        .next(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2629,7 +2536,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_flow() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
 
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
@@ -2642,14 +2549,13 @@ mod tests {
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
-        ChatContext::new(
-            Arc::clone(&ctx),
+        ChatSession::new(
+            &mut ctx,
             &mut database,
             "fake_conv_id",
             output,
             None,
             InputSource::new_mock(vec!["/subscribe".to_string(), "y".to_string(), "/quit".to_string()]),
-            true,
             false,
             create_stream(serde_json::json!([])),
             || Some(80),
@@ -2661,7 +2567,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .try_chat(&mut database, &telemetry)
+        .next(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 

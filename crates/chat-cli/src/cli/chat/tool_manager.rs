@@ -58,7 +58,6 @@ use tracing::{
     warn,
 };
 
-use super::util::shared_writer::SharedWriter;
 use crate::api_client::model::{
     ToolResult,
     ToolResultContentBlock,
@@ -772,7 +771,7 @@ impl ToolManager {
     pub async fn load_tools(
         &mut self,
         database: &Database,
-        output: &mut SharedWriter,
+        output: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
         let notify = self.notify.take();
@@ -1046,6 +1045,7 @@ impl ToolManager {
         self.schema.extend(tool_specs);
     }
 
+    #[allow(clippy::await_holding_lock)]
     pub async fn get_prompt(
         &self,
         name: String,

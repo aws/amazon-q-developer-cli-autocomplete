@@ -611,7 +611,7 @@ mod tests {
     ///     .hidden
     /// ```
     async fn setup_test_directory() -> Context {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
         ctx.fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
         ctx.fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
         ctx.fs.create_dir_all("/aaaa2").await.unwrap();
@@ -849,7 +849,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_insert_when_no_newlines_in_file() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let test_file_path = "/file.txt";

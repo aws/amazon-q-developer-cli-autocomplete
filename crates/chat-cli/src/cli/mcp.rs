@@ -400,6 +400,7 @@ async fn load_cfg(ctx: &Context, p: &PathBuf) -> Result<McpServerConfig> {
 mod tests {
     use super::*;
     use crate::cli::RootSubcommand;
+    use crate::cli::chat::util::shared_writer::NullWriter;
     use crate::util::test::assert_parse;
 
     #[test]
@@ -429,7 +430,7 @@ mod tests {
     #[tokio::test]
     async fn ensure_file_created_and_loaded() {
         let ctx = Context::new();
-        let mut out = SharedWriter::null();
+        let mut out = NullWriter;
         let path = workspace_mcp_config_path(&ctx).unwrap();
 
         let cfg = super::ensure_config_file(&ctx, &path, &mut out).await.unwrap();
@@ -440,7 +441,7 @@ mod tests {
     #[tokio::test]
     async fn add_then_remove_cycle() {
         let ctx = Context::new();
-        let mut out = SharedWriter::null();
+        let mut out = NullWriter;
 
         // 1. add
         AddArgs {

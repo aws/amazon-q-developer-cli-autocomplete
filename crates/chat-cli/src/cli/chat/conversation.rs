@@ -430,7 +430,7 @@ impl ConversationState {
     }
 
     /// Sets the next user message with "cancelled" tool results.
-    pub fn abandon_tool_use(&mut self, tools_to_be_abandoned: &Vec<QueuedTool>, deny_input: String) {
+    pub fn abandon_tool_use(&mut self, tools_to_be_abandoned: &[QueuedTool], deny_input: String) {
         self.next_message = Some(UserMessage::new_cancelled_tool_uses(
             Some(deny_input),
             tools_to_be_abandoned.iter().map(|t| t.id.as_str()),
@@ -1073,12 +1073,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
+        let mut ctx = Context::new();
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
         let mut tool_manager = ToolManager::default();
         let mut conversation = ConversationState::new(
-            &mut Context::default(),
+            &mut ctx,
             "fake_conv_id",
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
             None,
@@ -1092,8 +1093,9 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(ctx, &mut output, true)
-                .await;
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             assert_conversation_state_invariants(s, i);
             conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
             conversation.set_next_user_message(i.to_string()).await;
@@ -1102,8 +1104,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_with_tool_results() {
+        let ctx = Context::new();
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
@@ -1120,8 +1123,9 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(ctx, &mut output, true)
-                .await;
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             assert_conversation_state_invariants(s, i);
 
             conversation.push_assistant_message(
@@ -1153,8 +1157,9 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(ctx, &mut output, true)
-                .await;
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             assert_conversation_state_invariants(s, i);
             if i % 3 == 0 {
                 conversation.push_assistant_message(
@@ -1181,9 +1186,9 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_with_context_files() {
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         ctx.fs.write(AMAZONQ_FILENAME, "test context").await.unwrap();
 
         let mut tool_manager = ToolManager::default();
@@ -1203,7 +1208,8 @@ mod tests {
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
                 .as_sendable_conversation_state(&ctx, &mut output, true)
-                .await;
+                .await
+                .unwrap();
 
             // Ensure that the first two messages are the fake context messages.
             let hist = s.history.as_ref().unwrap();
@@ -1229,13 +1235,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_additional_context() {
-        // tracing_subscriber::fmt::try_init().ok();
-
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
         let mut tool_manager = ToolManager::default();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
         let config = serde_json::json!({
@@ -1262,7 +1266,7 @@ mod tests {
             &mut ctx,
             "fake_conv_id",
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
-            Some(SharedWriter::stdout()),
+            None,
             tool_manager,
             None,
         )
@@ -1273,7 +1277,8 @@ mod tests {
         for i in 0..=5 {
             let s = conversation
                 .as_sendable_conversation_state(&ctx, &mut output, true)
-                .await;
+                .await
+                .unwrap();
             let hist = s.history.as_ref().unwrap();
             #[allow(clippy::match_wildcard_for_single_variants)]
             match &hist[0] {

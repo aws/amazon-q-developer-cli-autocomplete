@@ -100,8 +100,6 @@ mod tests {
 
     #[test]
     fn test_platform() {
-        let platform = Platform::default();
-
         for os in Os::all() {
             let platform = Platform::new_fake(*os);
             assert_eq!(&platform.os(), os);

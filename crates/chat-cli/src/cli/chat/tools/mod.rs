@@ -385,7 +385,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
 
         let actual = sanitize_path_tool_arg(&ctx, "~");
         let expected_home = ctx.env.home().unwrap_or_default();
@@ -407,7 +407,7 @@ mod tests {
     #[tokio::test]
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
-            let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+            let ctx = Context::new();
             let cwd = sanitize_path_tool_arg(&ctx, cwd);
             let path = sanitize_path_tool_arg(&ctx, path);
             let fs = ctx.fs;

@@ -103,7 +103,7 @@ impl ContextManager {
     /// A Result indicating success or an error
     async fn save_config(&self, ctx: &Context, global: bool) -> Result<()> {
         if global {
-            let global_path = directories::chat_global_context_path(&ctx)?;
+            let global_path = directories::chat_global_context_path(ctx)?;
             let contents = serde_json::to_string_pretty(&self.global_config)
                 .map_err(|e| eyre!("Failed to serialize global configuration: {}", e))?;
 
@@ -251,6 +251,8 @@ impl ContextManager {
     /// # Returns
     /// A Result containing a vector of profile names, with "default" always first
     pub fn list_profiles_blocking(&self, ctx: &Context) -> Result<Vec<String>> {
+        let _ = self;
+
         let mut profiles = Vec::new();
 
         // Always include default profile
@@ -792,15 +794,7 @@ fn validate_profile_name(name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::chat::util::shared_writer::NullWriter;
-
-    // Helper function to create a test ContextManager with Context
-    pub async fn create_test_context_manager(context_file_size: Option<usize>) -> Result<ContextManager> {
-        let context_file_size = context_file_size.unwrap_or(CONTEXT_FILES_MAX_SIZE);
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let manager = ContextManager::new(&ctx, Some(context_file_size)).await?;
-        Ok(manager)
-    }
+    use crate::cli::chat::util::test::create_test_context_manager;
 
     #[tokio::test]
     async fn test_validate_profile_name() {
@@ -823,8 +817,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_profile_ops() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
-        let ctx = Arc::clone(&manager.ctx);
 
         assert_eq!(manager.current_profile, "default");
 
@@ -862,8 +856,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_exceeds_limit() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(Some(2)).await?;
-        let ctx: Arc<Context> = Arc::clone(&manager.ctx);
 
         ctx.fs.create_dir_all("test").await?;
         ctx.fs.write("test/to-include.md", "ha").await?;
@@ -884,8 +878,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_ops() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
-        let ctx: Arc<Context> = Arc::clone(&manager.ctx);
 
         // Create some test files for matching.
         ctx.fs.create_dir_all("test").await?;

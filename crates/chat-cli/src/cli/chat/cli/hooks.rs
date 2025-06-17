@@ -767,6 +767,10 @@ fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, tr
     Ok(())
 }
 
+fn map_chat_error(e: ErrReport) -> ChatError {
+    ChatError::Custom(e.to_string().into())
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -775,9 +779,11 @@ mod tests {
 
     use super::*;
     use crate::cli::chat::util::shared_writer::NullWriter;
+    use crate::cli::chat::util::test::create_test_context_manager;
 
     #[tokio::test]
     async fn test_add_hook() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
@@ -806,6 +812,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_hook() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
@@ -823,6 +830,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_hook_disabled() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
@@ -849,6 +857,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_all_hooks_disabled() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
@@ -869,6 +878,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hooks() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
@@ -877,7 +887,7 @@ mod tests {
         manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
 
         // Run the hooks
-        let results = manager.run_hooks(&mut NullWriter).await;
+        let results = manager.run_hooks(&mut NullWriter).await.unwrap();
         assert_eq!(results.len(), 2); // Should include both hooks
 
         Ok(())
@@ -885,6 +895,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hooks_across_profiles() -> Result<()> {
+        let ctx = Context::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
@@ -892,14 +903,14 @@ mod tests {
         manager.add_hook(&ctx, "profile_hook".to_string(), hook1, false).await?;
         manager.add_hook(&ctx, "global_hook".to_string(), hook2, true).await?;
 
-        let results = manager.run_hooks(&mut NullWriter).await;
+        let results = manager.run_hooks(&mut NullWriter).await.unwrap();
         assert_eq!(results.len(), 2); // Should include both hooks
 
         // Create and switch to a new profile
         manager.create_profile(&ctx, "test_profile").await?;
         manager.switch_profile(&ctx, "test_profile").await?;
 
-        let results = manager.run_hooks(&mut NullWriter).await;
+        let results = manager.run_hooks(&mut NullWriter).await.unwrap();
         assert_eq!(results.len(), 1); // Should include global hook
         assert_eq!(results[0].0.name, "global_hook");
 
@@ -1124,8 +1135,4 @@ mod tests {
             "Windows shell path should contain cmd.exe or command.com"
         );
     }
-}
-
-fn map_chat_error(e: ErrReport) -> ChatError {
-    ChatError::Custom(e.to_string().into())
 }
