@@ -87,7 +87,7 @@ pub struct AddArgs {
     #[arg(long)]
     pub command: String,
     /// Arguments to pass to the command
-    #[arg(long, action = ArgAction::Append, value_delimiter = ',')]
+    #[arg(long, action = ArgAction::Append, allow_hyphen_values = true, value_delimiter = ',')]
     pub args: Vec<String>,
     /// Where to add the server to.
     #[arg(long, value_enum)]
