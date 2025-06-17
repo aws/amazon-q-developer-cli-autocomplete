@@ -9,6 +9,8 @@ pub const PRODUCT_NAME: &str = "Amazon Q";
 
 pub const GITHUB_REPO_NAME: &str = "aws/amazon-q-developer-cli";
 
+pub const MCP_SERVER_TOOL_DELIMITER: &str = "/";
+
 /// Build time env vars
 pub mod build {
     /// A git full sha hash of the current build

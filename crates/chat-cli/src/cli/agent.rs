@@ -82,6 +82,8 @@ pub struct Agent {
     #[serde(default)]
     pub tools: Vec<String>,
     #[serde(default)]
+    pub alias: HashMap<String, String>,
+    #[serde(default)]
     pub allowed_tools: HashSet<String>,
     #[serde(default)]
     pub included_files: Vec<String>,
@@ -103,6 +105,7 @@ impl Default for Agent {
             prompt: Default::default(),
             mcp_servers: Default::default(),
             tools: vec!["*".to_string()],
+            alias: Default::default(),
             allowed_tools: {
                 let mut set = HashSet::<String>::new();
                 set.insert("*".to_string());
@@ -433,13 +436,15 @@ mod tests {
               },
               "tools": [                                    
                 "@git",                                     
-                "@git.git_status",                         
                 "fs_read"
               ],
+              "alias": {
+                  "@gits/some_tool": "some_tool2"
+              },
               "allowedTools": [                           
                 "fs_read",                               
                 "@fetch",
-                "@git/git_status"
+                "@gits/git_status"
               ],
               "includedFiles": [                        
                 "~/my-genai-prompts/unittest.md"
@@ -452,7 +457,7 @@ mod tests {
               ],
               "toolsSettings": {                     
                 "fs_write": { "allowedPaths": ["~/**"] },
-                "@git/git_status": { "git_user": "$GIT_USER" }
+                "@git.git_status": { "git_user": "$GIT_USER" }
               }
             }
         "#;
@@ -462,6 +467,7 @@ mod tests {
         let agent = serde_json::from_str::<Agent>(INPUT).expect("Deserializtion failed");
         assert!(agent.mcp_servers.mcp_servers.contains_key("fetch"));
         assert!(agent.mcp_servers.mcp_servers.contains_key("git"));
+        assert!(agent.alias.contains_key("@gits/some_tool"));
     }
 
     #[test]

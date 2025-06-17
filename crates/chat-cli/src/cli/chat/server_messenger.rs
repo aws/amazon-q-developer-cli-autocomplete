@@ -18,7 +18,6 @@ use crate::mcp_client::{
 pub enum UpdateEventMessage {
     ToolsListResult {
         server_name: String,
-        orig_server_name: Option<String>,
         result: eyre::Result<ToolsListResult>,
     },
     PromptsListResult {
@@ -55,7 +54,6 @@ impl ServerMessengerBuilder {
     pub fn build_with_name(&self, server_name: String) -> ServerMessenger {
         ServerMessenger {
             server_name,
-            orig_server_name: None,
             update_event_sender: self.update_event_sender.clone(),
         }
     }
@@ -64,7 +62,6 @@ impl ServerMessengerBuilder {
 #[derive(Clone, Debug)]
 pub struct ServerMessenger {
     pub server_name: String,
-    pub orig_server_name: Option<String>,
     pub update_event_sender: Sender<UpdateEventMessage>,
 }
 
@@ -75,7 +72,6 @@ impl Messenger for ServerMessenger {
             .update_event_sender
             .send(UpdateEventMessage::ToolsListResult {
                 server_name: self.server_name.clone(),
-                orig_server_name: self.orig_server_name.clone(),
                 result,
             })
             .await

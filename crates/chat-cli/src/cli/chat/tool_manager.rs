@@ -26,7 +26,6 @@ use std::time::{
     Instant,
 };
 
-use convert_case::Casing;
 use crossterm::{
     cursor,
     execute,
@@ -93,6 +92,7 @@ use crate::mcp_client::{
 };
 use crate::platform::Context;
 use crate::telemetry::TelemetryThread;
+use crate::util::MCP_SERVER_TOOL_DELIMITER;
 use crate::util::directories::home_dir;
 
 const NAMESPACE_DELIMITER: &str = "___";
@@ -210,19 +210,25 @@ impl ToolManagerBuilder {
         let McpServerConfig { mcp_servers } = self.mcp_server_config.ok_or(eyre::eyre!("Missing mcp server config"))?;
         debug_assert!(self.conversation_id.is_some());
         let conversation_id = self.conversation_id.ok_or(eyre::eyre!("Missing conversation id"))?;
-        let regex = regex::Regex::new(VALID_TOOL_NAME)?;
-        let mut hasher = DefaultHasher::new();
         let is_interactive = self.is_interactive;
         let pre_initialized = mcp_servers
             .into_iter()
-            .map(|(orig_name, server_config)| {
-                let snaked_cased_name = orig_name.to_case(convert_case::Case::Snake);
-                let sanitized_server_name = sanitize_name(snaked_cased_name, &regex, &mut hasher);
-                let custom_tool_client =
-                    CustomToolClient::from_config(sanitized_server_name.clone(), orig_name, server_config);
-                (sanitized_server_name, custom_tool_client)
+            .filter_map(|(server_name, server_config)| {
+                if server_name.contains(MCP_SERVER_TOOL_DELIMITER) {
+                    let _ = queue!(
+                        output,
+                        style::Print(format!(
+                            "Invalid server name {server_name}. Server name cannot contain {MCP_SERVER_TOOL_DELIMITER}\n"
+                        ))
+                    );
+                    None
+                } else {
+                    let custom_tool_client = CustomToolClient::from_config(server_name.clone(), server_config);
+                    Some((server_name, custom_tool_client))
+                }
             })
             .collect::<Vec<(String, _)>>();
+        output.flush()?;
         let mut loading_servers = HashMap::<String, Instant>::new();
         for (server_name, _) in &pre_initialized {
             let init_time = std::time::Instant::now();
@@ -364,11 +370,7 @@ impl ToolManagerBuilder {
                 // request method on the mcp client no longer buffers all the pages from
                 // list calls.
                 match msg {
-                    UpdateEventMessage::ToolsListResult {
-                        server_name,
-                        orig_server_name,
-                        result,
-                    } => {
+                    UpdateEventMessage::ToolsListResult { server_name, result } => {
                         let time_taken = loading_servers
                             .remove(&server_name)
                             .map_or("0.0".to_owned(), |init_time| {
@@ -376,36 +378,52 @@ impl ToolManagerBuilder {
                                 format!("{:.2}", time_taken)
                             });
                         pending_clone.write().await.remove(&server_name);
-                        let orig_server_name = orig_server_name.as_ref().unwrap_or(&server_name);
-                        let tool_filter = 'list: {
+                        let (tool_filter, alias_list) = {
                             let agent_lock = agent_clone.lock().await;
 
                             // We will assume all tools are allowed if the tool list consists of 1
                             // element and it's a *
-                            if agent_lock.tools.len() == 1
+                            let tool_filter = if agent_lock.tools.len() == 1
                                 && agent_lock.tools.first().map(String::as_str).is_some_and(|c| c == "*")
                             {
-                                break 'list ToolFilter::All;
-                            }
-
-                            let set = agent_lock
-                                .tools
-                                .iter()
-                                .filter(|tool_name| tool_name.starts_with(&format!("@{orig_server_name}")))
-                                .map(|full_name| {
-                                    match full_name.split_once("/") {
-                                        Some((_, tool_name)) if !tool_name.is_empty() => tool_name,
-                                        _ => "*",
-                                    }
-                                    .to_string()
-                                })
-                                .collect::<HashSet<_>>();
-
-                            if set.contains("*") {
                                 ToolFilter::All
                             } else {
-                                ToolFilter::List(set)
-                            }
+                                let set = agent_lock
+                                    .tools
+                                    .iter()
+                                    .filter(|tool_name| tool_name.starts_with(&format!("@{server_name}")))
+                                    .map(|full_name| {
+                                        match full_name.split_once(MCP_SERVER_TOOL_DELIMITER) {
+                                            Some((_, tool_name)) if !tool_name.is_empty() => tool_name,
+                                            _ => "*",
+                                        }
+                                        .to_string()
+                                    })
+                                    .collect::<HashSet<_>>();
+
+                                if set.contains("*") {
+                                    ToolFilter::All
+                                } else {
+                                    ToolFilter::List(set)
+                                }
+                            };
+
+                            let server_prefix = format!("@{server_name}");
+                            let alias_list = agent_lock.alias.iter().fold(
+                                HashMap::<HostToolName, ModelToolName>::new(),
+                                |mut acc, (full_path, model_tool_name)| {
+                                    if full_path.starts_with(&server_prefix) {
+                                        if let Some((_, host_tool_name)) =
+                                            full_path.split_once(MCP_SERVER_TOOL_DELIMITER)
+                                        {
+                                            acc.insert(host_tool_name.to_string(), model_tool_name.to_string());
+                                        }
+                                    }
+                                    acc
+                                },
+                            );
+
+                            (tool_filter, alias_list)
                         };
 
                         match result {
@@ -416,12 +434,13 @@ impl ToolManagerBuilder {
                                     .filter_map(|v| serde_json::from_value::<ToolSpec>(v).ok())
                                     .filter(|spec| tool_filter.should_include(&spec.name))
                                     .collect::<Vec<_>>();
-                                let mut sanitized_mapping = HashMap::<String, String>::new();
+                                let mut sanitized_mapping = HashMap::<ModelToolName, ToolInfo>::new();
                                 let process_result = process_tool_specs(
                                     conv_id_clone.as_str(),
                                     &server_name,
                                     &mut specs,
                                     &mut sanitized_mapping,
+                                    &alias_list,
                                     &regex,
                                     &telemetry_clone,
                                 );
@@ -549,11 +568,9 @@ impl ToolManagerBuilder {
         });
 
         for (mut name, init_res) in pre_initialized {
-            let mut messenger = messenger_builder.build_with_name(name.clone());
+            let messenger = messenger_builder.build_with_name(name.clone());
             match init_res {
                 Ok(mut client) => {
-                    let orig_name = client.get_orig_name();
-                    messenger.orig_server_name.replace(orig_name.to_string());
                     client.assign_messenger(Box::new(messenger));
                     let mut client = Arc::new(client);
                     while let Some(collided_client) = clients.insert(name.clone(), client) {
@@ -701,7 +718,29 @@ enum OutOfSpecName {
     EmptyDescription(String),
 }
 
-type NewToolSpecs = Arc<Mutex<HashMap<String, (HashMap<String, String>, Vec<ToolSpec>)>>>;
+#[derive(Clone, Default, Debug)]
+pub struct ToolInfo {
+    server_name: String,
+    host_tool_name: HostToolName,
+}
+
+/// Tool name as recognized by the model. This is [HostToolName] post sanitization.
+type ModelToolName = String;
+
+/// Tool name as recognized by the host (i.e. Q CLI). This is identical to how each MCP server
+/// exposed them.
+type HostToolName = String;
+
+/// MCP server name as they are defined in the config
+type ServerName = String;
+
+/// A list of new tools to be included in the main chat loop.
+/// The vector of [ToolSpec] is a comprehensive list of all tools exposed by the server.
+/// The hashmap of [ModelToolName]: [HostToolName] are mapping of tool names that have been changed
+/// (which is a subset of the tools that are in the aforementioned vector)
+/// Note that [ToolSpec] is model facing and thus will have names that are model facing (i.e. model
+/// tool name).
+type NewToolSpecs = Arc<Mutex<HashMap<ServerName, (HashMap<ModelToolName, ToolInfo>, Vec<ToolSpec>)>>>;
 
 #[derive(Default, Debug)]
 /// Manages the lifecycle and interactions with tools from various sources, including MCP servers.
@@ -748,12 +787,12 @@ pub struct ToolManager {
     /// Mapping from sanitized tool names to original tool names.
     /// This is used to handle tool name transformations that may occur during initialization
     /// to ensure tool names comply with naming requirements.
-    pub tn_map: HashMap<String, String>,
+    pub tn_map: HashMap<ModelToolName, ToolInfo>,
 
     /// A cache of tool's input schema for all of the available tools.
     /// This is mainly used to show the user what the tools look like from the perspective of the
     /// model.
-    pub schema: HashMap<String, ToolSpec>,
+    pub schema: HashMap<ModelToolName, ToolSpec>,
 
     is_interactive: bool,
 
@@ -933,53 +972,22 @@ impl ToolManager {
             name => {
                 // Note: tn_map also has tools that underwent no transformation. In otherwords, if
                 // it is a valid tool name, we should get a hit.
-                let name = match self.tn_map.get(name) {
-                    Some(name) => Ok::<&str, ToolResult>(name.as_str()),
+                let ToolInfo {
+                    server_name,
+                    host_tool_name: tool_name,
+                } = match self.tn_map.get(name) {
+                    Some(tool_info) => Ok::<&ToolInfo, ToolResult>(tool_info),
                     None => {
-                        // There are three possibilities:
-                        // - The tool name supplied is valid, it's just missing the server name
-                        // prefix.
-                        // - The tool name supplied is valid, it's missing the server name prefix
-                        // and there are more than one possible tools that fit this description.
-                        // - No server has a tool with this name.
-                        let candidates = self.tn_map.keys().filter(|n| n.ends_with(name)).collect::<Vec<_>>();
-                        #[allow(clippy::comparison_chain)]
-                        if candidates.len() == 1 {
-                            Ok(candidates.first().map(|s| s.as_str()).unwrap())
-                        } else if candidates.len() > 1 {
-                            let mut content = candidates.iter().fold(
-                                "There are multilple tools with given tool name: ".to_string(),
-                                |mut acc, name| {
-                                    acc.push_str(name);
-                                    acc.push_str(", ");
-                                    acc
-                                },
-                            );
-                            content.push_str("specify a tool with its full name.");
-                            Err(ToolResult {
-                                tool_use_id: value.id.clone(),
-                                content: vec![ToolResultContentBlock::Text(content)],
-                                status: ToolResultStatus::Error,
-                            })
-                        } else {
-                            Err(ToolResult {
-                                tool_use_id: value.id.clone(),
-                                content: vec![ToolResultContentBlock::Text(format!(
-                                    "The tool, \"{name}\" is supplied with incorrect name"
-                                ))],
-                                status: ToolResultStatus::Error,
-                            })
-                        }
+                        // No match, we throw an error
+                        Err(ToolResult {
+                            tool_use_id: value.id.clone(),
+                            content: vec![ToolResultContentBlock::Text(format!(
+                                "No tool with \"{name}\" is found"
+                            ))],
+                            status: ToolResultStatus::Error,
+                        })
                     },
                 }?;
-                let name = self.tn_map.get(name).map_or(name, String::as_str);
-                let (server_name, tool_name) = name.split_once(NAMESPACE_DELIMITER).ok_or(ToolResult {
-                    tool_use_id: value.id.clone(),
-                    content: vec![ToolResultContentBlock::Text(format!(
-                        "The tool, \"{name}\" is supplied with incorrect name"
-                    ))],
-                    status: ToolResultStatus::Error,
-                })?;
                 let Some(client) = self.clients.get(server_name) else {
                     return Err(ToolResult {
                         tool_use_id: value.id,
@@ -1015,29 +1023,26 @@ impl ToolManager {
         let mut tool_specs = HashMap::<String, ToolSpec>::new();
         let new_tools = {
             let mut new_tool_specs = self.new_tool_specs.lock().await;
-            new_tool_specs.drain().fold(HashMap::new(), |mut acc, (k, v)| {
-                acc.insert(k, v);
-                acc
-            })
+            new_tool_specs.drain().fold(
+                HashMap::<ServerName, (HashMap<ModelToolName, ToolInfo>, Vec<ToolSpec>)>::new(),
+                |mut acc, (server_name, v)| {
+                    acc.insert(server_name, v);
+                    acc
+                },
+            )
         };
         let mut updated_servers = HashSet::<ToolOrigin>::new();
         for (server_name, (tool_name_map, specs)) in new_tools {
-            let target = format!("{server_name}{NAMESPACE_DELIMITER}");
-            self.tn_map.retain(|k, _| !k.starts_with(&target));
-            for (k, v) in tool_name_map {
-                self.tn_map.insert(k, v);
-            }
+            // First we evict the tools that were already in the tn_map
+            self.tn_map.retain(|_, tool_info| tool_info.server_name != server_name);
+            // And update the them with the new tools queried
+            // TODO: handle tool name conflict here (throw a warning)
+            self.tn_map.extend(tool_name_map);
             if let Some(spec) = specs.first() {
                 updated_servers.insert(spec.tool_origin.clone());
             }
             for spec in specs {
                 tool_specs.insert(spec.name.clone(), spec);
-            }
-        }
-        // Caching the tool names for skim operations
-        for tool_name in tool_specs.keys() {
-            if !self.tn_map.contains_key(tool_name) {
-                self.tn_map.insert(tool_name.clone(), tool_name.clone());
             }
         }
         // Update schema
@@ -1219,52 +1224,48 @@ fn process_tool_specs(
     conversation_id: &str,
     server_name: &str,
     specs: &mut Vec<ToolSpec>,
-    tn_map: &mut HashMap<String, String>,
+    tn_map: &mut HashMap<ModelToolName, ToolInfo>,
+    alias_list: &HashMap<HostToolName, ModelToolName>,
     regex: &Regex,
     telemetry: &TelemetryThread,
 ) -> eyre::Result<()> {
-    // Each mcp server might have multiple tools.
-    // To avoid naming conflicts we are going to namespace it.
-    // This would also help us locate which mcp server to call the tool from.
+    // Tools are subjected to the following validations:
+    // 1. ^[a-zA-Z][a-zA-Z0-9_]*$,
+    // 2. less than 64 charcters in length
+    // 3. a non-empty description
+    //
+    // For non-compliance due to point 1, we shall change it on behalf of the users.
+    // For the rest, we simply throw a warning and reject the tool.
     let mut out_of_spec_tool_names = Vec::<OutOfSpecName>::new();
     let mut hasher = DefaultHasher::new();
-    let number_of_tools = specs.len();
-    // Sanitize tool names to ensure they comply with the naming requirements:
-    // 1. If the name already matches the regex pattern and doesn't contain the namespace delimiter, use
-    //    it as is
-    // 2. Otherwise, remove invalid characters and handle special cases:
-    //    - Remove namespace delimiters
-    //    - Ensure the name starts with an alphabetic character
-    //    - Generate a hash-based name if the sanitized result is empty
-    // This ensures all tool names are valid identifiers that can be safely used in the system
-    // If after all of the aforementioned modification the combined tool
-    // name we have exceeds a length of 64, we surface it as an error
+    let mut number_of_tools = 0_usize;
+
     for spec in specs.iter_mut() {
-        let sn = if !regex.is_match(&spec.name) {
-            let mut sn = sanitize_name(spec.name.clone(), regex, &mut hasher);
-            while tn_map.contains_key(&sn) {
-                sn.push('1');
+        let model_tool_name = alias_list.get(&spec.name).map(|name| name.to_string()).unwrap_or({
+            if !regex.is_match(&spec.name) {
+                let mut sn = sanitize_name(spec.name.clone(), regex, &mut hasher);
+                while tn_map.contains_key(&sn) {
+                    sn.push('1');
+                }
+                sn
+            } else {
+                spec.name.clone()
             }
-            sn
-        } else {
-            spec.name.clone()
-        };
-        let full_name = format!("{}{}{}", server_name, NAMESPACE_DELIMITER, sn);
-        if full_name.len() > 64 {
+        });
+        if model_tool_name.len() > 64 {
             out_of_spec_tool_names.push(OutOfSpecName::TooLong(spec.name.clone()));
             continue;
         } else if spec.description.is_empty() {
             out_of_spec_tool_names.push(OutOfSpecName::EmptyDescription(spec.name.clone()));
             continue;
         }
-        if sn != spec.name {
-            tn_map.insert(
-                full_name.clone(),
-                format!("{}{}{}", server_name, NAMESPACE_DELIMITER, spec.name),
-            );
-        }
-        spec.name = full_name;
+        tn_map.insert(model_tool_name.clone(), ToolInfo {
+            server_name: server_name.to_string(),
+            host_tool_name: spec.name.clone(),
+        });
+        spec.name = model_tool_name;
         spec.tool_origin = ToolOrigin::McpServer(server_name.to_string());
+        number_of_tools += 1;
     }
     // Native origin is the default, and since this function never reads native tools, if we still
     // have it, that would indicate a tool that should not be included.
@@ -1296,16 +1297,6 @@ fn process_tool_specs(
                     },
                 };
                 acc.push_str(format!(" - {} ({})\n", tool_name, msg).as_str());
-                acc
-            },
-        )))
-        // TODO: if no tools are valid, we need to offload the server
-        // from the fleet (i.e. kill the server)
-    } else if !tn_map.is_empty() {
-        Err(eyre::eyre!(tn_map.iter().fold(
-            String::from("The following tool names are changed:\n"),
-            |mut acc, (k, v)| {
-                acc.push_str(format!(" - {} -> {}\n", v, k).as_str());
                 acc
             },
         )))
