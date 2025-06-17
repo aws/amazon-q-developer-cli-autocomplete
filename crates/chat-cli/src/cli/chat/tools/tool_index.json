@@ -189,5 +189,27 @@
       },
       "required": ["thought"]
     }
+  },
+  "launch_agent": {
+    "name": "launch_agent",
+    "description": "Launches one or more Q chat subagent instances to perform tasks in parallel.",
+    "input_schema": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Prompt to provide to the subagent model."
+          },
+          "model": {
+            "type": "string",
+            "description": "Optional model for subagent to use. Defaults to system default if not specified."
+          }
+        },
+        "required": ["prompt"]
+      },
+      "description": "Array of subagent configurations to launch."
+    }
   }
 }
