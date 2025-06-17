@@ -287,7 +287,22 @@ impl ToolManagerBuilder {
         let regex = regex::Regex::new(VALID_TOOL_NAME)?;
         let mut hasher = DefaultHasher::new();
         let is_interactive = self.is_interactive;
-        let pre_initialized = mcp_servers
+
+        // Separate enabled and disabled servers
+        let (enabled_servers, disabled_servers): (Vec<_>, Vec<_>) = mcp_servers
+            .into_iter()
+            .partition(|(_, server_config)| !server_config.disabled);
+
+        // Prepare disabled servers for display
+        let disabled_servers_display: Vec<String> = disabled_servers
+            .iter()
+            .map(|(server_name, _)| {
+                let snaked_cased_name = server_name.to_case(convert_case::Case::Snake);
+                sanitize_name(snaked_cased_name, &regex, &mut hasher)
+            })
+            .collect();
+
+        let pre_initialized = enabled_servers
             .into_iter()
             .map(|(server_name, server_config)| {
                 let snaked_cased_name = server_name.to_case(convert_case::Case::Snake);
@@ -296,6 +311,7 @@ impl ToolManagerBuilder {
                 (sanitized_server_name, custom_tool_client)
             })
             .collect::<Vec<(String, _)>>();
+
         let mut loading_servers = HashMap::<String, Instant>::new();
         for (server_name, _) in &pre_initialized {
             let init_time = std::time::Instant::now();
@@ -306,14 +322,26 @@ impl ToolManagerBuilder {
         // Spawn a task for displaying the mcp loading statuses.
         // This is only necessary when we are in interactive mode AND there are servers to load.
         // Otherwise we do not need to be spawning this.
-        let (_loading_display_task, loading_status_sender) = if is_interactive && total > 0 {
+        let (_loading_display_task, loading_status_sender) = if is_interactive
+            && (total > 0 || !disabled_servers_display.is_empty())
+        {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<LoadingMsg>(50);
+            let disabled_servers_display_clone = disabled_servers_display.clone();
             (
                 Some(tokio::task::spawn(async move {
                     let mut spinner_logo_idx: usize = 0;
                     let mut complete: usize = 0;
                     let mut failed: usize = 0;
-                    queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
+
+                    // Show disabled servers immediately
+                    for server_name in &disabled_servers_display_clone {
+                        queue_disabled_message(server_name, &mut output)?;
+                    }
+
+                    if total > 0 {
+                        queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
+                    }
+
                     loop {
                         match tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
                             Ok(Some(recv_result)) => match recv_result {
@@ -352,7 +380,7 @@ impl ToolManagerBuilder {
                                     queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
                                 },
                                 LoadingMsg::Terminate { still_loading } => {
-                                    if !still_loading.is_empty() {
+                                    if !still_loading.is_empty() && total > 0 {
                                         execute!(
                                             output,
                                             cursor::MoveToColumn(0),
@@ -365,6 +393,14 @@ impl ToolManagerBuilder {
                                         });
                                         let msg = eyre::eyre!(msg);
                                         queue_incomplete_load_message(complete, total, &msg, &mut output)?;
+                                    } else if total > 0 {
+                                        // Clear the loading line if we have enabled servers
+                                        execute!(
+                                            output,
+                                            cursor::MoveToColumn(0),
+                                            cursor::MoveUp(1),
+                                            terminal::Clear(terminal::ClearType::CurrentLine),
+                                        )?;
                                     }
                                     execute!(output, style::Print("\n"),)?;
                                     break;
@@ -687,6 +723,7 @@ impl ToolManagerBuilder {
             has_new_stuff,
             is_interactive,
             mcp_load_record: load_record,
+            disabled_servers: disabled_servers_display,
             ..Default::default()
         })
     }
@@ -776,6 +813,9 @@ pub struct ToolManager {
     /// invalid characters).
     /// The value is the load message (i.e. load time, warnings, and errors)
     pub mcp_load_record: Arc<Mutex<HashMap<String, Vec<LoadingRecord>>>>,
+
+    /// List of disabled MCP server names for display purposes
+    disabled_servers: Vec<String>,
 }
 
 impl Clone for ToolManager {
@@ -790,6 +830,7 @@ impl Clone for ToolManager {
             schema: self.schema.clone(),
             is_interactive: self.is_interactive,
             mcp_load_record: self.mcp_load_record.clone(),
+            disabled_servers: self.disabled_servers.clone(),
             ..Default::default()
         }
     }
@@ -1469,6 +1510,19 @@ fn queue_warn_message(name: &str, msg: &eyre::Report, time: &str, output: &mut i
         style::ResetColor,
         style::Print(" with the following warning:\n"),
         style::Print(msg),
+        style::ResetColor,
+    )?)
+}
+
+fn queue_disabled_message(name: &str, output: &mut impl Write) -> eyre::Result<()> {
+    Ok(queue!(
+        output,
+        style::SetForegroundColor(style::Color::DarkGrey),
+        style::Print("○ "),
+        style::SetForegroundColor(style::Color::Blue),
+        style::Print(name),
+        style::ResetColor,
+        style::Print(" is disabled\n"),
         style::ResetColor,
     )?)
 }
