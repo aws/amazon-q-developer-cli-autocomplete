@@ -231,6 +231,7 @@ impl TelemetryThread {
         result: TelemetryResult,
         reason: Option<String>,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
         model: Option<String>,
     ) -> Result<(), TelemetryError> {
         let mut event = Event::new(EventType::ChatAddedMessage {
@@ -241,6 +242,7 @@ impl TelemetryThread {
             result,
             reason,
             reason_desc,
+            status_code,
             model,
         });
         set_start_url_and_region(database, &mut event).await;
@@ -311,6 +313,7 @@ impl TelemetryThread {
         }))?)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn send_response_error(
         &self,
         database: &Database,
@@ -319,11 +322,13 @@ impl TelemetryThread {
         result: TelemetryResult,
         reason: Option<String>,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
     ) -> Result<(), TelemetryError> {
         let mut event = Event::new(EventType::MessageResponseError {
             result,
             reason,
             reason_desc,
+            status_code,
             conversation_id,
             context_file_length,
         });
@@ -602,6 +607,7 @@ mod test {
                 Some("req_id".to_owned()),
                 Some(123),
                 TelemetryResult::Succeeded,
+                None,
                 None,
                 None,
                 None,
