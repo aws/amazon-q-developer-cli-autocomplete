@@ -71,6 +71,11 @@
       "description": "Error message detail. May contain arbitrary message details (unlike the `reason` field)."
     },
     {
+      "name": "statusCode",
+      "type": "int",
+      "description": "The HTTP status code of the request, e.g. 200, 400, etc."
+    },
+    {
       "name": "codewhispererterminal_toolUseId",
       "type": "string",
       "description": "The id assigned to the client by the model representing a tool use event"
@@ -171,6 +176,7 @@
         { "type": "result", "required": true },
         { "type": "reason", "required": false },
         { "type": "reasonDesc", "required": false },
+        { "type": "statusCode", "required": false },
         { "type": "codewhispererterminal_model" }
       ]
     },
@@ -292,7 +298,8 @@
           { "type": "codewhispererterminal_contextFileLength", "required": false },
           { "type": "result" },
           { "type": "reason", "required": false },
-          { "type": "reasonDesc", "required": false }
+          { "type": "reasonDesc", "required": false },
+          { "type": "statusCode", "required": false }
       ]
     }
   ]

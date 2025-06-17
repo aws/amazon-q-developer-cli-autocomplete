@@ -133,6 +133,7 @@ impl Event {
                 result,
                 reason,
                 reason_desc,
+                status_code,
                 model,
                 ..
             } => Some(
@@ -149,6 +150,7 @@ impl Event {
                     result: result.to_string().into(),
                     reason: reason.map(Into::into),
                     reason_desc: reason_desc.map(Into::into),
+                    status_code: status_code.map(|v| v as i64).map(Into::into),
                     codewhispererterminal_model: model.map(Into::into),
                 }
                 .into_metric_datum(),
@@ -251,6 +253,7 @@ impl Event {
                 result,
                 reason,
                 reason_desc,
+                status_code,
             } => Some(
                 AmazonqMessageResponseError {
                     create_time: self.created_time,
@@ -262,6 +265,7 @@ impl Event {
                     result: Some(result.to_string().into()),
                     reason: reason.map(Into::into),
                     reason_desc: reason_desc.map(Into::into),
+                    status_code: status_code.map(|v| v as i64).map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -299,6 +303,7 @@ pub enum EventType {
         result: TelemetryResult,
         reason: Option<String>,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
         model: Option<String>,
     },
     ToolUseSuggested {
@@ -338,6 +343,7 @@ pub enum EventType {
         result: TelemetryResult,
         reason: Option<String>,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
         conversation_id: String,
         context_file_length: Option<usize>,
     },
