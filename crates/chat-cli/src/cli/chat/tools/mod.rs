@@ -3,6 +3,7 @@ pub mod execute;
 pub mod fs_read;
 pub mod fs_write;
 pub mod gh_issue;
+pub mod internal_command;
 pub mod thinking;
 pub mod use_aws;
 
@@ -20,6 +21,7 @@ use eyre::Result;
 use fs_read::FsRead;
 use fs_write::FsWrite;
 use gh_issue::GhIssue;
+use internal_command::InternalCommand;
 use serde::{
     Deserialize,
     Serialize,
@@ -42,6 +44,7 @@ pub enum Tool {
     Custom(CustomTool),
     GhIssue(GhIssue),
     Thinking(Thinking),
+    InternalCommand(InternalCommand),
 }
 
 impl Tool {
@@ -58,6 +61,7 @@ impl Tool {
             Tool::Custom(custom_tool) => &custom_tool.name,
             Tool::GhIssue(_) => "gh_issue",
             Tool::Thinking(_) => "thinking (prerelease)",
+            Tool::InternalCommand(_) => "internal_command",
         }
         .to_owned()
     }
@@ -72,6 +76,7 @@ impl Tool {
             Tool::Custom(_) => true,
             Tool::GhIssue(_) => false,
             Tool::Thinking(_) => false,
+            Tool::InternalCommand(internal_command) => internal_command.requires_acceptance(),
         }
     }
 
@@ -85,6 +90,7 @@ impl Tool {
             Tool::Custom(custom_tool) => custom_tool.invoke(context, updates).await,
             Tool::GhIssue(gh_issue) => gh_issue.invoke(updates).await,
             Tool::Thinking(think) => think.invoke(updates).await,
+            Tool::InternalCommand(internal_command) => internal_command.invoke(updates).await,
         }
     }
 
@@ -98,6 +104,7 @@ impl Tool {
             Tool::Custom(custom_tool) => custom_tool.queue_description(updates),
             Tool::GhIssue(gh_issue) => gh_issue.queue_description(updates),
             Tool::Thinking(thinking) => thinking.queue_description(updates),
+            Tool::InternalCommand(internal_command) => internal_command.queue_description(updates),
         }
     }
 
@@ -111,6 +118,7 @@ impl Tool {
             Tool::Custom(custom_tool) => custom_tool.validate(ctx).await,
             Tool::GhIssue(gh_issue) => gh_issue.validate(ctx).await,
             Tool::Thinking(think) => think.validate(ctx).await,
+            Tool::InternalCommand(internal_command) => internal_command.validate().await,
         }
     }
 }
@@ -282,6 +290,7 @@ impl InvokeOutput {
             OutputKind::Text(s) => s.as_str(),
             OutputKind::Json(j) => j.as_str().unwrap_or_default(),
             OutputKind::Images(_) => "",
+            OutputKind::ExecuteCommand(_) => "",
         }
     }
 }
@@ -292,6 +301,7 @@ pub enum OutputKind {
     Text(String),
     Json(serde_json::Value),
     Images(RichImageBlocks),
+    ExecuteCommand(String),
 }
 
 impl Default for OutputKind {
