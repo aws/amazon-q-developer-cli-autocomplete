@@ -2,6 +2,7 @@ mod command;
 mod consts;
 mod context;
 mod conversation_state;
+mod help;
 mod hooks;
 mod input_source;
 mod message;
@@ -28,16 +29,13 @@ use std::io::{
     Read,
     Write,
 };
-use std::process::{
-    Command as ProcessCommand,
-    ExitCode,
-};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{
     env,
     fs,
     io,
+    process,
 };
 
 use amzn_codewhisperer_client::types::SubscriptionStatus;
@@ -75,6 +73,10 @@ use eyre::{
     ErrReport,
     Result,
     bail,
+};
+use help::{
+    compact_help_text,
+    generate_help_text,
 };
 use hooks::{
     Hook,
@@ -209,7 +211,7 @@ pub struct ChatArgs {
 }
 
 impl ChatArgs {
-    pub async fn execute(self, database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
+    pub async fn execute(self, database: &mut Database, telemetry: &TelemetryThread) -> Result<process::ExitCode> {
         let ctx = Context::new();
 
         let stdin = std::io::stdin();
@@ -230,7 +232,7 @@ impl ChatArgs {
         };
 
         let client = match ctx.env().get("Q_MOCK_CHAT_RESPONSE") {
-            Ok(json) => create_stream(serde_json::from_str(std::fs::read_to_string(json)?.as_str())?),
+            Ok(json) => create_stream(serde_json::from_str(fs::read_to_string(json)?.as_str())?),
             _ => StreamingClient::new(database).await?,
         };
 
@@ -296,7 +298,7 @@ impl ChatArgs {
         //     database.set_last_used_model_id(id.clone())?;
         // }
 
-        let conversation_id = uuid::Uuid::new_v4().to_string();
+        let conversation_id = Uuid::new_v4().to_string();
         info!(?conversation_id, "Generated new conversation id");
         let (prompt_request_sender, prompt_request_receiver) = std::sync::mpsc::channel::<Option<String>>();
         let (prompt_response_sender, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
@@ -368,40 +370,14 @@ impl ChatArgs {
         )
         .await?;
 
-        let result = chat.try_chat(database, telemetry).await.map(|_| ExitCode::SUCCESS);
+        let result = chat
+            .try_chat(database, telemetry)
+            .await
+            .map(|_| process::ExitCode::SUCCESS);
         drop(chat); // Explicit drop for clarity
 
         result
     }
-}
-
-/// Help text for the compact command
-fn compact_help_text() -> String {
-    color_print::cformat!(
-        r#"
-<magenta,em>Conversation Compaction</magenta,em>
-
-The <em>/compact</em> command summarizes the conversation history to free up context space
-while preserving essential information. This is useful for long-running conversations
-that may eventually reach memory constraints.
-
-<cyan!>Usage</cyan!>
-  <em>/compact</em>                   <black!>Summarize the conversation and clear history</black!>
-  <em>/compact [prompt]</em>          <black!>Provide custom guidance for summarization</black!>
-
-<cyan!>When to use</cyan!>
-• When you see the memory constraint warning message
-• When a conversation has been running for a long time
-• Before starting a new topic within the same session
-• After completing complex tool operations
-
-<cyan!>How it works</cyan!>
-• Creates an AI-generated summary of your conversation
-• Retains key information, code, and tool executions in the summary
-• Clears the conversation history to free up space
-• The assistant will reference the summary context in future responses
-"#
-    )
 }
 
 const WELCOME_TEXT: &str = color_print::cstr! {"<cyan!>
@@ -478,63 +454,6 @@ const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green
 <green!>ctrl + j</green!> new lines
 <green!>ctrl + s</green!> fuzzy search
 </black!>"};
-
-const HELP_TEXT: &str = color_print::cstr! {"
-
-<magenta,em>q</magenta,em> (Amazon Q Chat)
-
-<cyan,em>Commands:</cyan,em>
-<em>/clear</em>        <black!>Clear the conversation history</black!>
-<em>/issue</em>        <black!>Report an issue or make a feature request</black!>
-<em>/editor</em>       <black!>Open $EDITOR (defaults to vi) to compose a prompt</black!>
-<em>/help</em>         <black!>Show this help dialogue</black!>
-<em>/quit</em>         <black!>Quit the application</black!>
-<em>/compact</em>      <black!>Summarize the conversation to free up context space</black!>
-  <em>help</em>        <black!>Show help for the compact command</black!>
-  <em>[prompt]</em>    <black!>Optional custom prompt to guide summarization</black!>
-<em>/tools</em>        <black!>View and manage tools and permissions</black!>
-  <em>help</em>        <black!>Show an explanation for the trust command</black!>
-  <em>trust</em>       <black!>Trust a specific tool or tools for the session</black!>
-  <em>untrust</em>     <black!>Revert a tool or tools to per-request confirmation</black!>
-  <em>trustall</em>    <black!>Trust all tools (equivalent to deprecated /acceptall)</black!>
-  <em>reset</em>       <black!>Reset all tools to default permission levels</black!>
-<em>/mcp</em>          <black!>See mcp server loaded</black!>
-<em>/model</em>        <black!>Select a model for the current conversation session</black!>
-<em>/profile</em>      <black!>Manage profiles</black!>
-  <em>help</em>        <black!>Show profile help</black!>
-  <em>list</em>        <black!>List profiles</black!>
-  <em>set</em>         <black!>Set the current profile</black!>
-  <em>create</em>      <black!>Create a new profile</black!>
-  <em>delete</em>      <black!>Delete a profile</black!>
-  <em>rename</em>      <black!>Rename a profile</black!>
-<em>/prompts</em>      <black!>View and retrieve prompts</black!>
-  <em>help</em>        <black!>Show prompts help</black!>
-  <em>list</em>        <black!>List or search available prompts</black!>
-  <em>get</em>         <black!>Retrieve and send a prompt</black!>
-<em>/context</em>      <black!>Manage context files and hooks for the chat session</black!>
-  <em>help</em>        <black!>Show context help</black!>
-  <em>show</em>        <black!>Display current context rules configuration [--expand]</black!>
-  <em>add</em>         <black!>Add file(s) to context [--global] [--force]</black!>
-  <em>rm</em>          <black!>Remove file(s) from context [--global]</black!>
-  <em>clear</em>       <black!>Clear all files from current context [--global]</black!>
-  <em>hooks</em>       <black!>View and manage context hooks</black!>
-<em>/usage</em>        <black!>Show current session's context window usage</black!>
-<em>/load</em>         <black!>Load conversation state from a JSON file</black!>
-<em>/save</em>         <black!>Save conversation state to a JSON file</black!>
-<em>/subscribe</em>    <black!>Upgrade to a Q Developer Pro subscription for increased query limits</black!>
-  <em>[--manage]</em>  <black!>View and manage your existing subscription on AWS</black!>
-
-<cyan,em>MCP:</cyan,em>
-<black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
-
-<cyan,em>Tips:</cyan,em>
-<em>!{command}</em>            <black!>Quickly execute a command in your current session</black!>
-<em>Ctrl(^) + j</em>           <black!>Insert new-line to provide multi-line prompt. Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
-<em>Ctrl(^) + s</em>           <black!>Fuzzy search commands and context files. Use Tab to select multiple items.</black!>
-                      <black!>Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)</black!>
-<em>chat.editMode</em>         <black!>Set editing mode (vim or emacs) using: q settings chat.editMode vi/emacs</black!>
-
-"};
 
 const RESPONSE_TIMEOUT_CONTENT: &str = "Response timed out - message took too long to generate";
 const TRUST_ALL_TEXT: &str = color_print::cstr! {"<green!>All tools are now trusted (<red!>!</red!>). Amazon Q will execute tools <bold>without</bold> asking for confirmation.\
@@ -688,7 +607,7 @@ impl ChatContext {
             .unwrap_or_else(|| default_model_id(database).to_owned());
 
         let conversation_state = if resume_conversation {
-            let prior = std::env::current_dir()
+            let prior = env::current_dir()
                 .ok()
                 .and_then(|cwd| database.get_conversation_by_path(cwd).ok())
                 .flatten();
@@ -826,9 +745,10 @@ impl Default for ChatState {
 
 impl ChatContext {
     /// Opens the user's preferred editor to compose a prompt
+    #[cfg(not(windows))]
     fn open_editor(initial_text: Option<String>) -> Result<String, ChatError> {
         // Create a temporary file with a unique name
-        let temp_dir = std::env::temp_dir();
+        let temp_dir = env::temp_dir();
         let file_name = format!("q_prompt_{}.md", Uuid::new_v4());
         let temp_file_path = temp_dir.join(file_name);
 
@@ -851,7 +771,7 @@ impl ChatContext {
             .map_err(|e| ChatError::Custom(format!("Failed to create temporary file: {}", e).into()))?;
 
         // Open the editor with the parsed command and arguments
-        let mut cmd = ProcessCommand::new(editor_bin);
+        let mut cmd = process::Command::new(editor_bin);
         // Add any arguments that were part of the EDITOR variable
         for arg in parts {
             cmd.arg(arg);
@@ -1757,7 +1677,7 @@ impl ChatContext {
                 .await?
             },
             Command::Help => {
-                execute!(self.output, style::Print(HELP_TEXT))?;
+                execute!(self.output, style::Print(generate_help_text()))?;
                 ChatState::PromptUser {
                     tool_uses: Some(tool_uses),
                     pending_tool_index,
@@ -1776,6 +1696,7 @@ impl ChatContext {
                     pending_tool_index,
                 }
             },
+            #[cfg(not(windows))]
             Command::PromptEditor { initial_text } => {
                 match Self::open_editor(initial_text) {
                     Ok(content) => {
@@ -4076,7 +3997,17 @@ impl ChatContext {
         )
         .await?;
 
-        if is_remote() || crate::util::open::open_url_async(&url).await.is_err() {
+        // Skip opening the URL in test environments
+        if cfg!(test) || is_remote() {
+            // In tests or remote environments, just display the URL without trying to open it
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::DarkGrey),
+                style::Print(format!("{} Subscription URL: {}\n\n", "?".magenta(), url.blue())),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        } else if crate::util::open::open_url_async(&url).await.is_err() {
+            // Only show error message if we actually tried to open the URL
             queue!(
                 self.output,
                 style::SetForegroundColor(Color::DarkGrey),

@@ -42,6 +42,7 @@ use crate::database::settings::Setting;
 pub const COMMANDS: &[&str] = &[
     "/clear",
     "/help",
+    #[cfg(not(windows))]
     "/editor",
     "/issue",
     // "/acceptall", /// Functional, but deprecated in favor of /tools trustall
