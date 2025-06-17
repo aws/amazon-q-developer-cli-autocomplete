@@ -85,6 +85,9 @@ pub struct AddArgs {
     /// The command used to launch the server
     #[arg(long)]
     pub command: String,
+    /// Arguments to pass to the command
+    #[arg(long, value_delimiter = ',')]
+    pub args: Vec<String>,
     /// Where to add the server to.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
@@ -118,6 +121,7 @@ impl AddArgs {
         let merged_env = self.env.into_iter().flatten().collect::<HashMap<_, _>>();
         let tool: CustomToolConfig = serde_json::from_value(serde_json::json!({
             "command": self.command,
+            "args": self.args,
             "env": merged_env,
             "timeout": self.timeout.unwrap_or(default_timeout()),
         }))?;
@@ -448,6 +452,11 @@ mod tests {
         AddArgs {
             name: "local".into(),
             command: "echo hi".into(),
+            args: vec![
+                "awslabs.eks-mcp-server".to_string(),
+                "--allow-write".to_string(),
+                "--allow-sensitive-data-access".to_string(),
+            ],
             env: vec![],
             timeout: None,
             scope: None,
@@ -491,6 +500,11 @@ mod tests {
             RootSubcommand::Mcp(McpSubcommand::Add(AddArgs {
                 name: "test_server".to_string(),
                 command: "test_command".to_string(),
+                args: vec![
+                "awslabs.eks-mcp-server".to_string(),
+                "--allow-write".to_string(),
+                "--allow-sensitive-data-access".to_string(),
+            ],
                 scope: None,
                 env: vec![
                     [

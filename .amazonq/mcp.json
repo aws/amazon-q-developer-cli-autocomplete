@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "awslabs.eks-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "awslabs.eks-mcp-server",
+        "--allow-write",
+        "--allow-sensitive-data-access"
+      ],
+      "env": {},
+      "timeout": 120000
+    }
+  }
+}
