@@ -30,11 +30,9 @@ pub fn format_mcp_error(err: &serde_json::Value) -> String {
                 }
             }
         }
-        // If we couldn't extract and parse nested JSON, return the original message
-        return message.to_string();
     }
 
-    // Fallback to pretty-printing the entire error if message field is missing
+    // Fallback if message field is missing or if we couldn't extract and parse nested JSON
     serde_json::to_string_pretty(err).unwrap_or_else(|_| format!("{:?}", err))
 }
 
@@ -91,7 +89,10 @@ mod tests {
 
         let formatted = format_mcp_error(&error);
 
-        assert_eq!(formatted, "MCP error -32602: Invalid arguments for prompt");
+        assert_eq!(
+            formatted,
+            "{\n  \"code\": -32602,\n  \"message\": \"MCP error -32602: Invalid arguments for prompt\"\n}"
+        );
     }
 
     #[test]
@@ -115,7 +116,7 @@ mod tests {
 
         let formatted = format_mcp_error(&error);
 
-        assert_eq!(formatted, "");
+        assert_eq!(formatted, "{\n  \"code\": -32602,\n  \"message\": \"\"\n}");
     }
 
     #[test]
@@ -138,10 +139,10 @@ mod tests {
 
         let formatted = format_mcp_error(&error);
 
-        // Should return the original message since the nested JSON is malformed
+        // Should return the pretty-printed JSON since the nested JSON is malformed
         assert_eq!(
             formatted,
-            "MCP error -32602: Invalid arguments for prompt: [{\n  \"code\": \"invalid_type\",\n  \"expected\": \"object\",\n  \"received\": \"undefined\",\n  \"path\": [],\n  \"message\": \"Required\"\n"
+            "{\n  \"code\": -32602,\n  \"message\": \"MCP error -32602: Invalid arguments for prompt: [{\\n  \\\"code\\\": \\\"invalid_type\\\",\\n  \\\"expected\\\": \\\"object\\\",\\n  \\\"received\\\": \\\"undefined\\\",\\n  \\\"path\\\": [],\\n  \\\"message\\\": \\\"Required\\\"\\n\"\n}"
         );
     }
 }
