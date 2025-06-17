@@ -1031,26 +1031,60 @@ impl ToolManager {
                 },
             )
         };
+
         let mut updated_servers = HashSet::<ToolOrigin>::new();
+        let mut conflicts = HashMap::<ServerName, String>::new();
         for (server_name, (tool_name_map, specs)) in new_tools {
             // First we evict the tools that were already in the tn_map
             self.tn_map.retain(|_, tool_info| tool_info.server_name != server_name);
-            // And update the them with the new tools queried
-            // TODO: handle tool name conflict here (throw a warning)
-            self.tn_map.extend(tool_name_map);
+
+            // And update them with the new tools queried
+            // valid: tools that do not have conflicts in naming
+            let (valid, invalid) = tool_name_map
+                .into_iter()
+                .partition::<HashMap<ModelToolName, ToolInfo>, _>(|(model_tool_name, _)| {
+                    !self.tn_map.contains_key(model_tool_name)
+                });
+            // We reject tools that are conflicting with the existing tools by not including them
+            // in the tn_map. We would also want to report this error.
+            if !invalid.is_empty() {
+                let msg = invalid.into_iter().fold("The following tools are rejected because they conflict with existing tools in names. Avoid this via setting aliases for them: \n".to_string(), |mut acc, (model_tool_name, tool_info)| {
+                    acc.push_str(&format!(" - {} from {}\n", model_tool_name, tool_info.server_name));
+                    acc
+                });
+                conflicts.insert(server_name, msg);
+            }
             if let Some(spec) = specs.first() {
                 updated_servers.insert(spec.tool_origin.clone());
             }
-            for spec in specs {
+            // We want to filter for specs that are valid
+            // Note that [ToolSpec::name] is a model facing name (thus you should be comparing it
+            // with the keys of a tn_map)
+            for spec in specs.into_iter().filter(|spec| valid.contains_key(&spec.name)) {
                 tool_specs.insert(spec.name.clone(), spec);
             }
+
+            self.tn_map.extend(valid);
         }
+
         // Update schema
         // As we are writing over the ensemble of tools in a given server, we will need to first
         // remove everything that it has.
         self.schema
             .retain(|_tool_name, spec| !updated_servers.contains(&spec.tool_origin));
         self.schema.extend(tool_specs);
+
+        // if block here to avoid repeatedly asking for loc
+        if !conflicts.is_empty() {
+            let mut record_lock = self.mcp_load_record.lock().await;
+            for (server_name, msg) in conflicts {
+                let record = LoadingRecord::Err(msg);
+                record_lock
+                    .entry(server_name)
+                    .and_modify(|v| v.push(record.clone()))
+                    .or_insert(vec![record]);
+            }
+        }
     }
 
     #[allow(clippy::await_holding_lock)]
