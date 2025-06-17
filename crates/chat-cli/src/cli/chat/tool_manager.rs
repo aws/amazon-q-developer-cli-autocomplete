@@ -287,12 +287,12 @@ impl ToolManagerBuilder {
         let regex = regex::Regex::new(VALID_TOOL_NAME)?;
         let mut hasher = DefaultHasher::new();
         let is_interactive = self.is_interactive;
-        
+
         // Separate enabled and disabled servers
         let (enabled_servers, disabled_servers): (Vec<_>, Vec<_>) = mcp_servers
             .into_iter()
             .partition(|(_, server_config)| !server_config.disabled);
-        
+
         // Prepare disabled servers for display
         let disabled_servers_display: Vec<String> = disabled_servers
             .iter()
@@ -301,7 +301,7 @@ impl ToolManagerBuilder {
                 sanitize_name(snaked_cased_name, &regex, &mut hasher)
             })
             .collect();
-        
+
         let pre_initialized = enabled_servers
             .into_iter()
             .map(|(server_name, server_config)| {
@@ -311,7 +311,7 @@ impl ToolManagerBuilder {
                 (sanitized_server_name, custom_tool_client)
             })
             .collect::<Vec<(String, _)>>();
-        
+
         let mut loading_servers = HashMap::<String, Instant>::new();
         for (server_name, _) in &pre_initialized {
             let init_time = std::time::Instant::now();
@@ -322,7 +322,9 @@ impl ToolManagerBuilder {
         // Spawn a task for displaying the mcp loading statuses.
         // This is only necessary when we are in interactive mode AND there are servers to load.
         // Otherwise we do not need to be spawning this.
-        let (_loading_display_task, loading_status_sender) = if is_interactive && (total > 0 || !disabled_servers_display.is_empty()) {
+        let (_loading_display_task, loading_status_sender) = if is_interactive
+            && (total > 0 || !disabled_servers_display.is_empty())
+        {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<LoadingMsg>(50);
             let disabled_servers_display_clone = disabled_servers_display.clone();
             (
@@ -330,16 +332,16 @@ impl ToolManagerBuilder {
                     let mut spinner_logo_idx: usize = 0;
                     let mut complete: usize = 0;
                     let mut failed: usize = 0;
-                    
+
                     // Show disabled servers immediately
                     for server_name in &disabled_servers_display_clone {
                         queue_disabled_message(server_name, &mut output)?;
                     }
-                    
+
                     if total > 0 {
                         queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
                     }
-                    
+
                     loop {
                         match tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
                             Ok(Some(recv_result)) => match recv_result {
