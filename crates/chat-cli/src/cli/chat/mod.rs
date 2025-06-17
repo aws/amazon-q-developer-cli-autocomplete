@@ -161,6 +161,7 @@ use crate::api_client::{
 };
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
+use crate::cli::chat::token_counter::CharCount;
 use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::{
@@ -419,7 +420,7 @@ const SMALL_SCREEN_WELCOME_TEXT: &str = color_print::cstr! {"<em>Welcome to <cya
 const RESUME_TEXT: &str = color_print::cstr! {"<em>Picking up where we left off...</em>"};
 
 // Only show the model-related tip for now to make users aware of this feature.
-const ROTATING_TIPS: [&str; 2] = [
+const ROTATING_TIPS: [&str; 3] = [
     // color_print::cstr! {"You can resume the last conversation from your current directory by launching with
     // <green!>q chat --resume</green!>"}, color_print::cstr! {"Get notified whenever Q CLI finishes responding.
     // Just run <green!>q settings chat.enableNotifications true</green!>"}, color_print::cstr! {"You can use
@@ -440,6 +441,7 @@ const ROTATING_TIPS: [&str; 2] = [
     // warnings or errors associated with <green!>/mcp</green!>"},
     color_print::cstr! {"Use <green!>/model</green!> to select the model to use for this conversation"},
     color_print::cstr! {"Set a default model by running <green!>q settings chat.defaultModel MODEL</green!>. Run <green!>/model</green!> to learn more."},
+    color_print::cstr! {"Run <green!>/prompts</green!> to learn how to build & run repeatable workflows"},
 ];
 
 pub struct ModelOption {
@@ -461,8 +463,6 @@ pub const MODEL_OPTIONS: [ModelOption; 3] = [
         model_id: "CLAUDE_3_5_SONNET_20241022_V2_0",
     },
 ];
-
-pub const DEFAULT_MODEL_ID: &str = "CLAUDE_3_7_SONNET_20250219_V1_0";
 
 const GREETING_BREAK_POINT: usize = 80;
 
@@ -583,6 +583,22 @@ pub enum ChatError {
     GetPromptError(#[from] GetPromptError),
 }
 
+impl ChatError {
+    fn status_code(&self) -> Option<u16> {
+        match self {
+            ChatError::Client(e) => e.status_code(),
+            ChatError::Auth(_) => None,
+            ChatError::ResponseStream(_) => None,
+            ChatError::Std(_) => None,
+            ChatError::Readline(_) => None,
+            ChatError::Custom(_) => None,
+            ChatError::Interrupted { .. } => None,
+            ChatError::NonInteractiveToolApproval => None,
+            ChatError::GetPromptError(_) => None,
+        }
+    }
+}
+
 impl ReasonCode for ChatError {
     fn reason_code(&self) -> String {
         match self {
@@ -650,19 +666,19 @@ impl ChatContext {
         let output_clone = output.clone();
 
         let mut existing_conversation = false;
-        let valid_model_id = match model_id {
-            Some(id) => Some(id),
-            None => database
-                .settings
-                .get_string(Setting::ChatDefaultModel)
-                .and_then(|model_name| {
-                    MODEL_OPTIONS
-                        .iter()
-                        .find(|opt| opt.name == model_name)
-                        .map(|opt| opt.model_id.to_owned())
-                })
-                .or_else(|| Some(DEFAULT_MODEL_ID.to_owned())),
-        };
+        let valid_model_id = model_id
+            .or_else(|| {
+                database
+                    .settings
+                    .get_string(Setting::ChatDefaultModel)
+                    .and_then(|model_name| {
+                        MODEL_OPTIONS
+                            .iter()
+                            .find(|opt| opt.name == model_name)
+                            .map(|opt| opt.model_id.to_owned())
+                    })
+            })
+            .unwrap_or_else(|| default_model_id(database).to_owned());
 
         let conversation_state = if resume_conversation {
             let prior = std::env::current_dir()
@@ -690,7 +706,7 @@ impl ChatContext {
                     profile,
                     Some(output_clone),
                     tool_manager,
-                    valid_model_id,
+                    Some(valid_model_id),
                 )
                 .await
             }
@@ -702,7 +718,7 @@ impl ChatContext {
                 profile,
                 Some(output_clone),
                 tool_manager,
-                valid_model_id,
+                Some(valid_model_id),
             )
             .await
         };
@@ -1004,7 +1020,7 @@ impl ChatContext {
                 ChatState::HandleResponseStream(response) => tokio::select! {
                     res = self.handle_response(database, telemetry, response) => res,
                     Ok(_) = ctrl_c_stream => {
-                        self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None, None).await;
+                        self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None, None, None).await;
 
                         Err(ChatError::Interrupted { tool_uses: None })
                     }
@@ -1030,7 +1046,7 @@ impl ChatContext {
             Ok(state) => Ok(state),
             Err(e) => {
                 let (reason, reason_desc) = get_error_reason(&e);
-                self.send_error_telemetry(database, telemetry, reason, Some(reason_desc))
+                self.send_error_telemetry(database, telemetry, reason, Some(reason_desc), e.status_code())
                     .await;
 
                 macro_rules! print_err {
@@ -1099,7 +1115,7 @@ impl ChatContext {
                     ChatError::Client(err) => match err {
                         // Errors from attempting to send too large of a conversation history. In
                         // this case, attempt to automatically compact the history for the user.
-                        crate::api_client::ApiClientError::ContextWindowOverflow => {
+                        crate::api_client::ApiClientError::ContextWindowOverflow { .. } => {
                             if !self.conversation_state.can_create_summary_request().await {
                                 execute!(
                                     self.output,
@@ -1138,10 +1154,10 @@ impl ChatContext {
                                 help: false,
                             });
                         },
-                        crate::api_client::ApiClientError::QuotaBreach(msg) => {
-                            print_err!(msg, err);
+                        crate::api_client::ApiClientError::QuotaBreach { message, .. } => {
+                            print_err!(message, err);
                         },
-                        crate::api_client::ApiClientError::ModelOverloadedError { request_id } => {
+                        crate::api_client::ApiClientError::ModelOverloadedError { request_id, .. } => {
                             queue!(
                                 self.output,
                                 style::SetAttribute(Attribute::Bold),
@@ -1165,7 +1181,7 @@ impl ChatContext {
                                 style::SetForegroundColor(Color::Reset),
                             )?;
                         },
-                        crate::api_client::ApiClientError::MonthlyLimitReached => {
+                        crate::api_client::ApiClientError::MonthlyLimitReached { .. } => {
                             let subscription_status = get_subscription_status(database).await;
                             if subscription_status.is_err() {
                                 execute!(
@@ -1306,10 +1322,11 @@ impl ChatContext {
                     TelemetryResult::Failed,
                     Some(reason),
                     Some(reason_desc),
+                    e.status_code(),
                 )
                 .await;
                 match e {
-                    crate::api_client::ApiClientError::ContextWindowOverflow => {
+                    crate::api_client::ApiClientError::ContextWindowOverflow { .. } => {
                         self.conversation_state.clear(true);
                         if self.interactive {
                             self.spinner.take();
@@ -1356,6 +1373,7 @@ impl ChatContext {
                             TelemetryResult::Failed,
                             Some(reason),
                             Some(reason_desc),
+                            err.status_code(),
                         )
                         .await;
                         return Err(err.into());
@@ -1374,8 +1392,16 @@ impl ChatContext {
             )?;
         }
 
-        self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
-            .await;
+        self.send_chat_telemetry(
+            database,
+            telemetry,
+            request_id,
+            TelemetryResult::Succeeded,
+            None,
+            None,
+            None,
+        )
+        .await;
 
         self.conversation_state.replace_history_with_summary(summary.clone());
 
@@ -1565,9 +1591,9 @@ impl ChatContext {
         Ok(match command {
             Command::Ask { prompt } => {
                 // Check for a pending tool approval
+                let tool_denied_without_reason = ["n", "N"].contains(&prompt.as_str());
                 if let Some(index) = pending_tool_index {
                     let tool_use = &mut tool_uses[index];
-
                     let is_trust = ["t", "T"].contains(&prompt.as_str());
                     if ["y", "Y"].contains(&prompt.as_str()) || is_trust {
                         if is_trust {
@@ -1576,6 +1602,23 @@ impl ChatContext {
                         tool_use.accepted = true;
 
                         return Ok(ChatState::ExecuteTools(tool_uses));
+                    // Prompt reason if no selected
+                    } else if tool_denied_without_reason {
+                        tool_use.accepted = false;
+                        execute!(
+                            self.output,
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print(
+                                "\nPlease provide a reason for denying this tool use, or otherwise continue your conversation:\n\n"
+                            ),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+
+                        return Ok(ChatState::PromptUser {
+                            tool_uses: Some(tool_uses),
+                            pending_tool_index,
+                            skip_printing_tools: true,
+                        });
                     }
                 } else if !self.pending_prompts.is_empty() {
                     let prompts = self.pending_prompts.drain(0..).collect();
@@ -1587,7 +1630,6 @@ impl ChatContext {
 
                 // Otherwise continue with normal chat on 'n' or other responses
                 self.tool_use_status = ToolUseStatus::Idle;
-
                 if pending_tool_index.is_some() {
                     self.conversation_state.abandon_tool_use(tool_uses, user_input);
                 } else {
@@ -2859,6 +2901,21 @@ impl ChatContext {
                                 optimal_case
                             }
                         };
+                        // Add usage guidance at the top
+                        queue!(
+                            self.output,
+                            style::Print("\n"),
+                            style::SetAttribute(Attribute::Bold),
+                            style::Print("Usage: "),
+                            style::SetAttribute(Attribute::Reset),
+                            style::Print("You can use a prompt by typing "),
+                            style::SetAttribute(Attribute::Bold),
+                            style::SetForegroundColor(Color::Green),
+                            style::Print("'@<prompt name> [...args]'"),
+                            style::SetForegroundColor(Color::Reset),
+                            style::SetAttribute(Attribute::Reset),
+                            style::Print("\n\n"),
+                        )?;
                         queue!(
                             self.output,
                             style::Print("\n"),
@@ -2975,13 +3032,19 @@ impl ChatContext {
                 }
 
                 let data = state.calculate_conversation_size();
+                let tool_specs_json: String = state
+                    .tools
+                    .values()
+                    .filter_map(|s| serde_json::to_string(s).ok())
+                    .collect();
 
                 let context_token_count: TokenCount = data.context_messages.into();
                 let assistant_token_count: TokenCount = data.assistant_messages.into();
                 let user_token_count: TokenCount = data.user_messages.into();
+                let tools_char_count: CharCount = tool_specs_json.len().into(); // usize → CharCount
+                let tools_token_count: TokenCount = tools_char_count.into(); // CharCount → TokenCount
                 let total_token_used: TokenCount =
-                    (data.context_messages + data.user_messages + data.assistant_messages).into();
-
+                    (data.context_messages + data.user_messages + data.assistant_messages + tools_char_count).into();
                 let window_width = self.terminal_width();
                 // set a max width for the progress bar for better aesthetic
                 let progress_bar_width = std::cmp::min(window_width, 80);
@@ -2990,13 +3053,18 @@ impl ChatContext {
                     * progress_bar_width as f64) as usize;
                 let assistant_width = ((assistant_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
                     * progress_bar_width as f64) as usize;
+                let tools_width = ((tools_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
+                    * progress_bar_width as f64) as usize;
                 let user_width = ((user_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
                     * progress_bar_width as f64) as usize;
 
                 let left_over_width = progress_bar_width
-                    - std::cmp::min(context_width + assistant_width + user_width, progress_bar_width);
+                    - std::cmp::min(
+                        context_width + assistant_width + user_width + tools_width,
+                        progress_bar_width,
+                    );
 
-                let is_overflow = (context_width + assistant_width + user_width) > progress_bar_width;
+                let is_overflow = (context_width + assistant_width + user_width + tools_width) > progress_bar_width;
 
                 if is_overflow {
                     queue!(
@@ -3023,6 +3091,7 @@ impl ChatContext {
                             total_token_used,
                             CONTEXT_WINDOW_SIZE / 1000
                         )),
+                        // Context files
                         style::SetForegroundColor(Color::DarkCyan),
                         // add a nice visual to mimic "tiny" progress, so the overral progress bar doesn't look too
                         // empty
@@ -3032,6 +3101,15 @@ impl ChatContext {
                             0
                         })),
                         style::Print("█".repeat(context_width)),
+                        // Tools
+                        style::SetForegroundColor(Color::DarkRed),
+                        style::Print("|".repeat(if tools_width == 0 && *tools_token_count > 0 {
+                            1
+                        } else {
+                            0
+                        })),
+                        style::Print("█".repeat(tools_width)),
+                        // Assistant responses
                         style::SetForegroundColor(Color::Blue),
                         style::Print("|".repeat(if assistant_width == 0 && *assistant_token_count > 0 {
                             1
@@ -3039,6 +3117,7 @@ impl ChatContext {
                             0
                         })),
                         style::Print("█".repeat(assistant_width)),
+                        // User prompts
                         style::SetForegroundColor(Color::Magenta),
                         style::Print("|".repeat(if user_width == 0 && *user_token_count > 0 { 1 } else { 0 })),
                         style::Print("█".repeat(user_width)),
@@ -3065,6 +3144,14 @@ impl ChatContext {
                         "~{} tokens ({:.2}%)\n",
                         context_token_count,
                         (context_token_count.value() as f32 / CONTEXT_WINDOW_SIZE as f32) * 100.0
+                    )),
+                    style::SetForegroundColor(Color::DarkRed),
+                    style::Print("█ Tools:    "),
+                    style::SetForegroundColor(Color::Reset),
+                    style::Print(format!(
+                        " ~{} tokens ({:.2}%)\n",
+                        tools_token_count,
+                        (tools_token_count.value() as f32 / CONTEXT_WINDOW_SIZE as f32) * 100.0
                     )),
                     style::SetForegroundColor(Color::Blue),
                     style::Print("█ Q responses: "),
@@ -3641,6 +3728,7 @@ impl ChatContext {
                         TelemetryResult::Failed,
                         Some(reason),
                         Some(reason_desc),
+                        recv_error.status_code(),
                     )
                     .await;
 
@@ -3752,8 +3840,16 @@ impl ChatContext {
             }
 
             if ended {
-                self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
-                    .await;
+                self.send_chat_telemetry(
+                    database,
+                    telemetry,
+                    request_id,
+                    TelemetryResult::Succeeded,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
 
                 if self.interactive
                     && database
@@ -4138,6 +4234,7 @@ impl ChatContext {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_chat_telemetry(
         &self,
         database: &Database,
@@ -4146,6 +4243,7 @@ impl ChatContext {
         result: TelemetryResult,
         reason: Option<String>,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
     ) {
         telemetry
             .send_chat_added_message(
@@ -4157,6 +4255,7 @@ impl ChatContext {
                 result,
                 reason,
                 reason_desc,
+                status_code,
                 self.conversation_state.model.clone(),
             )
             .await
@@ -4169,6 +4268,7 @@ impl ChatContext {
         telemetry: &TelemetryThread,
         reason: String,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
     ) {
         telemetry
             .send_response_error(
@@ -4178,9 +4278,18 @@ impl ChatContext {
                 TelemetryResult::Failed,
                 Some(reason),
                 reason_desc,
+                status_code,
             )
             .await
             .ok();
+    }
+}
+
+/// Currently, Sonnet 4 is set as the default model for non-FRA users.
+pub fn default_model_id(database: &Database) -> &'static str {
+    match database.get_auth_profile() {
+        Ok(Some(profile)) if profile.arn.split(':').nth(3) == Some("us-east-1") => "CLAUDE_SONNET_4_20250514_V1_0",
+        _ => "CLAUDE_3_7_SONNET_20250219_V1_0",
     }
 }
 
@@ -4558,11 +4667,13 @@ mod tests {
                 "/tools untrust fs_write".to_string(),
                 "create a file".to_string(), // prompt again due to untrust
                 "n".to_string(),             // cancel
+                "no reason".to_string(),     // dummy reason
                 "/tools trust fs_write".to_string(),
                 "create a file".to_string(), // again without prompting due to '/tools trust'
                 "/tools reset".to_string(),
                 "create a file".to_string(), // prompt again due to reset
                 "n".to_string(),             // cancel
+                "no reason".to_string(),     // dummy reason
                 "exit".to_string(),
             ]),
             true,

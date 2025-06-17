@@ -189,7 +189,7 @@ mod tests {
                 "Yet another test file that's has the largest context file".to_string(),
             ),
         ];
-        let limit = 10;
+        let limit = 9;
 
         let dropped_files = drop_matched_context_files(&mut files, limit).unwrap();
         assert_eq!(dropped_files.len(), 1);

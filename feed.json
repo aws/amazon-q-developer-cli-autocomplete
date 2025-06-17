@@ -12,6 +12,26 @@
     },
     {
       "type": "release",
+      "date": "2025-06-17",
+      "version": "1.12.1",
+      "title": "Version 1.12.1",
+      "changes": [
+        {
+          "type": "changed",
+          "description": "The default `q chat` model to Sonnet 4 - [#219](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/219)"
+        },
+        {
+          "type": "added",
+          "description": "Instructions on using `/prompts` in `q chat` - [#208](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/208)"
+        },
+        {
+          "type": "fixed",
+          "description": "Validation errors with `/compact` in `q chat` - [#224](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/224)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-06-11",
       "version": "1.12.0",
       "title": "Version 1.12.0",

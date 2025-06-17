@@ -600,9 +600,20 @@ impl ConversationState {
             flatten_history(conv_state.history.take(history_len.saturating_sub(1)))
         };
 
+        let user_input_message_context = UserInputMessageContext {
+            env_state: Some(build_env_state()),
+            git_state: None,
+            tool_results: None,
+            tools: if self.tools.is_empty() {
+                None
+            } else {
+                Some(self.tools.values().flatten().cloned().collect::<Vec<Tool>>())
+            },
+        };
+
         let mut summary_message = UserInputMessage {
             content: summary_content,
-            user_input_message_context: None,
+            user_input_message_context: Some(user_input_message_context),
             user_intent: None,
             images: None,
             model_id: self.model.clone(),
