@@ -94,6 +94,9 @@ pub struct AddArgs {
     /// Server launch timeout, in milliseconds
     #[arg(long)]
     pub timeout: Option<u64>,
+    /// Whether the server should be disabled (not loaded)
+    #[arg(long, default_value_t = false)]
+    pub disabled: bool,
     /// Overwrite an existing server with the same name
     #[arg(long, default_value_t = false)]
     pub force: bool,
@@ -120,6 +123,7 @@ impl AddArgs {
             "command": self.command,
             "env": merged_env,
             "timeout": self.timeout.unwrap_or(default_timeout()),
+            "disabled": self.disabled,
         }))?;
 
         writeln!(
@@ -203,7 +207,8 @@ impl ListArgs {
             match cfg_opt {
                 Some(cfg) if !cfg.mcp_servers.is_empty() => {
                     for (name, tool_cfg) in &cfg.mcp_servers {
-                        writeln!(output, "    • {name:<12} {}", tool_cfg.command)?;
+                        let status = if tool_cfg.disabled { " (disabled)" } else { "" };
+                        writeln!(output, "    • {name:<12} {}{}", tool_cfg.command, status)?;
                     }
                 },
                 _ => {
@@ -287,6 +292,7 @@ impl StatusArgs {
                     style::Print(format!("File    : {}\n", path.display())),
                     style::Print(format!("Command : {}\n", cfg.command)),
                     style::Print(format!("Timeout : {} ms\n", cfg.timeout)),
+                    style::Print(format!("Disabled: {}\n", cfg.disabled)),
                     style::Print(format!(
                         "Env Vars: {}\n",
                         cfg.env
@@ -451,6 +457,7 @@ mod tests {
             env: vec![],
             timeout: None,
             scope: None,
+            disabled: false,
             force: false,
         }
         .execute(&ctx, &mut out)
@@ -501,6 +508,7 @@ mod tests {
                     .collect()
                 ],
                 timeout: None,
+                disabled: false,
                 force: false,
             }))
         );
