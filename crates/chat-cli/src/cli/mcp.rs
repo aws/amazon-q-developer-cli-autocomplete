@@ -494,6 +494,8 @@ mod tests {
                 "test_server",
                 "--command",
                 "test_command",
+                "--args",
+                "awslabs.eks-mcp-server,--allow-write,--allow-sensitive-data-access",
                 "--env",
                 "key1=value1,key2=value2"
             ],
@@ -501,10 +503,10 @@ mod tests {
                 name: "test_server".to_string(),
                 command: "test_command".to_string(),
                 args: vec![
-                "awslabs.eks-mcp-server".to_string(),
-                "--allow-write".to_string(),
-                "--allow-sensitive-data-access".to_string(),
-            ],
+                    "awslabs.eks-mcp-server".to_string(),
+                    "--allow-write".to_string(),
+                    "--allow-sensitive-data-access".to_string(),
+                ],
                 scope: None,
                 env: vec![
                     [
