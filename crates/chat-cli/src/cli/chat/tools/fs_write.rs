@@ -363,7 +363,7 @@ impl PermissionCandidate for FsWrite {
                                 }
                             },
                         }
-                        return PermissionEvalResult::Ask;
+                        PermissionEvalResult::Ask
                     },
                     (allow_res, deny_res) => {
                         if let Err(e) = allow_res {
@@ -373,7 +373,7 @@ impl PermissionCandidate for FsWrite {
                             warn!("fs_write failed to build deny set: {:?}", e);
                         }
                         warn!("One or more detailed args failed to parse, falling back to ask");
-                        return PermissionEvalResult::Ask;
+                        PermissionEvalResult::Ask
                     },
                 }
             },
