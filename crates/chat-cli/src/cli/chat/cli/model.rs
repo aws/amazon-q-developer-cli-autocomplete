@@ -98,7 +98,7 @@ impl ModelArgs {
     }
 }
 
-/// Currently, Sonnet 4 is set as the default model for non-FRA users.Add commentMore actions
+/// Currently, Sonnet 4 is set as the default model for non-FRA users.
 pub fn default_model_id(database: &Database) -> &'static str {
     match database.get_auth_profile() {
         Ok(Some(profile)) if profile.arn.split(':').nth(3) == Some("eu-central-1") => "CLAUDE_3_7_SONNET_20250219_V1_0",
