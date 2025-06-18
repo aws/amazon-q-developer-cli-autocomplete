@@ -5,6 +5,8 @@ pub mod open;
 pub mod process;
 pub mod spinner;
 pub mod system_info;
+#[cfg(test)]
+pub mod test;
 
 use std::fmt::Display;
 use std::io::{

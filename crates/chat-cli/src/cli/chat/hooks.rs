@@ -295,6 +295,7 @@ impl HookExecutor {
     async fn execute_inline_hook(&self, hook: &Hook) -> Result<String> {
         let command = hook.command.as_ref().ok_or_else(|| eyre!("no command specified"))?;
 
+        #[cfg(unix)]
         let command_future = tokio::process::Command::new("bash")
             .arg("-c")
             .arg(command)
@@ -302,6 +303,16 @@ impl HookExecutor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .output();
+
+        #[cfg(windows)]
+        let command_future = tokio::process::Command::new("cmd")
+            .arg("/C")
+            .arg(command)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+
         let timeout = Duration::from_millis(hook.timeout_ms);
 
         // Run with timeout
@@ -544,14 +555,47 @@ mod tests {
     #[tokio::test]
     async fn test_max_output_size() {
         let mut executor = HookExecutor::new();
-        let mut hook = Hook::new_inline_hook(
-            HookTrigger::PerPrompt,
-            "for i in {1..1000}; do echo $i; done".to_string(),
-        );
+
+        // Use different commands based on OS
+        #[cfg(unix)]
+        let command = "for i in {1..1000}; do echo $i; done";
+
+        #[cfg(windows)]
+        let command = "for /L %i in (1,1,1000) do @echo %i";
+
+        let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, command.to_string());
         hook.max_output_size = 100;
 
         let results = executor.run_hooks(vec![&hook], None::<&mut Stdout>).await;
 
         assert!(results[0].1.len() <= hook.max_output_size + " ... truncated".len());
+    }
+
+    #[tokio::test]
+    async fn test_os_specific_command_execution() {
+        let mut executor = HookExecutor::new();
+
+        // Create a simple command that outputs the shell name
+        #[cfg(unix)]
+        let command = "echo $SHELL";
+
+        #[cfg(windows)]
+        let command = "echo %ComSpec%";
+
+        let hook = Hook::new_inline_hook(HookTrigger::PerPrompt, command.to_string());
+
+        let results = executor.run_hooks(vec![&hook], None::<&mut Stdout>).await;
+
+        assert_eq!(results.len(), 1, "Command execution should succeed");
+
+        // Verify output contains expected shell information
+        #[cfg(unix)]
+        assert!(results[0].1.contains("/"), "Unix shell path should contain '/'");
+
+        #[cfg(windows)]
+        assert!(
+            results[0].1.to_lowercase().contains("cmd.exe") || results[0].1.to_lowercase().contains("command.com"),
+            "Windows shell path should contain cmd.exe or command.com"
+        );
     }
 }

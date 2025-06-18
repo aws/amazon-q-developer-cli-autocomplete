@@ -23,7 +23,7 @@ use spinners::{
 use super::OutputFormat;
 use crate::platform::diagnostics::Diagnostics;
 
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Clone, Debug, Args, PartialEq, Eq)]
 pub struct DiagnosticArgs {
     /// The format of the output
     #[arg(long, short, value_enum, default_value_t)]

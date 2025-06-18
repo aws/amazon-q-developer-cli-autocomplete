@@ -54,7 +54,7 @@ clap = { version = "4.5.32", features = [
 ] }
 clap_complete = "4.5.46"
 clap_complete_fig = "4.4.0"
-color-eyre = "0.6.2"
+color-eyre = "0.6.5"
 color-print = "0.3.5"
 convert_case = "0.8.0"
 cookie = "0.18.1"
@@ -149,6 +149,7 @@ tracing-subscriber = { version = "0.3.19", features = [
     "parking_lot",
     "time",
 ] }
+typed-path = "0.11.0"
 unicode-width = "0.2.0"
 url = "2.5.4"
 uuid = { version = "1.15.1", features = ["v4", "serde"] }

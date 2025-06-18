@@ -11,6 +11,7 @@ use crate::telemetry::definitions::IntoMetricDatum;
 use crate::telemetry::definitions::metrics::{
     AmazonqDidSelectProfile,
     AmazonqEndChat,
+    AmazonqMessageResponseError,
     AmazonqProfileState,
     AmazonqStartChat,
     CodewhispererterminalAddChatMessage,
@@ -24,7 +25,6 @@ use crate::telemetry::definitions::types::{
     CodewhispererterminalCustomToolInputTokenSize,
     CodewhispererterminalCustomToolLatency,
     CodewhispererterminalCustomToolOutputTokenSize,
-    CodewhispererterminalInCloudshell,
     CodewhispererterminalIsToolValid,
     CodewhispererterminalMcpServerInitFailureReason,
     CodewhispererterminalToolName,
@@ -41,6 +41,7 @@ use crate::telemetry::definitions::types::{
 pub struct Event {
     pub created_time: Option<SystemTime>,
     pub credential_start_url: Option<String>,
+    pub sso_region: Option<String>,
     #[serde(flatten)]
     pub ty: EventType,
 }
@@ -51,7 +52,16 @@ impl Event {
             ty,
             created_time: Some(SystemTime::now()),
             credential_start_url: None,
+            sso_region: None,
         }
+    }
+
+    pub fn set_start_url(&mut self, start_url: String) {
+        self.credential_start_url = Some(start_url);
+    }
+
+    pub fn set_sso_region(&mut self, sso_region: String) {
+        self.sso_region = Some(sso_region);
     }
 
     pub fn into_metric_datum(self) -> Option<MetricDatum> {
@@ -61,7 +71,7 @@ impl Event {
                     create_time: self.created_time,
                     value: None,
                     credential_start_url: self.credential_start_url.map(Into::into),
-                    codewhispererterminal_in_cloudshell: in_cloudshell(),
+                    codewhispererterminal_in_cloudshell: None,
                 }
                 .into_metric_datum(),
             ),
@@ -79,7 +89,7 @@ impl Event {
                     result: Some(result.to_string().into()),
                     reason: reason.map(Into::into),
                     oauth_flow: Some(oauth_flow.into()),
-                    codewhispererterminal_in_cloudshell: in_cloudshell(),
+                    codewhispererterminal_in_cloudshell: None,
                 }
                 .into_metric_datum(),
             ),
@@ -89,42 +99,59 @@ impl Event {
                     value: None,
                     credential_start_url: self.credential_start_url.map(Into::into),
                     codewhispererterminal_subcommand: Some(subcommand.into()),
-                    codewhispererterminal_in_cloudshell: in_cloudshell(),
+                    codewhispererterminal_in_cloudshell: None,
                 }
                 .into_metric_datum(),
             ),
-            EventType::ChatStart { conversation_id } => Some(
+            EventType::ChatStart { conversation_id, model } => Some(
                 AmazonqStartChat {
                     create_time: self.created_time,
                     value: None,
                     credential_start_url: self.credential_start_url.map(Into::into),
                     amazonq_conversation_id: Some(conversation_id.into()),
-                    codewhispererterminal_in_cloudshell: in_cloudshell(),
+                    codewhispererterminal_in_cloudshell: None,
+                    codewhispererterminal_model: model.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
-            EventType::ChatEnd { conversation_id } => Some(
+            EventType::ChatEnd { conversation_id, model } => Some(
                 AmazonqEndChat {
                     create_time: self.created_time,
                     value: None,
                     credential_start_url: self.credential_start_url.map(Into::into),
                     amazonq_conversation_id: Some(conversation_id.into()),
-                    codewhispererterminal_in_cloudshell: in_cloudshell(),
+                    codewhispererterminal_in_cloudshell: None,
+                    codewhispererterminal_model: model.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
             EventType::ChatAddedMessage {
                 conversation_id,
                 context_file_length,
+                message_id,
+                request_id,
+                result,
+                reason,
+                reason_desc,
+                status_code,
+                model,
                 ..
             } => Some(
                 CodewhispererterminalAddChatMessage {
                     create_time: self.created_time,
                     value: None,
                     amazonq_conversation_id: Some(conversation_id.into()),
+                    request_id: request_id.map(Into::into),
+                    codewhispererterminal_utterance_id: message_id.map(Into::into),
                     credential_start_url: self.credential_start_url.map(Into::into),
-                    codewhispererterminal_in_cloudshell: in_cloudshell(),
+                    sso_region: self.sso_region.map(Into::into),
+                    codewhispererterminal_in_cloudshell: None,
                     codewhispererterminal_context_file_length: context_file_length.map(|l| l as i64).map(Into::into),
+                    result: result.to_string().into(),
+                    reason: reason.map(Into::into),
+                    reason_desc: reason_desc.map(Into::into),
+                    status_code: status_code.map(|v| v as i64).map(Into::into),
+                    codewhispererterminal_model: model.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -141,6 +168,7 @@ impl Event {
                 input_token_size,
                 output_token_size,
                 custom_tool_call_latency,
+                model,
             } => Some(
                 CodewhispererterminalToolUseSuggested {
                     create_time: self.created_time,
@@ -161,6 +189,7 @@ impl Event {
                         .map(|s| CodewhispererterminalCustomToolOutputTokenSize(s as i64)),
                     codewhispererterminal_custom_tool_latency: custom_tool_call_latency
                         .map(|l| CodewhispererterminalCustomToolLatency(l as i64)),
+                    codewhispererterminal_model: model.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -218,6 +247,28 @@ impl Event {
                 }
                 .into_metric_datum(),
             ),
+            EventType::MessageResponseError {
+                conversation_id,
+                context_file_length,
+                result,
+                reason,
+                reason_desc,
+                status_code,
+            } => Some(
+                AmazonqMessageResponseError {
+                    create_time: self.created_time,
+                    value: None,
+                    amazonq_conversation_id: Some(conversation_id.into()),
+                    codewhispererterminal_context_file_length: context_file_length.map(|l| l as i64).map(Into::into),
+                    credential_start_url: self.credential_start_url.map(Into::into),
+                    sso_region: self.sso_region.map(Into::into),
+                    result: Some(result.to_string().into()),
+                    reason: reason.map(Into::into),
+                    reason_desc: reason_desc.map(Into::into),
+                    status_code: status_code.map(|v| v as i64).map(Into::into),
+                }
+                .into_metric_datum(),
+            ),
         }
     }
 }
@@ -238,14 +289,22 @@ pub enum EventType {
     },
     ChatStart {
         conversation_id: String,
+        model: Option<String>,
     },
     ChatEnd {
         conversation_id: String,
+        model: Option<String>,
     },
     ChatAddedMessage {
         conversation_id: String,
-        message_id: String,
+        message_id: Option<String>,
+        request_id: Option<String>,
         context_file_length: Option<usize>,
+        result: TelemetryResult,
+        reason: Option<String>,
+        reason_desc: Option<String>,
+        status_code: Option<u16>,
+        model: Option<String>,
     },
     ToolUseSuggested {
         conversation_id: String,
@@ -260,6 +319,7 @@ pub enum EventType {
         input_token_size: Option<usize>,
         output_token_size: Option<usize>,
         custom_tool_call_latency: Option<usize>,
+        model: Option<String>,
     },
     McpServerInit {
         conversation_id: String,
@@ -279,6 +339,14 @@ pub enum EventType {
         result: TelemetryResult,
         sso_region: Option<String>,
     },
+    MessageResponseError {
+        result: TelemetryResult,
+        reason: Option<String>,
+        reason_desc: Option<String>,
+        status_code: Option<u16>,
+        conversation_id: String,
+        context_file_length: Option<usize>,
+    },
 }
 
 #[derive(Debug)]
@@ -295,10 +363,11 @@ pub struct ToolUseEventBuilder {
     pub input_token_size: Option<usize>,
     pub output_token_size: Option<usize>,
     pub custom_tool_call_latency: Option<usize>,
+    pub model: Option<String>,
 }
 
 impl ToolUseEventBuilder {
-    pub fn new(conv_id: String, tool_use_id: String) -> Self {
+    pub fn new(conv_id: String, tool_use_id: String, model: Option<String>) -> Self {
         Self {
             conversation_id: conv_id,
             utterance_id: None,
@@ -312,6 +381,7 @@ impl ToolUseEventBuilder {
             input_token_size: None,
             output_token_size: None,
             custom_tool_call_latency: None,
+            model,
         }
     }
 
@@ -373,8 +443,4 @@ pub enum QProfileSwitchIntent {
     Auth,
     Update,
     Reload,
-}
-
-fn in_cloudshell() -> Option<CodewhispererterminalInCloudshell> {
-    Some(crate::util::system_info::in_cloudshell().into())
 }

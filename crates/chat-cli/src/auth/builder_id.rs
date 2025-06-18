@@ -41,6 +41,10 @@ use aws_smithy_runtime_api::client::identity::{
 };
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_types::region::Region;
+use eyre::{
+    Result,
+    eyre,
+};
 use time::OffsetDateTime;
 use tracing::{
     debug,
@@ -536,6 +540,16 @@ pub async fn logout(database: &mut Database) -> Result<(), AuthError> {
     Ok(())
 }
 
+pub async fn get_start_url_and_region(database: &Database) -> (Option<String>, Option<String>) {
+    // NOTE: Database provides direct methods to access the start_url and region, but they are not
+    // guaranteed to be up to date in the chat session. Example: login is changed mid-chat session.
+    let token = BuilderIdToken::load(database).await;
+    match token {
+        Ok(Some(t)) => (t.start_url, t.region),
+        _ => (None, None),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BearerResolver;
 
@@ -555,6 +569,17 @@ impl ResolveIdentity for BearerResolver {
                 None => Err(AuthError::NoToken.into()),
             }
         }))
+    }
+}
+
+pub async fn is_idc_user(database: &Database) -> Result<bool> {
+    if cfg!(test) {
+        return Ok(false);
+    }
+    if let Ok(Some(token)) = BuilderIdToken::load(database).await {
+        Ok(token.token_type() == TokenType::IamIdentityCenter)
+    } else {
+        Err(eyre!("No auth token found - is the user signed in?"))
     }
 }
 

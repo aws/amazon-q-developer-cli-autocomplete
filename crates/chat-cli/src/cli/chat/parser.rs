@@ -4,10 +4,6 @@ use std::time::{
 };
 
 use eyre::Result;
-use rand::distr::{
-    Alphanumeric,
-    SampleString,
-};
 use thiserror::Error;
 use tracing::{
     error,
@@ -21,6 +17,7 @@ use super::message::{
 };
 use crate::api_client::clients::SendMessageOutput;
 use crate::api_client::model::ChatResponseStream;
+use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]
 pub struct RecvError {
@@ -28,6 +25,28 @@ pub struct RecvError {
     pub request_id: Option<String>,
     #[source]
     pub source: RecvErrorKind,
+}
+
+impl RecvError {
+    pub fn status_code(&self) -> Option<u16> {
+        match &self.source {
+            RecvErrorKind::Client(e) => e.status_code(),
+            RecvErrorKind::Json(_) => None,
+            RecvErrorKind::StreamTimeout { .. } => None,
+            RecvErrorKind::UnexpectedToolUseEos { .. } => None,
+        }
+    }
+}
+
+impl ReasonCode for RecvError {
+    fn reason_code(&self) -> String {
+        match &self.source {
+            RecvErrorKind::Client(_) => "RecvErrorApiClient".to_string(),
+            RecvErrorKind::Json(_) => "RecvErrorJson".to_string(),
+            RecvErrorKind::StreamTimeout { .. } => "RecvErrorStreamTimeout".to_string(),
+            RecvErrorKind::UnexpectedToolUseEos { .. } => "RecvErrorUnexpectedToolUseEos".to_string(),
+        }
+    }
 }
 
 impl std::fmt::Display for RecvError {
@@ -98,7 +117,7 @@ pub struct ResponseParser {
 
 impl ResponseParser {
     pub fn new(response: SendMessageOutput) -> Self {
-        let message_id = Alphanumeric.sample_string(&mut rand::rng(), 9);
+        let message_id = uuid::Uuid::new_v4().to_string();
         info!(?message_id, "Generated new message id");
         Self {
             response,
@@ -202,7 +221,6 @@ impl ResponseParser {
                 // If we failed deserializing after waiting for a long time, then this is most
                 // likely bedrock responding with a stop event for some reason without actually
                 // including the tool contents. Essentially, the tool was too large.
-                // Timeouts have been seen as short as ~1 minute, so setting the time to 30.
                 let time_elapsed = start.elapsed();
                 let args = serde_json::Value::Object(
                     [(
@@ -214,7 +232,7 @@ impl ResponseParser {
                     .into_iter()
                     .collect(),
                 );
-                if self.peek().await?.is_none() && time_elapsed > Duration::from_secs(30) {
+                if self.peek().await?.is_none() {
                     error!(
                         "Received an unexpected end of stream after spending ~{}s receiving tool events",
                         time_elapsed.as_secs_f64()

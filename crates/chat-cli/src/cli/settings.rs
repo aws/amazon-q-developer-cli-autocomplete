@@ -22,7 +22,7 @@ use crate::util::{
     directories,
 };
 
-#[derive(Debug, Subcommand, PartialEq, Eq)]
+#[derive(Clone, Debug, Subcommand, PartialEq, Eq)]
 pub enum SettingsSubcommands {
     /// Open the settings file
     Open,
@@ -37,7 +37,7 @@ pub enum SettingsSubcommands {
     },
 }
 
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Clone, Debug, Args, PartialEq, Eq)]
 #[command(subcommand_negates_reqs = true)]
 #[command(args_conflicts_with_subcommands = true)]
 #[command(group(ArgGroup::new("vals").requires("key").args(&["value", "delete", "format"])))]

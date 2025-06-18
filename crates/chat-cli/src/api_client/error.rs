@@ -1,26 +1,27 @@
+use amzn_codewhisperer_client::operation::create_subscription_token::CreateSubscriptionTokenError;
 use amzn_codewhisperer_client::operation::generate_completions::GenerateCompletionsError;
 use amzn_codewhisperer_client::operation::list_available_customizations::ListAvailableCustomizationsError;
 use amzn_codewhisperer_client::operation::list_available_profiles::ListAvailableProfilesError;
+use amzn_codewhisperer_client::operation::send_telemetry_event::SendTelemetryEventError;
 pub use amzn_codewhisperer_streaming_client::operation::generate_assistant_response::GenerateAssistantResponseError;
 use amzn_codewhisperer_streaming_client::types::error::ChatResponseStreamError as CodewhispererChatResponseStreamError;
 use amzn_consolas_client::operation::generate_recommendations::GenerateRecommendationsError;
 use amzn_consolas_client::operation::list_customizations::ListCustomizationsError;
 use amzn_qdeveloper_streaming_client::operation::send_message::SendMessageError as QDeveloperSendMessageError;
 use amzn_qdeveloper_streaming_client::types::error::ChatResponseStreamError as QDeveloperChatResponseStreamError;
-use aws_credential_types::provider::error::CredentialsError;
+use aws_sdk_ssooidc::error::ProvideErrorMetadata;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 pub use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_runtime_api::http::Response;
 use aws_smithy_types::event_stream::RawMessage;
 use thiserror::Error;
 
 use crate::auth::AuthError;
 use crate::aws_common::SdkErrorDisplay;
+use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]
 pub enum ApiClientError {
-    #[error("failed to load credentials: {}", .0)]
-    Credentials(CredentialsError),
-
     // Generate completions errors
     #[error("{}", SdkErrorDisplay(.0))]
     GenerateCompletions(#[from] SdkError<GenerateCompletionsError, HttpResponse>),
@@ -32,6 +33,10 @@ pub enum ApiClientError {
     ListAvailableCustomizations(#[from] SdkError<ListAvailableCustomizationsError, HttpResponse>),
     #[error("{}", SdkErrorDisplay(.0))]
     ListAvailableServices(#[from] SdkError<ListCustomizationsError, HttpResponse>),
+
+    // Telemetry client error
+    #[error("{}", SdkErrorDisplay(.0))]
+    SendTelemetryEvent(#[from] SdkError<SendTelemetryEventError, HttpResponse>),
 
     // Send message errors
     #[error("{}", SdkErrorDisplay(.0))]
@@ -47,7 +52,17 @@ pub enum ApiClientError {
 
     // quota breach
     #[error("quota has reached its limit")]
-    QuotaBreach(&'static str),
+    QuotaBreach {
+        message: &'static str,
+        status_code: Option<u16>,
+    },
+
+    // Separate from quota breach (somehow)
+    #[error("monthly query limit reached")]
+    MonthlyLimitReached { status_code: Option<u16> },
+
+    #[error("{}", SdkErrorDisplay(.0))]
+    CreateSubscriptionToken(#[from] SdkError<CreateSubscriptionTokenError, HttpResponse>),
 
     /// Returned from the backend when the user input is too large to fit within the model context
     /// window.
@@ -55,7 +70,7 @@ pub enum ApiClientError {
     /// Note that we currently do not receive token usage information regarding how large the
     /// context window is.
     #[error("the context window has overflowed")]
-    ContextWindowOverflow,
+    ContextWindowOverflow { status_code: Option<u16> },
 
     #[error(transparent)]
     SmithyBuild(#[from] aws_smithy_types::error::operation::BuildError),
@@ -65,6 +80,75 @@ pub enum ApiClientError {
 
     #[error(transparent)]
     AuthError(#[from] AuthError),
+
+    #[error(
+        "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again."
+    )]
+    ModelOverloadedError {
+        request_id: Option<String>,
+        status_code: Option<u16>,
+    },
+}
+
+impl ApiClientError {
+    pub fn status_code(&self) -> Option<u16> {
+        match self {
+            ApiClientError::GenerateCompletions(e) => sdk_status_code(e),
+            ApiClientError::GenerateRecommendations(e) => sdk_status_code(e),
+            ApiClientError::ListAvailableCustomizations(e) => sdk_status_code(e),
+            ApiClientError::ListAvailableServices(e) => sdk_status_code(e),
+            ApiClientError::CodewhispererGenerateAssistantResponse(e) => sdk_status_code(e),
+            ApiClientError::QDeveloperSendMessage(e) => sdk_status_code(e),
+            ApiClientError::CodewhispererChatResponseStream(_) => None,
+            ApiClientError::QDeveloperChatResponseStream(_) => None,
+            ApiClientError::ListAvailableProfilesError(e) => sdk_status_code(e),
+            ApiClientError::SendTelemetryEvent(e) => sdk_status_code(e),
+            ApiClientError::CreateSubscriptionToken(e) => sdk_status_code(e),
+            ApiClientError::QuotaBreach { status_code, .. } => *status_code,
+            ApiClientError::ContextWindowOverflow { status_code } => *status_code,
+            ApiClientError::SmithyBuild(_) => None,
+            ApiClientError::AuthError(_) => None,
+            ApiClientError::ModelOverloadedError { status_code, .. } => *status_code,
+            ApiClientError::MonthlyLimitReached { status_code } => *status_code,
+        }
+    }
+}
+
+impl ReasonCode for ApiClientError {
+    fn reason_code(&self) -> String {
+        match self {
+            ApiClientError::GenerateCompletions(e) => sdk_error_code(e),
+            ApiClientError::GenerateRecommendations(e) => sdk_error_code(e),
+            ApiClientError::ListAvailableCustomizations(e) => sdk_error_code(e),
+            ApiClientError::ListAvailableServices(e) => sdk_error_code(e),
+            ApiClientError::CodewhispererGenerateAssistantResponse(e) => sdk_error_code(e),
+            ApiClientError::QDeveloperSendMessage(e) => sdk_error_code(e),
+            ApiClientError::CodewhispererChatResponseStream(e) => sdk_error_code(e),
+            ApiClientError::QDeveloperChatResponseStream(e) => sdk_error_code(e),
+            ApiClientError::ListAvailableProfilesError(e) => sdk_error_code(e),
+            ApiClientError::SendTelemetryEvent(e) => sdk_error_code(e),
+            ApiClientError::CreateSubscriptionToken(e) => sdk_error_code(e),
+            ApiClientError::QuotaBreach { .. } => "QuotaBreachError".to_string(),
+            ApiClientError::ContextWindowOverflow { .. } => "ContextWindowOverflow".to_string(),
+            ApiClientError::SmithyBuild(_) => "SmithyBuildError".to_string(),
+            ApiClientError::AuthError(_) => "AuthError".to_string(),
+            ApiClientError::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
+            ApiClientError::MonthlyLimitReached { .. } => "MonthlyLimitReached".to_string(),
+        }
+    }
+}
+
+fn sdk_error_code<T, R>(e: &SdkError<T, R>) -> String
+where
+    T: ProvideErrorMetadata,
+{
+    e.as_service_error()
+        .and_then(|se| se.meta().code().map(str::to_string))
+        .unwrap_or_else(|| e.to_string())
+}
+
+fn sdk_status_code<E>(e: &SdkError<E, Response>) -> Option<u16> {
+    e.raw_response().map(|res| res.status().as_u16())
 }
 
 #[cfg(test)]
@@ -87,7 +171,6 @@ mod tests {
 
     fn all_errors() -> Vec<ApiClientError> {
         vec![
-            ApiClientError::Credentials(CredentialsError::unhandled("<unhandled>")),
             ApiClientError::GenerateCompletions(SdkError::service_error(
                 GenerateCompletionsError::unhandled("<unhandled>"),
                 response(),
@@ -110,6 +193,10 @@ mod tests {
             )),
             ApiClientError::QDeveloperSendMessage(SdkError::service_error(
                 QDeveloperSendMessageError::unhandled("<unhandled>"),
+                response(),
+            )),
+            ApiClientError::CreateSubscriptionToken(SdkError::service_error(
+                CreateSubscriptionTokenError::unhandled("<unhandled>"),
                 response(),
             )),
             ApiClientError::CodewhispererChatResponseStream(SdkError::service_error(

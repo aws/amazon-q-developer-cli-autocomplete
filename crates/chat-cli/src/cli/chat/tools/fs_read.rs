@@ -251,92 +251,91 @@ time. You tried to read {byte_count} bytes. Try executing with fewer lines speci
 
 /// Helper function to read a directory with specified depth
 async fn read_single_directory(ctx: &Context, path_str: &str, depth: Option<usize>) -> Result<String> {
-    let path = sanitize_path_tool_arg(ctx, path_str);
-    let max_depth = depth.unwrap_or(FsDirectory::DEFAULT_DEPTH);
-    debug!(?path, max_depth, "Reading directory at path with depth");
-    let mut result = Vec::new();
-    let mut dir_queue = VecDeque::new();
-    dir_queue.push_back((path, 0));
-    while let Some((path, depth)) = dir_queue.pop_front() {
-        if depth > max_depth {
-            break;
-        }
-        let mut read_dir = ctx.fs().read_dir(path).await?;
+     let path = sanitize_path_tool_arg(ctx, path_str);
+        let max_depth = depth.unwrap_or(FsDirectory::DEFAULT_DEPTH);
+        debug!(?path, max_depth, "Reading directory at path with depth");
+        let mut result = Vec::new();
+        let mut dir_queue = VecDeque::new();
+        dir_queue.push_back((path, 0));
+        while let Some((path, depth)) = dir_queue.pop_front() {
+            if depth > max_depth {
+                break;
+            }
+            let mut read_dir = ctx.fs().read_dir(path).await?;
 
-        #[cfg(windows)]
-        while let Some(ent) = read_dir.next_entry().await? {
+            #[cfg(windows)]
+            while let Some(ent) = read_dir.next_entry().await? {
+                let md = ent.metadata().await?;
+
+                let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
+                let formatted_date = datetime
+                    .format(time::macros::format_description!(
+                        "[month repr:short] [day] [hour]:[minute]"
+                    ))
+                    .unwrap();
+
+                result.push(format!(
+                    "{} {} {} {}",
+                    format_ftype(&md),
+                    String::from_utf8_lossy(ent.file_name().as_encoded_bytes()),
+                    formatted_date,
+                    ent.path().to_string_lossy()
+                ));
+
+                if md.is_dir() && md.is_dir() {
+                    dir_queue.push_back((ent.path(), depth + 1));
+                }
+            }
+
+            #[cfg(unix)]
+            while let Some(ent) = read_dir.next_entry().await? {
+                use std::os::unix::fs::{
+                    MetadataExt,
+                    PermissionsExt,
+                };
+
             let md = ent.metadata().await?;
+            let formatted_mode = format_mode(md.permissions().mode()).into_iter().collect::<String>();
 
-            let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
-            let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
-            let formatted_date = datetime
-                .format(time::macros::format_description!(
-                    "[month repr:short] [day] [hour]:[minute]"
-                ))
-                .unwrap();
+                let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
+                let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
+                let formatted_date = datetime
+                    .format(time::macros::format_description!(
+                        "[month repr:short] [day] [hour]:[minute]"
+                    ))
+                    .unwrap();
 
-            result.push(format!(
-                "{} {} {} {}",
-                format_ftype(&md),
-                String::from_utf8_lossy(ent.file_name().as_encoded_bytes()),
-                formatted_date,
-                ent.path().to_string_lossy()
-            ));
-
-            if md.is_dir() {
+                // Mostly copying "The Long Format" from `man ls`.
+                // TODO: query user/group database to convert uid/gid to names?
+                result.push(format!(
+                    "{}{} {} {} {} {} {} {}",
+                    format_ftype(&md),
+                    formatted_mode,
+                    md.nlink(),
+                    md.uid(),
+                    md.gid(),
+                    md.size(),
+                    formatted_date,
+                    ent.path().to_string_lossy()
+                ));
                 if md.is_dir() {
                     dir_queue.push_back((ent.path(), depth + 1));
                 }
             }
         }
 
-        #[cfg(unix)]
-        while let Some(ent) = read_dir.next_entry().await? {
-            use std::os::unix::fs::{
-                MetadataExt,
-                PermissionsExt,
-            };
-
-            let md = ent.metadata().await?;
-            let formatted_mode = format_mode(md.permissions().mode()).into_iter().collect::<String>();
-
-            let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
-            let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
-            let formatted_date = datetime
-                .format(time::macros::format_description!(
-                    "[month repr:short] [day] [hour]:[minute]"
-                ))
-                .unwrap();
-
-            // Mostly copying "The Long Format" from `man ls`.
-            // TODO: query user/group database to convert uid/gid to names?
-            result.push(format!(
-                "{}{} {} {} {} {} {} {}",
-                format_ftype(&md),
-                formatted_mode,
-                md.nlink(),
-                md.uid(),
-                md.gid(),
-                md.size(),
-                formatted_date,
-                ent.path().to_string_lossy()
-            ));
-            if md.is_dir() {
-                dir_queue.push_back((ent.path(), depth + 1));
-            }
+        let file_count = result.len();
+        let result = result.join("\n");
+        let byte_count = result.len();
+        if byte_count > MAX_TOOL_RESPONSE_SIZE {
+            bail!(
+                "This tool only supports reading up to {MAX_TOOL_RESPONSE_SIZE} bytes at a time. You tried to read {byte_count} bytes ({file_count} files). Try executing with fewer lines specified."
+            );
         }
-    }
 
-    let file_count = result.len();
-    let result = result.join("\n");
-    let byte_count = result.len();
-    if byte_count > MAX_TOOL_RESPONSE_SIZE {
-        bail!(
-            "This tool only supports reading up to {MAX_TOOL_RESPONSE_SIZE} bytes at a time. You tried to read {byte_count} bytes ({file_count} files). Try executing with fewer lines specified."
-        );
-    }
+        Ok(result)
 
-    Ok(result)
 }
 
 /// Helper function to search a file with specified substring
@@ -965,6 +964,7 @@ fn format_ftype(md: &Metadata) -> char {
 }
 
 /// Formats a permissions mode into the form used by `ls`, e.g. `0o644` to `rw-r--r--`
+#[cfg(unix)]
 fn format_mode(mode: u32) -> [char; 9] {
     let mut mode = mode & 0o777;
     let mut res = ['-'; 9];
@@ -1335,6 +1335,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn test_format_mode() {
         macro_rules! assert_mode {
             ($actual:expr, $expected:expr) => {

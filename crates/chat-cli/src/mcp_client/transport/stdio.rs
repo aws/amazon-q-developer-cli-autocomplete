@@ -51,7 +51,7 @@ impl JsonRpcStdioTransport {
                 // Messages are delimited by newlines and assumed to contain no embedded newlines
                 // See https://spec.modelcontextprotocol.io/specification/2024-11-05/basic/transports/#stdio
                 match buf_reader.read_until(b'\n', &mut buffer).await {
-                    Ok(0) => continue,
+                    Ok(0) => break,
                     Ok(_) => match serde_json::from_slice::<JsonRpcMessage>(buffer.as_slice()) {
                         Ok(msg) => {
                             let _ = tx.send(Ok(msg));
@@ -226,7 +226,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_client_transport() {
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut cmd = Command::new("powershell");
+            cmd.args(&["cat"]);
+            cmd
+        };
+        #[cfg(not(windows))]
         let mut cmd = Command::new("cat");
+
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         // Inject our mock transport instead

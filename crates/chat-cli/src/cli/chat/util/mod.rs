@@ -14,21 +14,6 @@ use eyre::Result;
 
 use super::ChatError;
 use super::token_counter::TokenCounter;
-use crate::util::system_info::in_cloudshell;
-
-const GOV_REGIONS: &[&str] = &["us-gov-east-1", "us-gov-west-1"];
-
-pub fn region_check(capability: &'static str) -> eyre::Result<()> {
-    let Ok(region) = std::env::var("AWS_REGION") else {
-        return Ok(());
-    };
-
-    if in_cloudshell() && GOV_REGIONS.contains(&region.as_str()) {
-        eyre::bail!("AWS GovCloud ({region}) is not supported for {capability}.");
-    }
-
-    Ok(())
-}
 
 pub fn truncate_safe(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -204,7 +189,7 @@ mod tests {
                 "Yet another test file that's has the largest context file".to_string(),
             ),
         ];
-        let limit = 10;
+        let limit = 9;
 
         let dropped_files = drop_matched_context_files(&mut files, limit).unwrap();
         assert_eq!(dropped_files.len(), 1);

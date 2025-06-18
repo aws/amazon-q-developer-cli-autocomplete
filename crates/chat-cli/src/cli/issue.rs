@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use clap::Args;
 use eyre::Result;
 
-#[derive(Debug, Args, PartialEq, Eq)]
+#[derive(Clone, Debug, Args, PartialEq, Eq)]
 pub struct IssueArgs {
     /// Force issue creation
     #[arg(long, short = 'f')]

@@ -595,7 +595,15 @@ fn qchat_path() -> Result<PathBuf> {
             return Ok(PathBuf::from("/usr/bin").join(CHAT_BINARY_NAME));
         }
     }
-    Ok(home_local_bin()?.join(CHAT_BINARY_NAME))
+
+    if let Ok(local_bin_path) = home_local_bin() {
+        let local_bin_path = local_bin_path.join(CHAT_BINARY_NAME);
+        if local_bin_path.exists() {
+            return Ok(local_bin_path);
+        }
+    }
+
+    Ok(PathBuf::from(CHAT_BINARY_NAME))
 }
 
 #[cfg(target_os = "macos")]

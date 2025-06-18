@@ -59,6 +59,10 @@ pub enum Command {
         force: bool,
     },
     Mcp,
+    Model,
+    Subscribe {
+        manage: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -839,6 +843,11 @@ impl Command {
                     Self::Save { path, force }
                 },
                 "mcp" => Self::Mcp,
+                "model" => Self::Model,
+                "subscribe" => {
+                    let manage = parts.contains(&"--manage");
+                    Self::Subscribe { manage }
+                },
                 unknown_command => {
                     let looks_like_path = {
                         let after_slash_command_str = parts[1..].join(" ");

@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use amzn_toolkit_telemetry_client::config::BehaviorVersion;
 use aws_credential_types::provider::error::CredentialsError;
 use aws_credential_types::{
@@ -7,6 +9,10 @@ use aws_credential_types::{
 use aws_sdk_cognitoidentity::primitives::{
     DateTime,
     DateTimeFormat,
+};
+use tracing::{
+    trace,
+    warn,
 };
 
 use crate::aws_common::app_name;
@@ -20,6 +26,8 @@ pub async fn get_cognito_credentials_send(
     database: &mut Database,
     telemetry_stage: &TelemetryStage,
 ) -> Result<Credentials, CredentialsError> {
+    trace!("Creating new cognito credentials");
+
     let conf = aws_sdk_cognitoidentity::Config::builder()
         .behavior_version(BehaviorVersion::v2025_01_17())
         .region(telemetry_stage.region.clone())
@@ -80,6 +88,10 @@ pub async fn get_cognito_credentials(
             session_token,
             expiration,
         }) => {
+            if is_expired(expiration.as_ref()) {
+                return get_cognito_credentials_send(database, telemetry_stage).await;
+            }
+
             let Some(access_key_id) = access_key_id else {
                 return get_cognito_credentials_send(database, telemetry_stage).await;
             };
@@ -104,12 +116,12 @@ pub async fn get_cognito_credentials(
 
 #[derive(Debug)]
 pub struct CognitoProvider {
-    credentials: Credentials,
+    telemetry_stage: TelemetryStage,
 }
 
 impl CognitoProvider {
-    pub fn new(credentials: Credentials) -> CognitoProvider {
-        CognitoProvider { credentials }
+    pub fn new(telemetry_stage: TelemetryStage) -> CognitoProvider {
+        CognitoProvider { telemetry_stage }
     }
 }
 
@@ -118,7 +130,36 @@ impl provider::ProvideCredentials for CognitoProvider {
     where
         Self: 'a,
     {
-        provider::future::ProvideCredentials::new(async { Ok(self.credentials.clone()) })
+        provider::future::ProvideCredentials::new(async {
+            match Database::new().await {
+                Ok(mut db) => get_cognito_credentials(&mut db, &self.telemetry_stage).await,
+                Err(err) => Err(CredentialsError::provider_error(format!(
+                    "failed to get database: {:?}",
+                    err
+                ))),
+            }
+        })
+    }
+}
+
+fn is_expired(expiration: Option<&String>) -> bool {
+    let expiration = if let Some(v) = expiration {
+        v
+    } else {
+        warn!("no cognito expiration was saved");
+        return true;
+    };
+
+    match DateTime::from_str(expiration, DateTimeFormat::DateTime) {
+        Ok(expiration) => {
+            // Check if the expiration is at least after five minutes after the current time.
+            let curr: DateTime = (SystemTime::now() + std::time::Duration::from_secs(60 * 5)).into();
+            expiration < curr
+        },
+        Err(err) => {
+            warn!(?err, "invalid cognito expiration was saved");
+            true
+        },
     }
 }
 

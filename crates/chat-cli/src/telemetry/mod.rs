@@ -25,10 +25,7 @@ use amzn_toolkit_telemetry_client::{
     Config,
 };
 use aws_credential_types::provider::SharedCredentialsProvider;
-use cognito::{
-    CognitoProvider,
-    get_cognito_credentials,
-};
+use cognito::CognitoProvider;
 use endpoint::StaticEndpoint;
 pub use install_method::{
     InstallMethod,
@@ -48,8 +45,9 @@ use uuid::{
 };
 
 use crate::api_client::Client as CodewhispererClient;
+use crate::auth::builder_id::get_start_url_and_region;
 use crate::aws_common::app_name;
-use crate::cli::CliRootCommands;
+use crate::cli::RootSubcommand;
 use crate::database::settings::Setting;
 use crate::database::{
     Database,
@@ -86,9 +84,9 @@ impl From<amzn_toolkit_telemetry_client::operation::post_metrics::PostMetricsErr
     }
 }
 
-impl From<mpsc::error::SendError<Event>> for TelemetryError {
-    fn from(value: mpsc::error::SendError<Event>) -> Self {
-        Self::Send(Box::new(value))
+impl From<Box<mpsc::error::SendError<Event>>> for TelemetryError {
+    fn from(value: Box<mpsc::error::SendError<Event>>) -> Self {
+        Self::Send(value)
     }
 }
 
@@ -128,9 +126,43 @@ impl TelemetryStage {
 }
 
 #[derive(Debug)]
+enum TelemetrySender {
+    Strong(mpsc::UnboundedSender<Event>),
+    Weak(mpsc::WeakUnboundedSender<Event>),
+}
+
+impl TelemetrySender {
+    fn send(&self, ev: Event) -> Result<(), Box<mpsc::error::SendError<Event>>> {
+        match self {
+            Self::Strong(sender) => sender.send(ev).map_err(Box::new),
+            Self::Weak(sender) => {
+                if let Some(sender) = sender.upgrade() {
+                    sender.send(ev).map_err(Box::new)
+                } else {
+                    tracing::error!(
+                        "Attempted to send telemetry after telemetry thread has been dropped. Event attempted {:?}",
+                        ev
+                    );
+                    Ok(())
+                }
+            },
+        }
+    }
+}
+
+impl Clone for TelemetrySender {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Strong(sender) => Self::Weak(sender.downgrade()),
+            Self::Weak(sender) => Self::Weak(sender.clone()),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct TelemetryThread {
     handle: Option<JoinHandle<()>>,
-    tx: mpsc::UnboundedSender<Event>,
+    tx: TelemetrySender,
 }
 
 impl Clone for TelemetryThread {
@@ -146,9 +178,10 @@ impl TelemetryThread {
     pub async fn new(env: &Env, database: &mut Database) -> Result<Self, TelemetryError> {
         let telemetry_client = TelemetryClient::new(env, database).await?;
         let (tx, mut rx) = mpsc::unbounded_channel();
+        let tx = TelemetrySender::Strong(tx);
         let handle = tokio::spawn(async move {
             while let Some(event) = rx.recv().await {
-                trace!("Sending telemetry event: {:?}", event);
+                trace!("TelemetryThread received new telemetry event: {:?}", event);
                 telemetry_client.send_event(event).await;
             }
         });
@@ -181,29 +214,40 @@ impl TelemetryThread {
         Ok(self.tx.send(Event::new(EventType::UserLoggedIn {}))?)
     }
 
-    pub fn send_cli_subcommand_executed(&self, subcommand: Option<&CliRootCommands>) -> Result<(), TelemetryError> {
-        let subcommand = match subcommand {
-            Some(subcommand) => subcommand.name(),
-            None => "chat",
-        }
-        .to_owned();
-
-        Ok(self
-            .tx
-            .send(Event::new(EventType::CliSubcommandExecuted { subcommand }))?)
+    pub fn send_cli_subcommand_executed(&self, subcommand: &RootSubcommand) -> Result<(), TelemetryError> {
+        Ok(self.tx.send(Event::new(EventType::CliSubcommandExecuted {
+            subcommand: subcommand.to_string(),
+        }))?)
     }
 
-    pub fn send_chat_added_message(
+    #[allow(clippy::too_many_arguments)] // TODO: Should make a parameters struct.
+    pub async fn send_chat_added_message(
         &self,
+        database: &Database,
         conversation_id: String,
-        message_id: String,
+        message_id: Option<String>,
+        request_id: Option<String>,
         context_file_length: Option<usize>,
+        result: TelemetryResult,
+        reason: Option<String>,
+        reason_desc: Option<String>,
+        status_code: Option<u16>,
+        model: Option<String>,
     ) -> Result<(), TelemetryError> {
-        Ok(self.tx.send(Event::new(EventType::ChatAddedMessage {
+        let mut event = Event::new(EventType::ChatAddedMessage {
             conversation_id,
             message_id,
+            request_id,
             context_file_length,
-        }))?)
+            result,
+            reason,
+            reason_desc,
+            status_code,
+            model,
+        });
+        set_start_url_and_region(database, &mut event).await;
+
+        Ok(self.tx.send(event)?)
     }
 
     pub fn send_tool_use_suggested(&self, event: ToolUseEventBuilder) -> Result<(), TelemetryError> {
@@ -220,6 +264,7 @@ impl TelemetryThread {
             input_token_size: event.input_token_size,
             output_token_size: event.output_token_size,
             custom_tool_call_latency: event.custom_tool_call_latency,
+            model: event.model,
         }))?)
     }
 
@@ -267,6 +312,40 @@ impl TelemetryThread {
             sso_region,
         }))?)
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_response_error(
+        &self,
+        database: &Database,
+        conversation_id: String,
+        context_file_length: Option<usize>,
+        result: TelemetryResult,
+        reason: Option<String>,
+        reason_desc: Option<String>,
+        status_code: Option<u16>,
+    ) -> Result<(), TelemetryError> {
+        let mut event = Event::new(EventType::MessageResponseError {
+            result,
+            reason,
+            reason_desc,
+            status_code,
+            conversation_id,
+            context_file_length,
+        });
+        set_start_url_and_region(database, &mut event).await;
+
+        Ok(self.tx.send(event)?)
+    }
+}
+
+async fn set_start_url_and_region(database: &Database, event: &mut Event) {
+    let (start_url, region) = get_start_url_and_region(database).await;
+    if let Some(start_url) = start_url {
+        event.set_start_url(start_url);
+    }
+    if let Some(region) = region {
+        event.set_sso_region(region);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -284,24 +363,21 @@ impl TelemetryClient {
             && database.settings.get_bool(Setting::TelemetryEnabled).unwrap_or(true);
 
         // If telemetry is disabled we do not emit using toolkit_telemetry
-        let toolkit_telemetry_client = match telemetry_enabled {
-            true => match get_cognito_credentials(database, &TelemetryStage::EXTERNAL_PROD).await {
-                Ok(credentials) => Some(ToolkitTelemetryClient::from_conf(
-                    Config::builder()
-                        .http_client(crate::aws_common::http_client::client())
-                        .behavior_version(BehaviorVersion::v2025_01_17())
-                        .endpoint_resolver(StaticEndpoint(TelemetryStage::EXTERNAL_PROD.endpoint))
-                        .app_name(app_name())
-                        .region(TelemetryStage::EXTERNAL_PROD.region.clone())
-                        .credentials_provider(SharedCredentialsProvider::new(CognitoProvider::new(credentials)))
-                        .build(),
-                )),
-                Err(err) => {
-                    error!("Failed to acquire cognito credentials: {err}");
-                    None
-                },
-            },
-            false => None,
+        let toolkit_telemetry_client = if telemetry_enabled {
+            Some(ToolkitTelemetryClient::from_conf(
+                Config::builder()
+                    .http_client(crate::aws_common::http_client::client())
+                    .behavior_version(BehaviorVersion::v2025_01_17())
+                    .endpoint_resolver(StaticEndpoint(TelemetryStage::EXTERNAL_PROD.endpoint))
+                    .app_name(app_name())
+                    .region(TelemetryStage::EXTERNAL_PROD.region.clone())
+                    .credentials_provider(SharedCredentialsProvider::new(CognitoProvider::new(
+                        TelemetryStage::EXTERNAL_PROD,
+                    )))
+                    .build(),
+            ))
+        } else {
+            None
         };
 
         fn client_id(env: &Env, database: &mut Database, telemetry_enabled: bool) -> Result<Uuid, TelemetryError> {
@@ -353,6 +429,7 @@ impl TelemetryClient {
         if let EventType::ChatAddedMessage {
             conversation_id,
             message_id,
+            model,
             ..
         } = &event.ty
         {
@@ -360,43 +437,48 @@ impl TelemetryClient {
 
             let chat_add_message_event = match ChatAddMessageEvent::builder()
                 .conversation_id(conversation_id)
-                .message_id(message_id)
+                .message_id(message_id.clone().unwrap_or("not_set".to_string()))
                 .build()
             {
                 Ok(event) => event,
                 Err(err) => {
-                    error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
+                    error!(err =% DisplayErrorContext(err), "Failed to send cw telemetry event");
                     return;
                 },
             };
 
+            let event = TelemetryEvent::ChatAddMessageEvent(chat_add_message_event);
+            debug!(
+                ?event,
+                ?user_context,
+                telemetry_enabled = self.telemetry_enabled,
+                "Sending cw telemetry event"
+            );
             if let Err(err) = self
                 .codewhisperer_client
-                .send_telemetry_event(
-                    TelemetryEvent::ChatAddMessageEvent(chat_add_message_event),
-                    user_context,
-                    self.telemetry_enabled,
-                )
+                .send_telemetry_event(event, user_context, self.telemetry_enabled, model.to_owned())
                 .await
             {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
+                error!(err =% DisplayErrorContext(err), "Failed to send cw telemetry event");
             }
         }
     }
 
     async fn send_telemetry_toolkit_metric(&self, event: Event) {
         let Some(toolkit_telemetry_client) = self.toolkit_telemetry_client.clone() else {
+            trace!("not sending toolkit metric - client does not exist");
             return;
         };
         let client_id = self.client_id;
         let Some(metric_datum) = event.into_metric_datum() else {
+            trace!("not sending toolkit metric - metric datum does not exist");
             return;
         };
 
         let product = AwsProduct::CodewhispererTerminal;
         let metric_name = metric_datum.metric_name().to_owned();
 
-        debug!(?product, ?metric_datum, "Posting metrics");
+        debug!(?client_id, ?product, ?metric_datum, "Sending toolkit telemetry event");
         if let Err(err) = toolkit_telemetry_client
             .post_metrics()
             .aws_product(product)
@@ -410,7 +492,7 @@ impl TelemetryClient {
             .await
             .map_err(DisplayErrorContext)
         {
-            error!(%err, ?metric_name, "Failed to post metric");
+            error!(%err, ?metric_name, "Failed to post toolkit metric");
         }
     }
 
@@ -440,6 +522,29 @@ impl TelemetryClient {
             },
         }
     }
+}
+
+pub trait ReasonCode: std::error::Error {
+    fn reason_code(&self) -> String;
+}
+
+/// Returns a generic error reason + reason description pair.
+pub fn get_error_reason<E>(error: &E) -> (String, String)
+where
+    E: ReasonCode + 'static,
+{
+    let err_chain = eyre::Chain::new(error);
+    let reason_desc = if err_chain.len() > 1 {
+        format!(
+            "'{}' caused by: {}",
+            error,
+            err_chain.last().map_or("UNKNOWN".to_string(), |e| e.to_string())
+        )
+    } else {
+        error.to_string()
+    };
+
+    (error.reason_code(), reason_desc)
 }
 
 #[cfg(test)]
@@ -492,10 +597,22 @@ mod test {
 
         thread.send_user_logged_in().ok();
         thread
-            .send_cli_subcommand_executed(Some(&CliRootCommands::Version { changelog: None }))
+            .send_cli_subcommand_executed(&RootSubcommand::Version { changelog: None })
             .ok();
         thread
-            .send_chat_added_message("version".to_owned(), "version".to_owned(), Some(123))
+            .send_chat_added_message(
+                &database,
+                "conv_id".to_owned(),
+                Some("message_id".to_owned()),
+                Some("req_id".to_owned()),
+                Some(123),
+                TelemetryResult::Succeeded,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
             .ok();
 
         drop(thread);
@@ -524,6 +641,7 @@ mod test {
                 ),
                 client.user_context().unwrap(),
                 false,
+                Some("model".to_owned()),
             )
             .await
             .unwrap();

@@ -1,21 +1,20 @@
-pub mod cli;
 mod command;
 mod consts;
 mod context;
 mod conversation_state;
 mod hooks;
 mod input_source;
-pub mod mcp;
 mod message;
 mod parse;
 mod parser;
 mod prompt;
+mod prompt_parser;
 mod server_messenger;
 #[cfg(unix)]
 mod skim_integration;
 mod token_counter;
-mod tool_manager;
-mod tools;
+pub mod tool_manager;
+pub mod tools;
 pub mod util;
 
 use std::borrow::Cow;
@@ -38,8 +37,11 @@ use std::time::Duration;
 use std::{
     env,
     fs,
+    io,
 };
 
+use amzn_codewhisperer_client::types::SubscriptionStatus;
+use clap::Args;
 use command::{
     Command,
     PromptsSubcommand,
@@ -65,6 +67,10 @@ use crossterm::{
     style,
     terminal,
 };
+use dialoguer::{
+    Error as DError,
+    Select,
+};
 use eyre::{
     ErrReport,
     Result,
@@ -89,10 +95,6 @@ use parser::{
     RecvErrorKind,
     ResponseParser,
 };
-use rand::distr::{
-    Alphanumeric,
-    SampleString,
-};
 use regex::Regex;
 use serde_json::Map;
 use spinners::{
@@ -100,6 +102,7 @@ use spinners::{
     Spinners,
 };
 use thiserror::Error;
+use time::OffsetDateTime;
 use token_counter::{
     TokenCount,
     TokenCounter,
@@ -140,19 +143,25 @@ use util::{
     animate_output,
     drop_matched_context_files,
     play_notification_bell,
-    region_check,
 };
 use uuid::Uuid;
 use winnow::Partial;
 use winnow::stream::Offset;
 
-use crate::api_client::StreamingClient;
 use crate::api_client::clients::SendMessageOutput;
 use crate::api_client::model::{
     ChatResponseStream,
     Tool as FigTool,
     ToolResultStatus,
 };
+use crate::api_client::{
+    ApiClientError,
+    Client,
+    StreamingClient,
+};
+use crate::auth::AuthError;
+use crate::auth::builder_id::is_idc_user;
+use crate::cli::chat::token_counter::CharCount;
 use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::{
@@ -160,9 +169,211 @@ use crate::mcp_client::{
     PromptGetResult,
 };
 use crate::platform::Context;
-use crate::telemetry::TelemetryThread;
 use crate::telemetry::core::ToolUseEventBuilder;
-use crate::util::CLI_BINARY_NAME;
+use crate::telemetry::{
+    ReasonCode,
+    TelemetryResult,
+    TelemetryThread,
+    get_error_reason,
+};
+use crate::util::system_info::is_remote;
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
+pub struct ChatArgs {
+    /// (Deprecated, use --trust-all-tools) Enabling this flag allows the model to execute
+    /// all commands without first accepting them.
+    #[arg(short, long, hide = true)]
+    pub accept_all: bool,
+    /// Print the first response to STDOUT without interactive mode. This will fail if the
+    /// prompt requests permissions to use a tool, unless --trust-all-tools is also used.
+    #[arg(long)]
+    pub no_interactive: bool,
+    /// Resumes the previous conversation from this directory.
+    #[arg(short, long)]
+    pub resume: bool,
+    /// The first question to ask
+    pub input: Option<String>,
+    /// Context profile to use
+    #[arg(long = "profile")]
+    pub profile: Option<String>,
+    /// Current model to use
+    #[arg(long = "model")]
+    pub model: Option<String>,
+    /// Allows the model to use any tool to run commands without asking for confirmation.
+    #[arg(long)]
+    pub trust_all_tools: bool,
+    /// Trust only this set of tools. Example: trust some tools:
+    /// '--trust-tools=fs_read,fs_write', trust no tools: '--trust-tools='
+    #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
+    pub trust_tools: Option<Vec<String>>,
+}
+
+impl ChatArgs {
+    pub async fn execute(self, database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
+        let ctx = Context::new();
+
+        let stdin = std::io::stdin();
+        // no_interactive flag or part of a pipe
+        let interactive = !self.no_interactive && stdin.is_terminal();
+        let input = if !interactive && !stdin.is_terminal() {
+            // append to input string any extra info that was provided, e.g. via pipe
+            let mut input = self.input.unwrap_or_default();
+            stdin.lock().read_to_string(&mut input)?;
+            Some(input)
+        } else {
+            self.input
+        };
+
+        let mut output = match interactive {
+            true => SharedWriter::stderr(),
+            false => SharedWriter::stdout(),
+        };
+
+        let client = match ctx.env().get("Q_MOCK_CHAT_RESPONSE") {
+            Ok(json) => create_stream(serde_json::from_str(std::fs::read_to_string(json)?.as_str())?),
+            _ => StreamingClient::new(database).await?,
+        };
+
+        let mcp_server_configs = match McpServerConfig::load_config(&mut output).await {
+            Ok(config) => {
+                if interactive && !database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false) {
+                    execute!(
+                        output,
+                        style::Print(
+                            "To learn more about MCP safety, see https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-security.html\n\n"
+                        )
+                    )?;
+                }
+                database.settings.set(Setting::McpLoadedBefore, true).await?;
+                config
+            },
+            Err(e) => {
+                warn!("No mcp server config loaded: {}", e);
+                McpServerConfig::default()
+            },
+        };
+
+        // If profile is specified, verify it exists before starting the chat
+        if let Some(ref profile_name) = self.profile {
+            // Create a temporary context manager to check if the profile exists
+            match ContextManager::new(Arc::clone(&ctx), None).await {
+                Ok(context_manager) => {
+                    let profiles = context_manager.list_profiles().await?;
+                    if !profiles.contains(profile_name) {
+                        bail!(
+                            "Profile '{}' does not exist. Available profiles: {}",
+                            profile_name,
+                            profiles.join(", ")
+                        );
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to initialize context manager to verify profile: {}", e);
+                    // Continue without verification if context manager can't be initialized
+                },
+            }
+        }
+
+        // If modelId is specified, verify it exists before starting the chat
+        let model_id: Option<String> = if let Some(model_name) = self.model {
+            let model_name_lower = model_name.to_lowercase();
+            match MODEL_OPTIONS.iter().find(|opt| opt.name == model_name_lower) {
+                Some(opt) => Some((opt.model_id).to_string()),
+                None => {
+                    let available_names: Vec<&str> = MODEL_OPTIONS.iter().map(|opt| opt.name).collect();
+                    bail!(
+                        "Model '{}' does not exist. Available models: {}",
+                        model_name,
+                        available_names.join(", ")
+                    );
+                },
+            }
+        } else {
+            None
+        };
+
+        // if let Some(ref id) = model_id {
+        //     database.set_last_used_model_id(id.clone())?;
+        // }
+
+        let conversation_id = uuid::Uuid::new_v4().to_string();
+        info!(?conversation_id, "Generated new conversation id");
+        let (prompt_request_sender, prompt_request_receiver) = std::sync::mpsc::channel::<Option<String>>();
+        let (prompt_response_sender, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let tool_manager_output: Box<dyn Write + Send + Sync + 'static> = if interactive {
+            Box::new(output.clone())
+        } else {
+            Box::new(NullWriter {})
+        };
+        let mut tool_manager = ToolManagerBuilder::default()
+            .mcp_server_config(mcp_server_configs)
+            .prompt_list_sender(prompt_response_sender)
+            .prompt_list_receiver(prompt_request_receiver)
+            .conversation_id(&conversation_id)
+            .interactive(interactive)
+            .build(telemetry, tool_manager_output)
+            .await?;
+        let tool_config = tool_manager.load_tools(database, &mut output).await?;
+        let mut tool_permissions = ToolPermissions::new(tool_config.len());
+
+        let trust_tools = self.trust_tools.map(|mut tools| {
+            if tools.len() == 1 && tools[0].is_empty() {
+                tools.pop();
+            }
+            tools
+        });
+
+        if self.accept_all || self.trust_all_tools {
+            tool_permissions.trust_all = true;
+            for tool in tool_config.values() {
+                tool_permissions.trust_tool(&tool.name);
+            }
+
+            // Deprecation notice for --accept-all users
+            if self.accept_all && interactive {
+                queue!(
+                    output,
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print("\n--accept-all, -a is deprecated. Use --trust-all-tools instead."),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+            }
+        } else if let Some(trusted) = trust_tools.map(|vec| vec.into_iter().collect::<HashSet<_>>()) {
+            // --trust-all-tools takes precedence over --trust-tools=...
+            for tool in tool_config.values() {
+                if trusted.contains(&tool.name) {
+                    tool_permissions.trust_tool(&tool.name);
+                } else {
+                    tool_permissions.untrust_tool(&tool.name);
+                }
+            }
+        }
+
+        let mut chat = ChatContext::new(
+            ctx,
+            database,
+            &conversation_id,
+            output,
+            input,
+            InputSource::new(database, prompt_request_sender, prompt_response_receiver)?,
+            interactive,
+            self.resume,
+            client,
+            || terminal::window_size().map(|s| s.columns.into()).ok(),
+            tool_manager,
+            self.profile,
+            model_id,
+            tool_config,
+            tool_permissions,
+        )
+        .await?;
+
+        let result = chat.try_chat(database, telemetry).await.map(|_| ExitCode::SUCCESS);
+        drop(chat); // Explicit drop for clarity
+
+        result
+    }
+}
 
 /// Help text for the compact command
 fn compact_help_text() -> String {
@@ -205,20 +416,49 @@ const WELCOME_TEXT: &str = color_print::cstr! {"<cyan!>
 const SMALL_SCREEN_WELCOME_TEXT: &str = color_print::cstr! {"<em>Welcome to <cyan!>Amazon Q</cyan!>!</em>"};
 const RESUME_TEXT: &str = color_print::cstr! {"<em>Picking up where we left off...</em>"};
 
-const ROTATING_TIPS: [&str; 13] = [
-    color_print::cstr! {"You can resume the last conversation from your current directory by launching with <green!>q chat --resume</green!>"},
-    color_print::cstr! {"Get notified whenever Q CLI finishes responding. Just run <green!>q settings chat.enableNotifications true</green!>"},
-    color_print::cstr! {"You can use <green!>/editor</green!> to edit your prompt with a vim-like experience"},
-    color_print::cstr! {"<green!>/usage</green!> shows you a visual breakdown of your current context window usage"},
-    color_print::cstr! {"Get notified whenever Q CLI finishes responding. Just run <green!>q settings chat.enableNotifications true</green!>"},
-    color_print::cstr! {"You can execute bash commands by typing <green!>!</green!> followed by the command"},
-    color_print::cstr! {"Q can use tools without asking for confirmation every time. Give <green!>/tools trust</green!> a try"},
-    color_print::cstr! {"You can programmatically inject context to your prompts by using hooks. Check out <green!>/context hooks help</green!>"},
-    color_print::cstr! {"You can use <green!>/compact</green!> to replace the conversation history with its summary to free up the context space"},
-    color_print::cstr! {"If you want to file an issue to the Q CLI team, just tell me, or run <green!>q issue</green!>"},
-    color_print::cstr! {"You can enable custom tools with <green!>MCP servers</green!>. Learn more with /help"},
-    color_print::cstr! {"You can specify wait time (in ms) for mcp server loading with <green!>q settings mcp.initTimeout {timeout in int}</green!>. Servers that takes longer than the specified time will continue to load in the background. Use /tools to see pending servers."},
-    color_print::cstr! {"You can see the server load status as well as any warnings or errors associated with <green!>/mcp</green!>"},
+// Only show the model-related tip for now to make users aware of this feature.
+const ROTATING_TIPS: [&str; 3] = [
+    // color_print::cstr! {"You can resume the last conversation from your current directory by launching with
+    // <green!>q chat --resume</green!>"}, color_print::cstr! {"Get notified whenever Q CLI finishes responding.
+    // Just run <green!>q settings chat.enableNotifications true</green!>"}, color_print::cstr! {"You can use
+    // <green!>/editor</green!> to edit your prompt with a vim-like experience"}, color_print::cstr!
+    // {"<green!>/usage</green!> shows you a visual breakdown of your current context window usage"},
+    // color_print::cstr! {"Get notified whenever Q CLI finishes responding. Just run <green!>q settings
+    // chat.enableNotifications true</green!>"}, color_print::cstr! {"You can execute bash commands by typing
+    // <green!>!</green!> followed by the command"}, color_print::cstr! {"Q can use tools without asking for
+    // confirmation every time. Give <green!>/tools trust</green!> a try"}, color_print::cstr! {"You can
+    // programmatically inject context to your prompts by using hooks. Check out <green!>/context hooks
+    // help</green!>"}, color_print::cstr! {"You can use <green!>/compact</green!> to replace the conversation
+    // history with its summary to free up the context space"}, color_print::cstr! {"If you want to file an issue
+    // to the Q CLI team, just tell me, or run <green!>q issue</green!>"}, color_print::cstr! {"You can enable
+    // custom tools with <green!>MCP servers</green!>. Learn more with /help"}, color_print::cstr! {"You can
+    // specify wait time (in ms) for mcp server loading with <green!>q settings mcp.initTimeout {timeout in
+    // int}</green!>. Servers that takes longer than the specified time will continue to load in the background. Use
+    // /tools to see pending servers."}, color_print::cstr! {"You can see the server load status as well as any
+    // warnings or errors associated with <green!>/mcp</green!>"},
+    color_print::cstr! {"Use <green!>/model</green!> to select the model to use for this conversation"},
+    color_print::cstr! {"Set a default model by running <green!>q settings chat.defaultModel MODEL</green!>. Run <green!>/model</green!> to learn more."},
+    color_print::cstr! {"Run <green!>/prompts</green!> to learn how to build & run repeatable workflows"},
+];
+
+pub struct ModelOption {
+    pub name: &'static str,
+    pub model_id: &'static str,
+}
+
+pub const MODEL_OPTIONS: [ModelOption; 3] = [
+    ModelOption {
+        name: "claude-4-sonnet",
+        model_id: "CLAUDE_SONNET_4_20250514_V1_0",
+    },
+    ModelOption {
+        name: "claude-3.7-sonnet",
+        model_id: "CLAUDE_3_7_SONNET_20250219_V1_0",
+    },
+    ModelOption {
+        name: "claude-3.5-sonnet",
+        model_id: "CLAUDE_3_5_SONNET_20241022_V2_0",
+    },
 ];
 
 const GREETING_BREAK_POINT: usize = 80;
@@ -249,6 +489,7 @@ const HELP_TEXT: &str = color_print::cstr! {"
   <em>trustall</em>    <black!>Trust all tools (equivalent to deprecated /acceptall)</black!>
   <em>reset</em>       <black!>Reset all tools to default permission levels</black!>
 <em>/mcp</em>          <black!>See mcp server loaded</black!>
+<em>/model</em>        <black!>Select a model for the current conversation session</black!>
 <em>/profile</em>      <black!>Manage profiles</black!>
   <em>help</em>        <black!>Show profile help</black!>
   <em>list</em>        <black!>List profiles</black!>
@@ -270,6 +511,8 @@ const HELP_TEXT: &str = color_print::cstr! {"
 <em>/usage</em>        <black!>Show current session's context window usage</black!>
 <em>/load</em>         <black!>Load conversation state from a JSON file</black!>
 <em>/save</em>         <black!>Save conversation state to a JSON file</black!>
+<em>/subscribe</em>    <black!>Upgrade to a Q Developer Pro subscription for increased query limits</black!>
+  <em>[--manage]</em>  <black!>View and manage your existing subscription on AWS</black!>
 
 <cyan,em>MCP:</cyan,em>
 <black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
@@ -288,187 +531,21 @@ const TRUST_ALL_TEXT: &str = color_print::cstr! {"<green!>All tools are now trus
 \nAgents can sometimes do unexpected things so understand the risks.</green!>
 \nLearn more at https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-chat-security.html#command-line-chat-trustall-safety"};
 
+const SUBSCRIBE_TITLE_TEXT: &str = color_print::cstr! { "<white!,bold>Subscribe to Q Developer Pro</white!,bold>" };
+
+const SUBSCRIBE_TEXT: &str = color_print::cstr! { "During the upgrade, you'll be asked to link your Builder ID to the AWS account that will be billed the monthly subscription fee.
+
+Need help? Visit our subscription support page> <blue!>https://docs.aws.amazon.com/console/amazonq/upgrade-builder-id</blue!>" };
+
+const LIMIT_REACHED_TEXT: &str = color_print::cstr! { "You've used all your free requests for this month. You have two options:
+1. Upgrade to a paid subscription for increased limits. See our Pricing page for what's included> <blue!>https://aws.amazon.com/q/developer/pricing/</blue!>
+2. Wait until next month when your limit automatically resets." };
+
 const TOOL_BULLET: &str = " ● ";
 const CONTINUATION_LINE: &str = " ⋮ ";
 const PURPOSE_ARROW: &str = " ↳ ";
 const SUCCESS_TICK: &str = " ✓ ";
 const ERROR_EXCLAMATION: &str = " ❗ ";
-
-pub async fn launch_chat(database: &mut Database, telemetry: &TelemetryThread, args: cli::Chat) -> Result<ExitCode> {
-    let trust_tools = args.trust_tools.map(|mut tools| {
-        if tools.len() == 1 && tools[0].is_empty() {
-            tools.pop();
-        }
-        tools
-    });
-
-    chat(
-        database,
-        telemetry,
-        args.input,
-        args.no_interactive,
-        args.resume,
-        args.accept_all,
-        args.profile,
-        args.trust_all_tools,
-        trust_tools,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
-pub async fn chat(
-    database: &mut Database,
-    telemetry: &TelemetryThread,
-    input: Option<String>,
-    no_interactive: bool,
-    resume_conversation: bool,
-    accept_all: bool,
-    profile: Option<String>,
-    trust_all_tools: bool,
-    trust_tools: Option<Vec<String>>,
-) -> Result<ExitCode> {
-    if !crate::util::system_info::in_cloudshell() && !crate::auth::is_logged_in(database).await {
-        bail!(
-            "You are not logged in, please log in with {}",
-            format!("{CLI_BINARY_NAME} login").bold()
-        );
-    }
-
-    region_check("chat")?;
-
-    let ctx = Context::new();
-
-    let stdin = std::io::stdin();
-    // no_interactive flag or part of a pipe
-    let interactive = !no_interactive && stdin.is_terminal();
-    let input = if !interactive && !stdin.is_terminal() {
-        // append to input string any extra info that was provided, e.g. via pipe
-        let mut input = input.unwrap_or_default();
-        stdin.lock().read_to_string(&mut input)?;
-        Some(input)
-    } else {
-        input
-    };
-
-    let mut output = match interactive {
-        true => SharedWriter::stderr(),
-        false => SharedWriter::stdout(),
-    };
-
-    let client = match ctx.env().get("Q_MOCK_CHAT_RESPONSE") {
-        Ok(json) => create_stream(serde_json::from_str(std::fs::read_to_string(json)?.as_str())?),
-        _ => StreamingClient::new(database).await?,
-    };
-
-    let mcp_server_configs = match McpServerConfig::load_config(&mut output).await {
-        Ok(config) => {
-            if interactive && !database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false) {
-                execute!(
-                    output,
-                    style::Print(
-                        "To learn more about MCP safety, see https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-security.html\n\n"
-                    )
-                )?;
-            }
-            database.settings.set(Setting::McpLoadedBefore, true).await?;
-            config
-        },
-        Err(e) => {
-            warn!("No mcp server config loaded: {}", e);
-            McpServerConfig::default()
-        },
-    };
-
-    // If profile is specified, verify it exists before starting the chat
-    if let Some(ref profile_name) = profile {
-        // Create a temporary context manager to check if the profile exists
-        match ContextManager::new(Arc::clone(&ctx), None).await {
-            Ok(context_manager) => {
-                let profiles = context_manager.list_profiles().await?;
-                if !profiles.contains(profile_name) {
-                    bail!(
-                        "Profile '{}' does not exist. Available profiles: {}",
-                        profile_name,
-                        profiles.join(", ")
-                    );
-                }
-            },
-            Err(e) => {
-                warn!("Failed to initialize context manager to verify profile: {}", e);
-                // Continue without verification if context manager can't be initialized
-            },
-        }
-    }
-
-    let conversation_id = Alphanumeric.sample_string(&mut rand::rng(), 9);
-    info!(?conversation_id, "Generated new conversation id");
-    let (prompt_request_sender, prompt_request_receiver) = std::sync::mpsc::channel::<Option<String>>();
-    let (prompt_response_sender, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
-    let tool_manager_output: Box<dyn Write + Send + Sync + 'static> = if interactive {
-        Box::new(output.clone())
-    } else {
-        Box::new(NullWriter {})
-    };
-    let mut tool_manager = ToolManagerBuilder::default()
-        .mcp_server_config(mcp_server_configs)
-        .prompt_list_sender(prompt_response_sender)
-        .prompt_list_receiver(prompt_request_receiver)
-        .conversation_id(&conversation_id)
-        .interactive(interactive)
-        .build(telemetry, tool_manager_output)
-        .await?;
-    let tool_config = tool_manager.load_tools(database, &mut output).await?;
-    let mut tool_permissions = ToolPermissions::new(tool_config.len());
-    if accept_all || trust_all_tools {
-        tool_permissions.trust_all = true;
-        for tool in tool_config.values() {
-            tool_permissions.trust_tool(&tool.name);
-        }
-
-        // Deprecation notice for --accept-all users
-        if accept_all && interactive {
-            queue!(
-                output,
-                style::SetForegroundColor(Color::Yellow),
-                style::Print("\n--accept-all, -a is deprecated. Use --trust-all-tools instead."),
-                style::SetForegroundColor(Color::Reset),
-            )?;
-        }
-    } else if let Some(trusted) = trust_tools.map(|vec| vec.into_iter().collect::<HashSet<_>>()) {
-        // --trust-all-tools takes precedence over --trust-tools=...
-        for tool in tool_config.values() {
-            if trusted.contains(&tool.name) {
-                tool_permissions.trust_tool(&tool.name);
-            } else {
-                tool_permissions.untrust_tool(&tool.name);
-            }
-        }
-    }
-
-    let mut chat = ChatContext::new(
-        ctx,
-        database,
-        &conversation_id,
-        output,
-        input,
-        InputSource::new(database, prompt_request_sender, prompt_response_receiver)?,
-        interactive,
-        resume_conversation,
-        client,
-        || terminal::window_size().map(|s| s.columns.into()).ok(),
-        tool_manager,
-        profile,
-        tool_config,
-        tool_permissions,
-    )
-    .await?;
-
-    let result = chat.try_chat(database, telemetry).await.map(|_| ExitCode::SUCCESS);
-    drop(chat); // Explicit drop for clarity
-
-    result
-}
 
 /// Enum used to denote the origin of a tool use event
 enum ToolUseStatus {
@@ -486,6 +563,8 @@ pub enum ChatError {
     #[error("{0}")]
     Client(#[from] crate::api_client::ApiClientError),
     #[error("{0}")]
+    Auth(#[from] AuthError),
+    #[error("{0}")]
     ResponseStream(#[from] parser::RecvError),
     #[error("{0}")]
     Std(#[from] std::io::Error),
@@ -501,6 +580,38 @@ pub enum ChatError {
     NonInteractiveToolApproval,
     #[error(transparent)]
     GetPromptError(#[from] GetPromptError),
+}
+
+impl ChatError {
+    fn status_code(&self) -> Option<u16> {
+        match self {
+            ChatError::Client(e) => e.status_code(),
+            ChatError::Auth(_) => None,
+            ChatError::ResponseStream(_) => None,
+            ChatError::Std(_) => None,
+            ChatError::Readline(_) => None,
+            ChatError::Custom(_) => None,
+            ChatError::Interrupted { .. } => None,
+            ChatError::NonInteractiveToolApproval => None,
+            ChatError::GetPromptError(_) => None,
+        }
+    }
+}
+
+impl ReasonCode for ChatError {
+    fn reason_code(&self) -> String {
+        match self {
+            ChatError::Client(e) => e.reason_code(),
+            ChatError::ResponseStream(e) => e.reason_code(),
+            ChatError::Std(_) => "StdIoError".to_string(),
+            ChatError::Readline(_) => "ReadlineError".to_string(),
+            ChatError::Custom(_) => "GenericError".to_string(),
+            ChatError::Interrupted { .. } => "Interrupted".to_string(),
+            ChatError::NonInteractiveToolApproval => "NonInteractiveToolApprovalError".to_string(),
+            ChatError::GetPromptError(_) => "GetPromptError".to_string(),
+            ChatError::Auth(_) => "AuthError".to_string(),
+        }
+    }
 }
 
 pub struct ChatContext {
@@ -546,6 +657,7 @@ impl ChatContext {
         terminal_width_provider: fn() -> Option<usize>,
         tool_manager: ToolManager,
         profile: Option<String>,
+        model_id: Option<String>,
         tool_config: HashMap<String, ToolSpec>,
         tool_permissions: ToolPermissions,
     ) -> Result<Self> {
@@ -553,6 +665,20 @@ impl ChatContext {
         let output_clone = output.clone();
 
         let mut existing_conversation = false;
+        let valid_model_id = model_id
+            .or_else(|| {
+                database
+                    .settings
+                    .get_string(Setting::ChatDefaultModel)
+                    .and_then(|model_name| {
+                        MODEL_OPTIONS
+                            .iter()
+                            .find(|opt| opt.name == model_name)
+                            .map(|opt| opt.model_id.to_owned())
+                    })
+            })
+            .unwrap_or_else(|| default_model_id(database).to_owned());
+
         let conversation_state = if resume_conversation {
             let prior = std::env::current_dir()
                 .ok()
@@ -579,6 +705,7 @@ impl ChatContext {
                     profile,
                     Some(output_clone),
                     tool_manager,
+                    Some(valid_model_id),
                 )
                 .await
             }
@@ -590,6 +717,7 @@ impl ChatContext {
                 profile,
                 Some(output_clone),
                 tool_manager,
+                Some(valid_model_id),
             )
             .await
         };
@@ -753,9 +881,7 @@ impl ChatContext {
 
             execute!(self.output, style::Print(welcome_text), style::Print("\n\n"),)?;
 
-            let current_tip_index = database.get_increment_rotating_tip().unwrap_or(0) % ROTATING_TIPS.len();
-
-            let tip = ROTATING_TIPS[current_tip_index];
+            let tip = ROTATING_TIPS[usize::try_from(rand::random::<u32>()).unwrap_or(0) % ROTATING_TIPS.len()];
             if is_small_screen {
                 // If the screen is small, print the tip in a single line
                 execute!(
@@ -808,6 +934,21 @@ impl ChatContext {
             skip_printing_tools: true,
         });
 
+        if self.interactive {
+            if let Some(ref id) = self.conversation_state.model {
+                if let Some(model_option) = MODEL_OPTIONS.iter().find(|option| option.model_id == *id) {
+                    execute!(
+                        self.output,
+                        style::SetForegroundColor(Color::Cyan),
+                        style::Print(format!("🤖 You are chatting with {}\n", model_option.name)),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print("\n")
+                    )
+                    .expect("Failed to write model information to terminal");
+                }
+            }
+        }
+
         if let Some(user_input) = self.initial_input.take() {
             next_state = Some(ChatState::HandleInput {
                 input: user_input,
@@ -845,7 +986,7 @@ impl ChatContext {
                 } => {
                     let tool_uses_clone = tool_uses.clone();
                     tokio::select! {
-                        res = self.handle_input(telemetry, input, tool_uses, pending_tool_index) => res,
+                        res = self.handle_input(telemetry, database, input, tool_uses, pending_tool_index) => res,
                         Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: tool_uses_clone })
                     }
                 },
@@ -858,7 +999,7 @@ impl ChatContext {
                 } => {
                     let tool_uses_clone = tool_uses.clone();
                     tokio::select! {
-                        res = self.compact_history(telemetry, tool_uses, pending_tool_index, prompt, show_summary, help) => res,
+                        res = self.compact_history(telemetry, database, tool_uses, pending_tool_index, prompt, show_summary, help) => res,
                         Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: tool_uses_clone })
                     }
                 },
@@ -877,12 +1018,16 @@ impl ChatContext {
                 },
                 ChatState::HandleResponseStream(response) => tokio::select! {
                     res = self.handle_response(database, telemetry, response) => res,
-                    Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: None })
+                    Ok(_) = ctrl_c_stream => {
+                        self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None, None, None).await;
+
+                        Err(ChatError::Interrupted { tool_uses: None })
+                    }
                 },
                 ChatState::Exit => return Ok(()),
             };
 
-            next_state = Some(self.handle_state_execution_result(database, result).await?);
+            next_state = Some(self.handle_state_execution_result(telemetry, database, result).await?);
         }
     }
 
@@ -890,6 +1035,7 @@ impl ChatContext {
     /// to.
     async fn handle_state_execution_result(
         &mut self,
+        telemetry: &TelemetryThread,
         database: &mut Database,
         result: Result<ChatState, ChatError>,
     ) -> Result<ChatState, ChatError> {
@@ -898,6 +1044,10 @@ impl ChatContext {
         match result {
             Ok(state) => Ok(state),
             Err(e) => {
+                let (reason, reason_desc) = get_error_reason(&e);
+                self.send_error_telemetry(database, telemetry, reason, Some(reason_desc), e.status_code())
+                    .await;
+
                 macro_rules! print_err {
                     ($prepend_msg:expr, $err:expr) => {{
                         queue!(
@@ -964,7 +1114,7 @@ impl ChatContext {
                     ChatError::Client(err) => match err {
                         // Errors from attempting to send too large of a conversation history. In
                         // this case, attempt to automatically compact the history for the user.
-                        crate::api_client::ApiClientError::ContextWindowOverflow => {
+                        crate::api_client::ApiClientError::ContextWindowOverflow { .. } => {
                             if !self.conversation_state.can_create_summary_request().await {
                                 execute!(
                                     self.output,
@@ -1003,8 +1153,81 @@ impl ChatContext {
                                 help: false,
                             });
                         },
-                        crate::api_client::ApiClientError::QuotaBreach(msg) => {
-                            print_err!(msg, err);
+                        crate::api_client::ApiClientError::QuotaBreach { message, .. } => {
+                            print_err!(message, err);
+                        },
+                        crate::api_client::ApiClientError::ModelOverloadedError { request_id, .. } => {
+                            queue!(
+                                self.output,
+                                style::SetAttribute(Attribute::Bold),
+                                style::SetForegroundColor(Color::Red),
+                            )?;
+
+                            let message = "    The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again.";
+                            let text = match request_id {
+                                Some(id) => format!(
+                                    "Amazon Q is having trouble responding right now:\n{}\n    Request ID: {}\n\n",
+                                    message, id
+                                ),
+                                None => format!("Amazon Q is having trouble responding right now:\n{}\n\n", message),
+                            };
+                            queue!(self.output, style::Print(&text))?;
+                            self.conversation_state.append_transcript(text);
+
+                            execute!(
+                                self.output,
+                                style::SetAttribute(Attribute::Reset),
+                                style::SetForegroundColor(Color::Reset),
+                            )?;
+                        },
+                        crate::api_client::ApiClientError::MonthlyLimitReached { .. } => {
+                            let subscription_status = get_subscription_status(database).await;
+                            if subscription_status.is_err() {
+                                execute!(
+                                    self.output,
+                                    style::SetForegroundColor(Color::Red),
+                                    style::Print(format!(
+                                        "Unable to verify subscription status: {}\n\n",
+                                        subscription_status.as_ref().err().unwrap()
+                                    )),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            }
+
+                            execute!(
+                                self.output,
+                                style::SetForegroundColor(Color::Yellow),
+                                style::Print("Monthly request limit reached"),
+                                style::SetForegroundColor(Color::Reset),
+                            )?;
+
+                            let limits_text = format!(
+                                "The limits reset on {:02}/01.",
+                                OffsetDateTime::now_utc().month().next() as u8
+                            );
+
+                            if subscription_status.is_err()
+                                || subscription_status.is_ok_and(|s| s == ActualSubscriptionStatus::None)
+                            {
+                                execute!(
+                                    self.output,
+                                    style::Print(format!("\n\n{LIMIT_REACHED_TEXT} {limits_text}")),
+                                    style::SetForegroundColor(Color::DarkGrey),
+                                    style::Print("\n\nUse "),
+                                    style::SetForegroundColor(Color::Green),
+                                    style::Print("/subscribe"),
+                                    style::SetForegroundColor(Color::DarkGrey),
+                                    style::Print(" to upgrade your subscription.\n\n"),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            } else {
+                                execute!(
+                                    self.output,
+                                    style::SetForegroundColor(Color::Yellow),
+                                    style::Print(format!(" - {limits_text}\n\n")),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            }
                         },
                         _ => {
                             print_default_error!(err);
@@ -1029,9 +1252,11 @@ impl ChatContext {
     /// model.
     ///
     /// The last two user messages in the history are not included in the compaction process.
+    #[allow(clippy::too_many_arguments)]
     async fn compact_history(
         &mut self,
         telemetry: &TelemetryThread,
+        database: &mut Database,
         tool_uses: Option<Vec<QueuedTool>>,
         pending_tool_index: Option<usize>,
         custom_prompt: Option<String>,
@@ -1087,32 +1312,46 @@ impl ChatContext {
         // retry except with less context included.
         let response = match response {
             Ok(res) => res,
-            Err(e) => match e {
-                crate::api_client::ApiClientError::ContextWindowOverflow => {
-                    self.conversation_state.clear(true);
-                    if self.interactive {
-                        self.spinner.take();
-                        execute!(
-                            self.output,
-                            terminal::Clear(terminal::ClearType::CurrentLine),
-                            cursor::MoveToColumn(0),
-                            style::SetForegroundColor(Color::Yellow),
-                            style::Print(
-                                "The context window usage has overflowed. Clearing the conversation history.\n\n"
-                            ),
-                            style::SetAttribute(Attribute::Reset)
-                        )?;
-                    }
-                    return Ok(ChatState::PromptUser {
-                        tool_uses,
-                        pending_tool_index,
-                        skip_printing_tools: true,
-                    });
-                },
-                e => return Err(e.into()),
+            Err(e) => {
+                let (reason, reason_desc) = get_error_reason(&e);
+                self.send_chat_telemetry(
+                    database,
+                    telemetry,
+                    None,
+                    TelemetryResult::Failed,
+                    Some(reason),
+                    Some(reason_desc),
+                    e.status_code(),
+                )
+                .await;
+                match e {
+                    crate::api_client::ApiClientError::ContextWindowOverflow { .. } => {
+                        self.conversation_state.clear(true);
+                        if self.interactive {
+                            self.spinner.take();
+                            execute!(
+                                self.output,
+                                terminal::Clear(terminal::ClearType::CurrentLine),
+                                cursor::MoveToColumn(0),
+                                style::SetForegroundColor(Color::Yellow),
+                                style::Print(
+                                    "The context window usage has overflowed. Clearing the conversation history.\n\n"
+                                ),
+                                style::SetAttribute(Attribute::Reset)
+                            )?;
+                        }
+                        return Ok(ChatState::PromptUser {
+                            tool_uses,
+                            pending_tool_index,
+                            skip_printing_tools: true,
+                        });
+                    },
+                    e => return Err(e.into()),
+                }
             },
         };
 
+        let request_id = response.request_id().map(|s| s.to_string());
         let summary = {
             let mut parser = ResponseParser::new(response);
             loop {
@@ -1125,6 +1364,17 @@ impl ChatContext {
                         if let Some(request_id) = &err.request_id {
                             self.failed_request_ids.push(request_id.clone());
                         };
+                        let (reason, reason_desc) = get_error_reason(&err);
+                        self.send_chat_telemetry(
+                            database,
+                            telemetry,
+                            err.request_id.clone(),
+                            TelemetryResult::Failed,
+                            Some(reason),
+                            Some(reason_desc),
+                            err.status_code(),
+                        )
+                        .await;
                         return Err(err.into());
                     },
                 }
@@ -1141,15 +1391,16 @@ impl ChatContext {
             )?;
         }
 
-        if let Some(message_id) = self.conversation_state.message_id() {
-            telemetry
-                .send_chat_added_message(
-                    self.conversation_state.conversation_id().to_owned(),
-                    message_id.to_owned(),
-                    self.conversation_state.context_message_length(),
-                )
-                .ok();
-        }
+        self.send_chat_telemetry(
+            database,
+            telemetry,
+            request_id,
+            TelemetryResult::Succeeded,
+            None,
+            None,
+            None,
+        )
+        .await;
 
         self.conversation_state.replace_history_with_summary(summary.clone());
 
@@ -1229,7 +1480,7 @@ impl ChatContext {
     /// Read input from the user.
     async fn prompt_user(
         &mut self,
-        database: &Database,
+        #[cfg_attr(windows, allow(unused_variables))] database: &Database,
         mut tool_uses: Option<Vec<QueuedTool>>,
         pending_tool_index: Option<usize>,
         skip_printing_tools: bool,
@@ -1310,6 +1561,7 @@ impl ChatContext {
     async fn handle_input(
         &mut self,
         telemetry: &TelemetryThread,
+        database: &mut Database,
         mut user_input: String,
         tool_uses: Option<Vec<QueuedTool>>,
         pending_tool_index: Option<usize>,
@@ -1338,9 +1590,9 @@ impl ChatContext {
         Ok(match command {
             Command::Ask { prompt } => {
                 // Check for a pending tool approval
+                let tool_denied_without_reason = ["n", "N"].contains(&prompt.as_str());
                 if let Some(index) = pending_tool_index {
                     let tool_use = &mut tool_uses[index];
-
                     let is_trust = ["t", "T"].contains(&prompt.as_str());
                     if ["y", "Y"].contains(&prompt.as_str()) || is_trust {
                         if is_trust {
@@ -1349,6 +1601,23 @@ impl ChatContext {
                         tool_use.accepted = true;
 
                         return Ok(ChatState::ExecuteTools(tool_uses));
+                    // Prompt reason if no selected
+                    } else if tool_denied_without_reason {
+                        tool_use.accepted = false;
+                        execute!(
+                            self.output,
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print(
+                                "\nPlease provide a reason for denying this tool use, or otherwise continue your conversation:\n\n"
+                            ),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+
+                        return Ok(ChatState::PromptUser {
+                            tool_uses: Some(tool_uses),
+                            pending_tool_index,
+                            skip_printing_tools: true,
+                        });
                     }
                 } else if !self.pending_prompts.is_empty() {
                     let prompts = self.pending_prompts.drain(0..).collect();
@@ -1360,7 +1629,6 @@ impl ChatContext {
 
                 // Otherwise continue with normal chat on 'n' or other responses
                 self.tool_use_status = ToolUseStatus::Idle;
-
                 if pending_tool_index.is_some() {
                     self.conversation_state.abandon_tool_use(tool_uses, user_input);
                 } else {
@@ -1382,8 +1650,36 @@ impl ChatContext {
             },
             Command::Execute { command } => {
                 queue!(self.output, style::Print('\n'))?;
-                std::process::Command::new("bash").args(["-c", &command]).status().ok();
-                queue!(self.output, style::Print('\n'))?;
+
+                // Use platform-appropriate shell
+                let result = if cfg!(target_os = "windows") {
+                    std::process::Command::new("cmd").args(["/C", &command]).status()
+                } else {
+                    std::process::Command::new("bash").args(["-c", &command]).status()
+                };
+
+                // Handle the result and provide appropriate feedback
+                match result {
+                    Ok(status) => {
+                        if !status.success() {
+                            queue!(
+                                self.output,
+                                style::SetForegroundColor(Color::Yellow),
+                                style::Print(format!("Command exited with status: {}\n", status)),
+                                style::SetForegroundColor(Color::Reset)
+                            )?;
+                        }
+                    },
+                    Err(e) => {
+                        queue!(
+                            self.output,
+                            style::SetForegroundColor(Color::Red),
+                            style::Print(format!("Failed to execute command: {}\n", e)),
+                            style::SetForegroundColor(Color::Reset)
+                        )?;
+                    },
+                }
+
                 ChatState::PromptUser {
                     tool_uses: None,
                     pending_tool_index: None,
@@ -1443,6 +1739,7 @@ impl ChatContext {
             } => {
                 self.compact_history(
                     telemetry,
+                    database,
                     Some(tool_uses),
                     pending_tool_index,
                     prompt,
@@ -2603,6 +2900,21 @@ impl ChatContext {
                                 optimal_case
                             }
                         };
+                        // Add usage guidance at the top
+                        queue!(
+                            self.output,
+                            style::Print("\n"),
+                            style::SetAttribute(Attribute::Bold),
+                            style::Print("Usage: "),
+                            style::SetAttribute(Attribute::Reset),
+                            style::Print("You can use a prompt by typing "),
+                            style::SetAttribute(Attribute::Bold),
+                            style::SetForegroundColor(Color::Green),
+                            style::Print("'@<prompt name> [...args]'"),
+                            style::SetForegroundColor(Color::Reset),
+                            style::SetAttribute(Attribute::Reset),
+                            style::Print("\n\n"),
+                        )?;
                         queue!(
                             self.output,
                             style::Print("\n"),
@@ -2719,13 +3031,19 @@ impl ChatContext {
                 }
 
                 let data = state.calculate_conversation_size();
+                let tool_specs_json: String = state
+                    .tools
+                    .values()
+                    .filter_map(|s| serde_json::to_string(s).ok())
+                    .collect();
 
                 let context_token_count: TokenCount = data.context_messages.into();
                 let assistant_token_count: TokenCount = data.assistant_messages.into();
                 let user_token_count: TokenCount = data.user_messages.into();
+                let tools_char_count: CharCount = tool_specs_json.len().into(); // usize → CharCount
+                let tools_token_count: TokenCount = tools_char_count.into(); // CharCount → TokenCount
                 let total_token_used: TokenCount =
-                    (data.context_messages + data.user_messages + data.assistant_messages).into();
-
+                    (data.context_messages + data.user_messages + data.assistant_messages + tools_char_count).into();
                 let window_width = self.terminal_width();
                 // set a max width for the progress bar for better aesthetic
                 let progress_bar_width = std::cmp::min(window_width, 80);
@@ -2734,13 +3052,18 @@ impl ChatContext {
                     * progress_bar_width as f64) as usize;
                 let assistant_width = ((assistant_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
                     * progress_bar_width as f64) as usize;
+                let tools_width = ((tools_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
+                    * progress_bar_width as f64) as usize;
                 let user_width = ((user_token_count.value() as f64 / CONTEXT_WINDOW_SIZE as f64)
                     * progress_bar_width as f64) as usize;
 
                 let left_over_width = progress_bar_width
-                    - std::cmp::min(context_width + assistant_width + user_width, progress_bar_width);
+                    - std::cmp::min(
+                        context_width + assistant_width + user_width + tools_width,
+                        progress_bar_width,
+                    );
 
-                let is_overflow = (context_width + assistant_width + user_width) > progress_bar_width;
+                let is_overflow = (context_width + assistant_width + user_width + tools_width) > progress_bar_width;
 
                 if is_overflow {
                     queue!(
@@ -2767,6 +3090,7 @@ impl ChatContext {
                             total_token_used,
                             CONTEXT_WINDOW_SIZE / 1000
                         )),
+                        // Context files
                         style::SetForegroundColor(Color::DarkCyan),
                         // add a nice visual to mimic "tiny" progress, so the overral progress bar doesn't look too
                         // empty
@@ -2776,6 +3100,15 @@ impl ChatContext {
                             0
                         })),
                         style::Print("█".repeat(context_width)),
+                        // Tools
+                        style::SetForegroundColor(Color::DarkRed),
+                        style::Print("|".repeat(if tools_width == 0 && *tools_token_count > 0 {
+                            1
+                        } else {
+                            0
+                        })),
+                        style::Print("█".repeat(tools_width)),
+                        // Assistant responses
                         style::SetForegroundColor(Color::Blue),
                         style::Print("|".repeat(if assistant_width == 0 && *assistant_token_count > 0 {
                             1
@@ -2783,6 +3116,7 @@ impl ChatContext {
                             0
                         })),
                         style::Print("█".repeat(assistant_width)),
+                        // User prompts
                         style::SetForegroundColor(Color::Magenta),
                         style::Print("|".repeat(if user_width == 0 && *user_token_count > 0 { 1 } else { 0 })),
                         style::Print("█".repeat(user_width)),
@@ -2809,6 +3143,14 @@ impl ChatContext {
                         "~{} tokens ({:.2}%)\n",
                         context_token_count,
                         (context_token_count.value() as f32 / CONTEXT_WINDOW_SIZE as f32) * 100.0
+                    )),
+                    style::SetForegroundColor(Color::DarkRed),
+                    style::Print("█ Tools:    "),
+                    style::SetForegroundColor(Color::Reset),
+                    style::Print(format!(
+                        " ~{} tokens ({:.2}%)\n",
+                        tools_token_count,
+                        (tools_token_count.value() as f32 / CONTEXT_WINDOW_SIZE as f32) * 100.0
                     )),
                     style::SetForegroundColor(Color::Blue),
                     style::Print("█ Q responses: "),
@@ -3000,6 +3342,131 @@ impl ChatContext {
                     pending_tool_index: None,
                     skip_printing_tools: true,
                 }
+            },
+            Command::Model => {
+                queue!(self.output, style::Print("\n"))?;
+                let active_model_id = self.conversation_state.model.as_deref();
+                let labels: Vec<String> = MODEL_OPTIONS
+                    .iter()
+                    .map(|opt| {
+                        if (opt.model_id.is_empty() && active_model_id.is_none())
+                            || Some(opt.model_id) == active_model_id
+                        {
+                            format!("{} (active)", opt.name)
+                        } else {
+                            opt.name.to_owned()
+                        }
+                    })
+                    .collect();
+
+                let selection: Option<_> = match Select::with_theme(&crate::util::dialoguer_theme())
+                    .with_prompt("Select a model for this chat session")
+                    .items(&labels)
+                    .default(0)
+                    .interact_on_opt(&dialoguer::console::Term::stdout())
+                {
+                    Ok(sel) => {
+                        let _ = crossterm::execute!(
+                            std::io::stdout(),
+                            crossterm::style::SetForegroundColor(crossterm::style::Color::Magenta)
+                        );
+                        sel
+                    },
+                    // Ctrl‑C -> Err(Interrupted)
+                    Err(DError::IO(ref e)) if e.kind() == io::ErrorKind::Interrupted => None,
+                    Err(e) => return Err(ChatError::Custom(format!("Failed to choose model: {e}").into())),
+                };
+
+                queue!(self.output, style::ResetColor)?;
+
+                if let Some(index) = selection {
+                    let selected = &MODEL_OPTIONS[index];
+                    let model_id_str = selected.model_id.to_string();
+                    self.conversation_state.model = Some(model_id_str);
+
+                    queue!(
+                        self.output,
+                        style::Print("\n"),
+                        style::Print(format!(" Using {}\n\n", selected.name)),
+                        style::ResetColor,
+                        style::SetForegroundColor(Color::Reset),
+                        style::SetBackgroundColor(Color::Reset),
+                    )?;
+                }
+
+                queue!(self.output, style::ResetColor)?;
+                self.output.flush()?;
+                ChatState::PromptUser {
+                    tool_uses: None,
+                    pending_tool_index: None,
+                    skip_printing_tools: false,
+                }
+            },
+            Command::Subscribe { manage } => {
+                if is_idc_user(database)
+                    .await
+                    .map_err(|e| ChatError::Custom(e.to_string().into()))?
+                {
+                    execute!(
+                        self.output,
+                        style::SetForegroundColor(Color::Yellow),
+                        style::Print("\nYour Q Developer Pro subscription is managed through IAM Identity Center.\n\n"),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+                } else if manage {
+                    queue!(self.output, style::Print("\n"),)?;
+                    match get_subscription_status_with_spinner(self.interactive, &mut self.output, database).await {
+                        Ok(status) => {
+                            if status != ActualSubscriptionStatus::Active {
+                                queue!(
+                                    self.output,
+                                    style::SetForegroundColor(Color::Yellow),
+                                    style::Print("You don't seem to have a Q Developer Pro subscription. "),
+                                    style::SetForegroundColor(Color::DarkGrey),
+                                    style::Print("Use "),
+                                    style::SetForegroundColor(Color::Green),
+                                    style::Print("/subscribe"),
+                                    style::SetForegroundColor(Color::DarkGrey),
+                                    style::Print(" to upgrade your subscription.\n\n"),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            }
+                        },
+                        Err(err) => {
+                            queue!(
+                                self.output,
+                                style::SetForegroundColor(Color::Red),
+                                style::Print(format!("Failed to get subscription status: {}\n\n", err)),
+                                style::SetForegroundColor(Color::Reset),
+                            )?;
+                        },
+                    }
+
+                    let url = format!(
+                        "https://{}.console.aws.amazon.com/amazonq/developer/home#/subscriptions",
+                        database
+                            .get_idc_region()
+                            .ok()
+                            .flatten()
+                            .unwrap_or("us-east-1".to_string())
+                    );
+                    if is_remote() || crate::util::open::open_url_async(&url).await.is_err() {
+                        execute!(
+                            self.output,
+                            style::Print(format!("Open this URL to manage your subscription: {}\n\n", url.blue())),
+                            style::ResetColor,
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                    }
+                } else {
+                    self.upgrade_to_pro(database).await?;
+                }
+
+                return Ok(ChatState::PromptUser {
+                    tool_uses: Some(tool_uses),
+                    pending_tool_index,
+                    skip_printing_tools: true,
+                });
             },
         })
     }
@@ -3264,6 +3731,18 @@ impl ChatContext {
                         self.failed_request_ids.push(request_id.clone());
                     };
 
+                    let (reason, reason_desc) = get_error_reason(&recv_error);
+                    self.send_chat_telemetry(
+                        database,
+                        telemetry,
+                        recv_error.request_id.clone(),
+                        TelemetryResult::Failed,
+                        Some(reason),
+                        Some(reason_desc),
+                        recv_error.status_code(),
+                    )
+                    .await;
+
                     match recv_error.source {
                         RecvErrorKind::StreamTimeout { source, duration } => {
                             error!(
@@ -3300,38 +3779,12 @@ impl ChatContext {
                             tool_use_id,
                             name,
                             message,
-                            time_elapsed,
+                            ..
                         } => {
                             error!(
                                 recv_error.request_id,
                                 tool_use_id, name, "The response stream ended before the entire tool use was received"
                             );
-                            if self.interactive {
-                                drop(self.spinner.take());
-                                queue!(
-                                    self.output,
-                                    terminal::Clear(terminal::ClearType::CurrentLine),
-                                    cursor::MoveToColumn(0),
-                                    style::SetForegroundColor(Color::Yellow),
-                                    style::SetAttribute(Attribute::Bold),
-                                    style::Print(format!(
-                                        "Warning: received an unexpected error from the model after {:.2}s",
-                                        time_elapsed.as_secs_f64()
-                                    )),
-                                )?;
-                                if let Some(request_id) = recv_error.request_id {
-                                    queue!(
-                                        self.output,
-                                        style::Print(format!("\n         request_id: {}", request_id))
-                                    )?;
-                                }
-                                execute!(self.output, style::Print("\n\n"), style::SetAttribute(Attribute::Reset))?;
-                                self.spinner = Some(Spinner::new(
-                                    Spinners::Dots,
-                                    "Trying to divide up the work...".to_string(),
-                                ));
-                            }
-
                             self.conversation_state.push_assistant_message(*message, database);
                             let tool_results = vec![ToolUseResult {
                                     tool_use_id,
@@ -3388,7 +3841,7 @@ impl ChatContext {
 
                 // TODO: We should buffer output based on how much we have to parse, not as a constant
                 // Do not remove unless you are nabochay :)
-                std::thread::sleep(Duration::from_millis(8));
+                tokio::time::sleep(Duration::from_millis(8)).await;
             }
 
             // Set spinner after showing all of the assistant text content so far.
@@ -3398,15 +3851,16 @@ impl ChatContext {
             }
 
             if ended {
-                if let Some(message_id) = self.conversation_state.message_id() {
-                    telemetry
-                        .send_chat_added_message(
-                            self.conversation_state.conversation_id().to_owned(),
-                            message_id.to_owned(),
-                            self.conversation_state.context_message_length(),
-                        )
-                        .ok();
-                }
+                self.send_chat_telemetry(
+                    database,
+                    telemetry,
+                    request_id,
+                    TelemetryResult::Succeeded,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
 
                 if self.interactive
                     && database
@@ -3463,10 +3917,14 @@ impl ChatContext {
         for tool_use in tool_uses {
             let tool_use_id = tool_use.id.clone();
             let tool_use_name = tool_use.name.clone();
-            let mut tool_telemetry = ToolUseEventBuilder::new(conv_id.clone(), tool_use.id.clone())
-                .set_tool_use_id(tool_use_id.clone())
-                .set_tool_name(tool_use.name.clone())
-                .utterance_id(self.conversation_state.message_id().map(|s| s.to_string()));
+            let mut tool_telemetry = ToolUseEventBuilder::new(
+                conv_id.clone(),
+                tool_use.id.clone(),
+                self.conversation_state.model.clone(),
+            )
+            .set_tool_use_id(tool_use_id.clone())
+            .set_tool_name(tool_use.name.clone())
+            .utterance_id(self.conversation_state.message_id().map(|s| s.to_string()));
             match self.conversation_state.tool_manager.get_tool_from_tool_use(tool_use) {
                 Ok(mut tool) => {
                     // Apply non-Q-generated context to tools
@@ -3549,6 +4007,98 @@ impl ChatContext {
         }
 
         Ok(ChatState::ExecuteTools(queued_tools))
+    }
+
+    async fn upgrade_to_pro(&mut self, database: &mut Database) -> Result<(), ChatError> {
+        queue!(self.output, style::Print("\n"),)?;
+
+        // Get current subscription status
+        match get_subscription_status_with_spinner(self.interactive, &mut self.output, database).await {
+            Ok(status) => {
+                if status == ActualSubscriptionStatus::Active {
+                    queue!(
+                        self.output,
+                        style::SetForegroundColor(Color::Yellow),
+                        style::Print("Your Builder ID already has a Q Developer Pro subscription.\n\n"),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+                    return Ok(());
+                }
+            },
+            Err(e) => {
+                execute!(
+                    self.output,
+                    style::SetForegroundColor(Color::Red),
+                    style::Print(format!("{}\n\n", e)),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+                // Don't exit early here, the check isn't required to subscribe.
+            },
+        }
+
+        // Upgrade information
+        queue!(
+            self.output,
+            style::Print(SUBSCRIBE_TITLE_TEXT),
+            style::SetForegroundColor(Color::Grey),
+            style::Print(format!("\n\n{}\n\n", SUBSCRIBE_TEXT)),
+            style::SetForegroundColor(Color::Reset),
+            cursor::Show
+        )?;
+
+        let prompt = format!(
+            "{}{}{}{}{}",
+            "Would you like to open the AWS console to upgrade? [".dark_grey(),
+            "y".green(),
+            "/".dark_grey(),
+            "n".green(),
+            "]: ".dark_grey(),
+        );
+
+        let user_input = self.read_user_input(&prompt, true);
+        queue!(self.output, style::SetForegroundColor(Color::Reset), style::Print("\n"),)?;
+
+        if !user_input.is_some_and(|i| ["y", "Y"].contains(&i.as_str())) {
+            execute!(
+                self.output,
+                style::SetForegroundColor(Color::Red),
+                style::Print("Upgrade cancelled.\n\n"),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+            return Ok(());
+        }
+
+        // Create a subscription token and open the webpage
+        let url = with_spinner(
+            self.interactive,
+            &mut self.output,
+            "Preparing to upgrade...",
+            || async {
+                let r = Client::new(database, None).await?.create_subscription_token().await?;
+                Ok::<String, ChatError>(r.encoded_verification_url().to_string())
+            },
+        )
+        .await?;
+
+        if is_remote() || crate::util::open::open_url_async(&url).await.is_err() {
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::DarkGrey),
+                style::Print(format!(
+                    "{} Having issues opening the AWS console? Try copy and pasting the URL > {}\n\n",
+                    "?".magenta(),
+                    url.blue()
+                )),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        }
+
+        execute!(
+            self.output,
+            style::Print("Once upgraded, type a new prompt to continue your work, or type /quit to exit the chat.\n\n")
+        )?;
+
+        Ok(())
     }
 
     /// Apply program context to tools that Q may not have.
@@ -3694,6 +4244,96 @@ impl ChatContext {
 
         Ok(())
     }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn send_chat_telemetry(
+        &self,
+        database: &Database,
+        telemetry: &TelemetryThread,
+        request_id: Option<String>,
+        result: TelemetryResult,
+        reason: Option<String>,
+        reason_desc: Option<String>,
+        status_code: Option<u16>,
+    ) {
+        telemetry
+            .send_chat_added_message(
+                database,
+                self.conversation_state.conversation_id().to_owned(),
+                self.conversation_state.message_id().map(|s| s.to_owned()),
+                request_id,
+                self.conversation_state.context_message_length(),
+                result,
+                reason,
+                reason_desc,
+                status_code,
+                self.conversation_state.model.clone(),
+            )
+            .await
+            .ok();
+    }
+
+    async fn send_error_telemetry(
+        &self,
+        database: &Database,
+        telemetry: &TelemetryThread,
+        reason: String,
+        reason_desc: Option<String>,
+        status_code: Option<u16>,
+    ) {
+        telemetry
+            .send_response_error(
+                database,
+                self.conversation_state.conversation_id().to_owned(),
+                self.conversation_state.context_message_length(),
+                TelemetryResult::Failed,
+                Some(reason),
+                reason_desc,
+                status_code,
+            )
+            .await
+            .ok();
+    }
+}
+
+/// Currently, Sonnet 4 is set as the default model for non-FRA users.
+pub fn default_model_id(database: &Database) -> &'static str {
+    match database.get_auth_profile() {
+        Ok(Some(profile)) if profile.arn.split(':').nth(3) == Some("us-east-1") => "CLAUDE_SONNET_4_20250514_V1_0",
+        _ => "CLAUDE_3_7_SONNET_20250219_V1_0",
+    }
+}
+
+/// Display a spinner + text while waiting for an async function to finish.
+async fn with_spinner<T, E, F, Fut>(
+    interactive: bool,
+    output: &mut impl std::io::Write,
+    spinner_text: &str,
+    f: F,
+) -> Result<T, E>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let spinner = if interactive {
+        let _ = queue!(output, cursor::Hide,);
+        Some(Spinner::new(Spinners::Dots, spinner_text.to_owned()))
+    } else {
+        None
+    };
+
+    let result = f().await;
+
+    if let Some(mut s) = spinner {
+        s.stop();
+        let _ = queue!(
+            output,
+            terminal::Clear(terminal::ClearType::CurrentLine),
+            cursor::MoveToColumn(0),
+        );
+    }
+
+    result
 }
 
 /// Prints hook configuration grouped by trigger: conversation session start or per user message
@@ -3792,9 +4432,70 @@ fn create_stream(model_responses: serde_json::Value) -> StreamingClient {
     StreamingClient::mock(mock)
 }
 
+/// Replaces amzn_codewhisperer_client::types::SubscriptionStatus with a more descriptive type.
+/// See response expectations in [`get_subscription_status`] for reasoning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ActualSubscriptionStatus {
+    Active,   // User has paid for this month
+    Expiring, // User has paid for this month but cancelled
+    None,     // User has not paid for this month
+}
+
+// NOTE: The subscription API behaves in a non-intuitive way. We expect the following responses:
+//
+// 1. SubscriptionStatus::Active:
+//    - The user *has* a subscription, but it is set to *not auto-renew* (i.e., cancelled).
+//    - We return ActualSubscriptionStatus::Expiring to indicate they are eligible to re-subscribe
+//
+// 2. SubscriptionStatus::Inactive:
+//    - The user has no subscription at all (no Pro access).
+//    - We return ActualSubscriptionStatus::None to indicate they are eligible to subscribe.
+//
+// 3. ConflictException (as an error):
+//    - The user already has an active subscription *with auto-renewal enabled*.
+//    - We return ActualSubscriptionStatus::Active since they don’t need to subscribe again.
+//
+// Also, it is currently not possible to subscribe or re-subscribe via console, only IDE/CLI.
+async fn get_subscription_status(database: &mut Database) -> Result<ActualSubscriptionStatus> {
+    if is_idc_user(database).await? {
+        return Ok(ActualSubscriptionStatus::Active);
+    }
+
+    let client = Client::new(database, None).await?;
+    match client.create_subscription_token().await {
+        Ok(response) => match response.status() {
+            SubscriptionStatus::Active => Ok(ActualSubscriptionStatus::Expiring),
+            SubscriptionStatus::Inactive => Ok(ActualSubscriptionStatus::None),
+            _ => Ok(ActualSubscriptionStatus::None),
+        },
+        Err(ApiClientError::CreateSubscriptionToken(e)) => {
+            let sdk_error_code = e.as_service_error().and_then(|err| err.meta().code());
+
+            if sdk_error_code.is_some_and(|c| c.contains("ConflictException")) {
+                Ok(ActualSubscriptionStatus::Active)
+            } else {
+                Err(e.into())
+            }
+        },
+        Err(e) => Err(e.into()),
+    }
+}
+
+async fn get_subscription_status_with_spinner(
+    interactive: bool,
+    output: &mut SharedWriter,
+    database: &mut Database,
+) -> Result<ActualSubscriptionStatus> {
+    return with_spinner(interactive, output, "Checking subscription status...", || async {
+        get_subscription_status(database).await
+    })
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::chat::util::shared_writer::TestWriterWithSink;
     use crate::platform::Env;
 
     #[tokio::test]
@@ -3842,6 +4543,7 @@ mod tests {
             test_client,
             || Some(80),
             tool_manager,
+            None,
             None,
             tool_config,
             ToolPermissions::new(0),
@@ -3976,11 +4678,13 @@ mod tests {
                 "/tools untrust fs_write".to_string(),
                 "create a file".to_string(), // prompt again due to untrust
                 "n".to_string(),             // cancel
+                "no reason".to_string(),     // dummy reason
                 "/tools trust fs_write".to_string(),
                 "create a file".to_string(), // again without prompting due to '/tools trust'
                 "/tools reset".to_string(),
                 "create a file".to_string(), // prompt again due to reset
                 "n".to_string(),             // cancel
+                "no reason".to_string(),     // dummy reason
                 "exit".to_string(),
             ]),
             true,
@@ -3988,6 +4692,7 @@ mod tests {
             test_client,
             || Some(80),
             tool_manager,
+            None,
             None,
             tool_config,
             ToolPermissions::new(0),
@@ -4088,6 +4793,7 @@ mod tests {
             || Some(80),
             tool_manager,
             None,
+            None,
             tool_config,
             ToolPermissions::new(0),
         )
@@ -4166,6 +4872,7 @@ mod tests {
             || Some(80),
             tool_manager,
             None,
+            None,
             tool_config,
             ToolPermissions::new(0),
         )
@@ -4192,5 +4899,47 @@ mod tests {
             let processed = input.trim().to_string();
             assert_eq!(processed, expected.trim().to_string(), "Failed for input: {}", input);
         }
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_flow() {
+        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+
+        let env = Env::new();
+        let mut database = Database::new().await.unwrap();
+        let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
+
+        let buf = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let test_writer = TestWriterWithSink { sink: buf.clone() };
+        let output = SharedWriter::new(test_writer.clone());
+
+        let tool_manager = ToolManager::default();
+        let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
+            .expect("Tools failed to load");
+        ChatContext::new(
+            Arc::clone(&ctx),
+            &mut database,
+            "fake_conv_id",
+            output,
+            None,
+            InputSource::new_mock(vec!["/subscribe".to_string(), "y".to_string(), "/quit".to_string()]),
+            true,
+            false,
+            create_stream(serde_json::json!([])),
+            || Some(80),
+            tool_manager,
+            None,
+            None,
+            tool_config,
+            ToolPermissions::new(0),
+        )
+        .await
+        .unwrap()
+        .try_chat(&mut database, &telemetry)
+        .await
+        .unwrap();
+
+        let output = String::from_utf8(test_writer.get_content()).expect("Invalid output");
+        assert!(output.contains("test/url"));
     }
 }

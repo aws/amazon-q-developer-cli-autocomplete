@@ -75,12 +75,186 @@ pub struct LoginArgs {
     pub use_device_flow: bool,
 }
 
+impl LoginArgs {
+    pub async fn execute(self, database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
+        if crate::auth::is_logged_in(database).await {
+            eyre::bail!(
+                "Already logged in, please logout with {} first",
+                format!("{CLI_BINARY_NAME} logout").magenta()
+            );
+        }
+
+        let login_method = match self.license {
+            Some(LicenseType::Free) => AuthMethod::BuilderId,
+            Some(LicenseType::Pro) => AuthMethod::IdentityCenter,
+            None => {
+                if self.identity_provider.is_some() && self.region.is_some() {
+                    // If license is specified and --identity-provider and --region are specified,
+                    // the license is determined to be pro
+                    AuthMethod::IdentityCenter
+                } else {
+                    // --license is not specified, prompt the user to choose
+                    let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter];
+                    let i = match choose("Select login method", &options)? {
+                        Some(i) => i,
+                        None => bail!("No login method selected"),
+                    };
+                    options[i]
+                }
+            },
+        };
+
+        match login_method {
+            AuthMethod::BuilderId | AuthMethod::IdentityCenter => {
+                let (start_url, region) = match login_method {
+                    AuthMethod::BuilderId => (None, None),
+                    AuthMethod::IdentityCenter => {
+                        let default_start_url = match self.identity_provider {
+                            Some(start_url) => Some(start_url),
+                            None => database.get_start_url()?,
+                        };
+                        let default_region = match self.region {
+                            Some(region) => Some(region),
+                            None => database.get_idc_region()?,
+                        };
+
+                        let start_url = input("Enter Start URL", default_start_url.as_deref())?;
+                        let region = input("Enter Region", default_region.as_deref())?;
+
+                        let _ = database.set_start_url(start_url.clone());
+                        let _ = database.set_idc_region(region.clone());
+
+                        (Some(start_url), Some(region))
+                    },
+                };
+
+                // Remote machine won't be able to handle browser opening and redirects,
+                // hence always use device code flow.
+                if is_remote() || self.use_device_flow {
+                    try_device_authorization(database, telemetry, start_url.clone(), region.clone()).await?;
+                } else {
+                    let (client, registration) = start_pkce_authorization(start_url.clone(), region.clone()).await?;
+
+                    match crate::util::open::open_url_async(&registration.url).await {
+                        // If it succeeded, finish PKCE.
+                        Ok(()) => {
+                            let mut spinner = Spinner::new(vec![
+                                SpinnerComponent::Spinner,
+                                SpinnerComponent::Text(" Logging in...".into()),
+                            ]);
+                            let ctrl_c_stream = ctrl_c();
+                            tokio::select! {
+                                res = registration.finish(&client, Some(database)) => res?,
+                                Ok(_) = ctrl_c_stream => {
+                                    #[allow(clippy::exit)]
+                                    exit(1);
+                                },
+                            }
+                            telemetry.send_user_logged_in().ok();
+                            spinner.stop_with_message("Logged in".into());
+                        },
+                        // If we are unable to open the link with the browser, then fallback to
+                        // the device code flow.
+                        Err(err) => {
+                            error!(%err, "Failed to open URL with browser, falling back to device code flow");
+
+                            // Try device code flow.
+                            try_device_authorization(database, telemetry, start_url.clone(), region.clone()).await?;
+                        },
+                    }
+                }
+            },
+        };
+
+        if login_method == AuthMethod::IdentityCenter {
+            select_profile_interactive(database, telemetry, true).await?;
+        }
+
+        Ok(ExitCode::SUCCESS)
+    }
+}
+
+pub async fn logout(database: &mut Database) -> Result<ExitCode> {
+    let _ = crate::auth::logout(database).await;
+
+    eprintln!("You are now logged out");
+    eprintln!(
+        "Run {} to log back in to {PRODUCT_NAME}",
+        format!("{CLI_BINARY_NAME} login").magenta()
+    );
+
+    Ok(ExitCode::SUCCESS)
+}
+
+#[derive(Args, Debug, PartialEq, Eq, Clone, Default)]
+pub struct WhoamiArgs {
+    /// Output format to use
+    #[arg(long, short, value_enum, default_value_t)]
+    format: OutputFormat,
+}
+
+impl WhoamiArgs {
+    pub async fn execute(self, database: &mut Database) -> Result<ExitCode> {
+        let builder_id = BuilderIdToken::load(database).await;
+
+        match builder_id {
+            Ok(Some(token)) => {
+                self.format.print(
+                    || match token.token_type() {
+                        TokenType::BuilderId => "Logged in with Builder ID".into(),
+                        TokenType::IamIdentityCenter => {
+                            format!(
+                                "Logged in with IAM Identity Center ({})",
+                                token.start_url.as_ref().unwrap()
+                            )
+                        },
+                    },
+                    || {
+                        json!({
+                            "accountType": match token.token_type() {
+                                TokenType::BuilderId => "BuilderId",
+                                TokenType::IamIdentityCenter => "IamIdentityCenter",
+                            },
+                            "startUrl": token.start_url,
+                            "region": token.region,
+                        })
+                    },
+                );
+
+                if matches!(token.token_type(), TokenType::IamIdentityCenter) {
+                    if let Ok(Some(profile)) = database.get_auth_profile() {
+                        color_print::cprintln!("\n<em>Profile:</em>\n{}\n{}\n", profile.profile_name, profile.arn);
+                    }
+                }
+
+                Ok(ExitCode::SUCCESS)
+            },
+            _ => {
+                self.format.print(|| "Not logged in", || json!({ "account": null }));
+                Ok(ExitCode::FAILURE)
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum LicenseType {
     /// Free license with Builder ID
     Free,
     /// Pro license with Identity Center
     Pro,
+}
+
+pub async fn profile(database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
+    if let Ok(Some(token)) = BuilderIdToken::load(database).await {
+        if matches!(token.token_type(), TokenType::BuilderId) {
+            bail!("This command is only available for Pro users");
+        }
+    }
+
+    select_profile_interactive(database, telemetry, false).await?;
+
+    Ok(ExitCode::SUCCESS)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,199 +276,7 @@ impl Display for AuthMethod {
 
 #[derive(Subcommand, Debug, PartialEq, Eq)]
 pub enum UserSubcommand {
-    /// Login
-    Login(LoginArgs),
-    /// Logout
-    Logout,
-    /// Prints details about the current user
-    Whoami {
-        /// Output format to use
-        #[arg(long, short, value_enum, default_value_t)]
-        format: OutputFormat,
-    },
-    /// Show the profile associated with this idc user
     Profile,
-}
-
-impl UserSubcommand {
-    pub async fn execute(self, database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
-        match self {
-            Self::Login(args) => {
-                if crate::auth::is_logged_in(database).await {
-                    eyre::bail!(
-                        "Already logged in, please logout with {} first",
-                        format!("{CLI_BINARY_NAME} logout").magenta()
-                    );
-                }
-
-                login_interactive(database, telemetry, args).await?;
-
-                Ok(ExitCode::SUCCESS)
-            },
-            Self::Logout => {
-                let _ = crate::auth::logout(database).await;
-
-                println!("You are now logged out");
-                println!(
-                    "Run {} to log back in to {PRODUCT_NAME}",
-                    format!("{CLI_BINARY_NAME} login").magenta()
-                );
-                Ok(ExitCode::SUCCESS)
-            },
-            Self::Whoami { format } => {
-                let builder_id = BuilderIdToken::load(database).await;
-
-                match builder_id {
-                    Ok(Some(token)) => {
-                        format.print(
-                            || match token.token_type() {
-                                TokenType::BuilderId => "Logged in with Builder ID".into(),
-                                TokenType::IamIdentityCenter => {
-                                    format!(
-                                        "Logged in with IAM Identity Center ({})",
-                                        token.start_url.as_ref().unwrap()
-                                    )
-                                },
-                            },
-                            || {
-                                json!({
-                                    "accountType": match token.token_type() {
-                                        TokenType::BuilderId => "BuilderId",
-                                        TokenType::IamIdentityCenter => "IamIdentityCenter",
-                                    },
-                                    "startUrl": token.start_url,
-                                    "region": token.region,
-                                })
-                            },
-                        );
-
-                        if matches!(token.token_type(), TokenType::IamIdentityCenter) {
-                            if let Ok(Some(profile)) = database.get_auth_profile() {
-                                color_print::cprintln!(
-                                    "\n<em>Profile:</em>\n{}\n{}\n",
-                                    profile.profile_name,
-                                    profile.arn
-                                );
-                            }
-                        }
-                        Ok(ExitCode::SUCCESS)
-                    },
-                    _ => {
-                        format.print(|| "Not logged in", || json!({ "account": null }));
-                        Ok(ExitCode::FAILURE)
-                    },
-                }
-            },
-            Self::Profile => {
-                if !crate::util::system_info::in_cloudshell() && !crate::auth::is_logged_in(database).await {
-                    bail!(
-                        "You are not logged in, please log in with {}",
-                        format!("{CLI_BINARY_NAME} login").bold()
-                    );
-                }
-
-                if let Ok(Some(token)) = BuilderIdToken::load(database).await {
-                    if matches!(token.token_type(), TokenType::BuilderId) {
-                        bail!("This command is only available for Pro users");
-                    }
-                }
-
-                select_profile_interactive(database, telemetry, false).await?;
-
-                Ok(ExitCode::SUCCESS)
-            },
-        }
-    }
-}
-
-pub async fn login_interactive(database: &mut Database, telemetry: &TelemetryThread, args: LoginArgs) -> Result<()> {
-    let login_method = match args.license {
-        Some(LicenseType::Free) => AuthMethod::BuilderId,
-        Some(LicenseType::Pro) => AuthMethod::IdentityCenter,
-        None => {
-            if args.identity_provider.is_some() && args.region.is_some() {
-                // If license is specified and --identity-provider and --region are specified,
-                // the license is determined to be pro
-                AuthMethod::IdentityCenter
-            } else {
-                // --license is not specified, prompt the user to choose
-                let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter];
-                let i = match choose("Select login method", &options)? {
-                    Some(i) => i,
-                    None => bail!("No login method selected"),
-                };
-                options[i]
-            }
-        },
-    };
-
-    match login_method {
-        AuthMethod::BuilderId | AuthMethod::IdentityCenter => {
-            let (start_url, region) = match login_method {
-                AuthMethod::BuilderId => (None, None),
-                AuthMethod::IdentityCenter => {
-                    let default_start_url = match args.identity_provider {
-                        Some(start_url) => Some(start_url),
-                        None => database.get_start_url()?,
-                    };
-                    let default_region = match args.region {
-                        Some(region) => Some(region),
-                        None => database.get_idc_region()?,
-                    };
-
-                    let start_url = input("Enter Start URL", default_start_url.as_deref())?;
-                    let region = input("Enter Region", default_region.as_deref())?;
-
-                    let _ = database.set_start_url(start_url.clone());
-                    let _ = database.set_idc_region(region.clone());
-
-                    (Some(start_url), Some(region))
-                },
-            };
-
-            // Remote machine won't be able to handle browser opening and redirects,
-            // hence always use device code flow.
-            if is_remote() || args.use_device_flow {
-                try_device_authorization(database, telemetry, start_url.clone(), region.clone()).await?;
-            } else {
-                let (client, registration) = start_pkce_authorization(start_url.clone(), region.clone()).await?;
-
-                match crate::util::open::open_url_async(&registration.url).await {
-                    // If it succeeded, finish PKCE.
-                    Ok(()) => {
-                        let mut spinner = Spinner::new(vec![
-                            SpinnerComponent::Spinner,
-                            SpinnerComponent::Text(" Logging in...".into()),
-                        ]);
-                        let ctrl_c_stream = ctrl_c();
-                        tokio::select! {
-                            res = registration.finish(&client, Some(database)) => res?,
-                            Ok(_) = ctrl_c_stream => {
-                                #[allow(clippy::exit)]
-                                exit(1);
-                            },
-                        }
-                        telemetry.send_user_logged_in().ok();
-                        spinner.stop_with_message("Logged in".into());
-                    },
-                    // If we are unable to open the link with the browser, then fallback to
-                    // the device code flow.
-                    Err(err) => {
-                        error!(%err, "Failed to open URL with browser, falling back to device code flow");
-
-                        // Try device code flow.
-                        try_device_authorization(database, telemetry, start_url.clone(), region.clone()).await?;
-                    },
-                }
-            }
-        },
-    };
-
-    if login_method == AuthMethod::IdentityCenter {
-        select_profile_interactive(database, telemetry, true).await?;
-    }
-
-    Ok(())
 }
 
 async fn try_device_authorization(

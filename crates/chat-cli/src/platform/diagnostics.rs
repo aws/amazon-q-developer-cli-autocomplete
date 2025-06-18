@@ -154,8 +154,6 @@ pub struct CurrentEnvironment {
     #[serde(serialize_with = "serialize_display")]
     pub install_method: InstallMethod,
     #[serde(skip_serializing_if = "is_false")]
-    pub in_cloudshell: bool,
-    #[serde(skip_serializing_if = "is_false")]
     pub in_ssh: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub in_ci: bool,
@@ -185,7 +183,6 @@ impl CurrentEnvironment {
 
         let install_method = crate::telemetry::get_install_method();
 
-        let in_cloudshell = crate::util::system_info::in_cloudshell();
         let in_ssh = crate::util::system_info::in_ssh();
         let in_ci = crate::util::system_info::in_ci();
         let in_wsl = crate::util::system_info::in_wsl();
@@ -195,7 +192,6 @@ impl CurrentEnvironment {
             cwd,
             cli_path,
             install_method,
-            in_cloudshell,
             in_ssh,
             in_ci,
             in_wsl,

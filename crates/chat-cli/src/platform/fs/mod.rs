@@ -13,6 +13,70 @@ use std::sync::{
 use tempfile::TempDir;
 use tokio::fs;
 
+// Import platform-specific modules
+#[cfg(unix)]
+mod unix;
+#[cfg(windows)]
+mod windows;
+
+// Use platform-specific functions
+#[cfg(unix)]
+use unix::{
+    append as platform_append,
+    symlink_sync,
+};
+#[cfg(windows)]
+use windows::{
+    append as platform_append,
+    symlink_sync,
+};
+
+/// Rust path handling is hard coded to work specific ways depending on the
+/// OS that is being executed on. Because of this, if Unix paths are provided,
+/// they aren't recognized. For example a leading prefix of '/' isn't considered
+/// an absolute path. To fix this, all test paths would need to have windows
+/// equivalents which is tedious and can lead to errors and missed test cases.
+/// To make writing tests easier, path normalization happens on Windows systems
+/// implicitly during test runtime.
+#[cfg(test)]
+fn normalize_test_path(path: impl AsRef<Path>) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use typed_path::Utf8TypedPath;
+        let path_ref = path.as_ref();
+
+        // Only process string paths with forward slashes
+        let typed_path = Utf8TypedPath::derive(path_ref.to_str().unwrap());
+        if typed_path.is_unix() {
+            let windows_path = typed_path.with_windows_encoding().to_string();
+
+            // If path is absolute (starts with /) and doesn't already have a drive letter
+            if PathBuf::from(&windows_path).has_root() {
+                // Prepend C: drive letter to make it truly absolute on Windows
+                return PathBuf::from(format!("C:{}", windows_path));
+            }
+
+            return PathBuf::from(windows_path);
+        }
+    }
+    path.as_ref().to_path_buf()
+}
+
+/// Cross-platform path append that handles test paths consistently
+fn append(base: impl AsRef<Path>, path: impl AsRef<Path>) -> PathBuf {
+    #[cfg(test)]
+    {
+        // Normalize the path for tests, then use the platform-specific append
+        platform_append(normalize_test_path(base), normalize_test_path(path))
+    }
+
+    #[cfg(not(test))]
+    {
+        // In non-test code, just use the platform-specific append directly
+        platform_append(base, path)
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Fs(inner::Inner);
 
@@ -285,14 +349,22 @@ impl Fs {
     /// Creates a new symbolic link on the filesystem.
     ///
     /// The `link` path will be a symbolic link pointing to the `original` path.
-    ///
-    /// This is a proxy to [`tokio::fs::symlink`].
-    #[cfg(unix)]
     pub async fn symlink(&self, original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
         use inner::Inner;
+
+        #[cfg(unix)]
+        async fn do_symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+            fs::symlink(original, link).await
+        }
+
+        #[cfg(windows)]
+        async fn do_symlink(original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
+            windows::symlink_async(original, link).await
+        }
+
         match &self.0 {
-            Inner::Real => fs::symlink(original, link).await,
-            Inner::Chroot(root) => fs::symlink(append(root.path(), original), append(root.path(), link)).await,
+            Inner::Real => do_symlink(original, link).await,
+            Inner::Chroot(root) => do_symlink(append(root.path(), original), append(root.path(), link)).await,
             Inner::Fake(_) => panic!("unimplemented"),
         }
     }
@@ -300,14 +372,11 @@ impl Fs {
     /// Creates a new symbolic link on the filesystem.
     ///
     /// The `link` path will be a symbolic link pointing to the `original` path.
-    ///
-    /// This is a proxy to [`std::os::unix::fs::symlink`].
-    #[cfg(unix)]
     pub fn symlink_sync(&self, original: impl AsRef<Path>, link: impl AsRef<Path>) -> io::Result<()> {
         use inner::Inner;
         match &self.0 {
-            Inner::Real => std::os::unix::fs::symlink(original, link),
-            Inner::Chroot(root) => std::os::unix::fs::symlink(append(root.path(), original), append(root.path(), link)),
+            Inner::Real => symlink_sync(original, link),
+            Inner::Chroot(root) => symlink_sync(append(root.path(), original), append(root.path(), link)),
             Inner::Fake(_) => panic!("unimplemented"),
         }
     }
@@ -403,35 +472,6 @@ impl Fs {
     }
 }
 
-/// Performs `a.join(b)`, except:
-/// - if `b` is an absolute path, then the resulting path will equal `/a/b`
-/// - if the prefix of `b` contains some `n` copies of a, then the resulting path will equal `/a/b`
-#[cfg(unix)]
-fn append(a: impl AsRef<Path>, b: impl AsRef<Path>) -> PathBuf {
-    use std::ffi::OsString;
-    use std::os::unix::ffi::{
-        OsStrExt,
-        OsStringExt,
-    };
-
-    // Have to use byte slices since rust seems to always append
-    // a forward slash at the end of a path...
-    let a = a.as_ref().as_os_str().as_bytes();
-    let mut b = b.as_ref().as_os_str().as_bytes();
-    while b.starts_with(a) {
-        b = b.strip_prefix(a).unwrap();
-    }
-    while b.starts_with(b"/") {
-        b = b.strip_prefix(b"/").unwrap();
-    }
-    PathBuf::from(OsString::from_vec(a.to_vec())).join(PathBuf::from(OsString::from_vec(b.to_vec())))
-}
-
-#[cfg(windows)]
-fn append(a: impl AsRef<Path>, b: impl AsRef<Path>) -> PathBuf {
-    todo!()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,18 +506,25 @@ mod tests {
         assert_eq!(fs.read_to_string(dir.path().join("write")).await.unwrap(), "write");
     }
 
-    #[test]
-    fn test_append() {
-        macro_rules! assert_append {
-            ($a:expr, $b:expr, $expected:expr) => {
-                assert_eq!(append($a, $b), PathBuf::from($expected));
-            };
-        }
-        assert_append!("/abc/test", "/test", "/abc/test/test");
-        assert_append!("/tmp/.dir", "/tmp/.dir/home/myuser", "/tmp/.dir/home/myuser");
-        assert_append!("/tmp/.dir", "/tmp/hello", "/tmp/.dir/tmp/hello");
-        assert_append!("/tmp/.dir", "/tmp/.dir/tmp/.dir/home/user", "/tmp/.dir/home/user");
-    }
+    macro_rules! test_append_cases {
+    ($(
+        $name:ident: ($a:expr, $b:expr) => $expected:expr
+    ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                assert_eq!(append($a, $b), normalize_test_path($expected));
+            }
+        )*
+    };
+}
+
+    test_append_cases!(
+        append_test_path_to_dir: ("/abc/test", "/test") => "/abc/test/test",
+        append_absolute_to_tmp_dir: ("/tmp/.dir", "/tmp/.dir/home/myuser") => "/tmp/.dir/home/myuser",
+        append_different_tmp_path: ("/tmp/.dir", "/tmp/hello") => "/tmp/.dir/tmp/hello",
+        append_nested_path_to_tmpdir: ("/tmp/.dir", "/tmp/.dir/tmp/.dir/home/user") => "/tmp/.dir/home/user",
+    );
 
     #[tokio::test]
     async fn test_read_to_string() {
