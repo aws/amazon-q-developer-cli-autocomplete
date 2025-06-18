@@ -32,6 +32,7 @@ Need help? Visit our subscription support page> <blue!>https://docs.aws.amazon.c
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Args)]
 pub struct SubscribeArgs {
+    #[arg(long)]
     manage: bool,
 }
 
