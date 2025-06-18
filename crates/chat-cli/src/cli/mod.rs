@@ -424,7 +424,7 @@ mod test {
     #[test]
     fn test_chat_with_context_profile_and_accept_all() {
         assert_parse!(
-            ["chat", "--profile", "my-profile", "--accept-all"],
+            ["chat", "--profile", "my-profile", "--trust-all-tools"],
             RootSubcommand::Chat(ChatArgs {
                 resume: false,
                 input: None,

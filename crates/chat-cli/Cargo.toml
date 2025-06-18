@@ -29,7 +29,6 @@ amzn-qdeveloper-streaming-client = { path = "../amzn-qdeveloper-streaming-client
 amzn-toolkit-telemetry-client = { path = "../amzn-toolkit-telemetry-client" }
 anstream = "0.6.13"
 arboard = { version = "3.5.0", default-features = false }
-async-recursion = "1.1.1"
 async-trait = "0.1.87"
 aws-config = "1.0.3"
 aws-credential-types = "1.0.3"
