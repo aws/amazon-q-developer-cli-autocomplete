@@ -50,6 +50,9 @@ pub enum Command {
     Prompts {
         subcommand: Option<PromptsSubcommand>,
     },
+    Resources {
+        subcommand: Option<ResourcesSubcommand>,
+    },
     Usage,
     Load {
         path: String,
@@ -404,6 +407,55 @@ pub struct PromptsGetParam {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResourcesSubcommand {
+    List { server_name: Option<String> },
+    Read { uri: String, server_name: Option<String> },
+    Templates { server_name: Option<String> },
+    Help,
+}
+
+impl ResourcesSubcommand {
+    const AVAILABLE_COMMANDS: &str = color_print::cstr! {"<cyan!>Available subcommands</cyan!>
+  <em>help</em>                                                   <black!>Show an explanation for the resources command</black!>
+  <em>list [server name]</em>                                     <black!>List available resources from a server or show all available resources</black!>
+  <em>read <<uri>></em>                                           <black!>Read content from a specific resource URI</black!>
+  <em>templates [server name]</em>                               <black!>List available resource templates</black!>"};
+    const BASE_COMMAND: &str = color_print::cstr! {"<cyan!>Usage: /resources [SUBCOMMAND]</cyan!>
+
+<cyan!>Description</cyan!>
+  Show the current set of available resources from the current fleet of mcp servers."};
+
+    fn usage_msg(header: impl AsRef<str>) -> String {
+        format!(
+            "{}\\n\\n{}\\n\\n{}",
+            header.as_ref(),
+            Self::BASE_COMMAND,
+            Self::AVAILABLE_COMMANDS
+        )
+    }
+
+    pub fn help_text() -> String {
+        color_print::cformat!(
+            r#"
+<magenta,em>Resources</magenta,em>
+
+Resources are data and content exposed by MCP servers that can be read and used as context 
+for AI interactions. These resources can include files, database records, API responses, 
+and other structured or unstructured data.
+
+To read a resource directly:
+  <em>/resources read <<uri>></em>                                 <black!>Read content from the specified resource URI</black!>
+
+{}
+
+{}"#,
+            Self::BASE_COMMAND,
+            Self::AVAILABLE_COMMANDS
+        )
+    }
 }
 
 impl Command {
@@ -822,6 +874,49 @@ impl Command {
                         },
                     }
                 },
+                "resources" => {
+                    let subcommand = parts.get(1);
+                    match subcommand {
+                        Some(c) if c.to_lowercase() == "list" => Self::Resources {
+                            subcommand: Some(ResourcesSubcommand::List {
+                                server_name: parts.get(2).map(|v| (*v).to_string()),
+                            }),
+                        },
+                        Some(c) if c.to_lowercase() == "help" => Self::Resources {
+                            subcommand: Some(ResourcesSubcommand::Help),
+                        },
+                        Some(c) if c.to_lowercase() == "read" => {
+                            let uri = parts.get(2);
+                            match uri {
+                                Some(uri) => Self::Resources {
+                                    subcommand: Some(ResourcesSubcommand::Read {
+                                        uri: (*uri).to_string(),
+                                        server_name: parts.get(3).map(|v| (*v).to_string()),
+                                    }),
+                                },
+                                None => {
+                                    return Err(ResourcesSubcommand::usage_msg("URI is required for read command"));
+                                },
+                            }
+                        },
+                        Some(c) if c.to_lowercase() == "templates" => Self::Resources {
+                            subcommand: Some(ResourcesSubcommand::Templates {
+                                server_name: parts.get(2).map(|v| (*v).to_string()),
+                            }),
+                        },
+                        Some(other) => {
+                            return Err(ResourcesSubcommand::usage_msg(format!(
+                                "Unknown subcommand '{}'\\n",
+                                other
+                            )));
+                        },
+                        None => Self::Resources {
+                            subcommand: Some(ResourcesSubcommand::List {
+                                server_name: parts.get(2).map(|v| (*v).to_string()),
+                            }),
+                        },
+                    }
+                },
                 "usage" => Self::Usage,
                 "load" => {
                     let Some(path) = parts.get(1) else {
@@ -1094,6 +1189,35 @@ mod tests {
                     subcommand: Some(HooksSubcommand::Help)
                 }),
             ),
+            // Resource command tests
+            ("/resources list", Command::Resources {
+                subcommand: Some(ResourcesSubcommand::List { server_name: None }),
+            }),
+            ("/resources list server1", Command::Resources {
+                subcommand: Some(ResourcesSubcommand::List {
+                    server_name: Some("server1".to_string()),
+                }),
+            }),
+            ("/resources read file://test.txt", Command::Resources {
+                subcommand: Some(ResourcesSubcommand::Read {
+                    uri: "file://test.txt".to_string(),
+                    server_name: None,
+                }),
+            }),
+            ("/resources read file://test.txt server1", Command::Resources {
+                subcommand: Some(ResourcesSubcommand::Read {
+                    uri: "file://test.txt".to_string(),
+                    server_name: Some("server1".to_string()),
+                }),
+            }),
+            ("/resources templates", Command::Resources {
+                subcommand: Some(ResourcesSubcommand::Templates { server_name: None }),
+            }),
+            ("/resources templates server1", Command::Resources {
+                subcommand: Some(ResourcesSubcommand::Templates {
+                    server_name: Some("server1".to_string()),
+                }),
+            }),
         ];
 
         for (input, parsed) in tests {

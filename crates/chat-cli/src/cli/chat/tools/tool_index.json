@@ -189,5 +189,23 @@
       },
       "required": ["thought"]
     }
+  },
+  "mcp_resource": {
+    "name": "mcp_resource",
+    "description": "Read content from MCP resources using their URI. This tool allows you to access and retrieve content from resources exposed by MCP servers. Use this when you need to read the actual content of a resource that was discovered via the /resources command.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "uri": {
+          "type": "string",
+          "description": "The URI of the MCP resource to read (e.g., 'echo://world', 'file:///path/to/file')"
+        },
+        "server_name": {
+          "type": "string",
+          "description": "The name of the MCP server that provides this resource"
+        }
+      },
+      "required": ["uri", "server_name"]
+    }
   }
 }

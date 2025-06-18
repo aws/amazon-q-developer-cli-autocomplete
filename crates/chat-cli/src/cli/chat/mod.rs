@@ -4,6 +4,8 @@ mod context;
 mod conversation_state;
 mod hooks;
 mod input_source;
+#[cfg(test)]
+mod mcp_resources_tests;
 mod message;
 mod parse;
 mod parser;
@@ -3022,6 +3024,32 @@ impl ChatContext {
                     skip_printing_tools: true,
                 }
             },
+            Command::Resources { subcommand } => {
+                match subcommand {
+                    Some(command::ResourcesSubcommand::Help) => {
+                        queue!(self.output, style::Print(command::ResourcesSubcommand::help_text()))?;
+                    },
+                    Some(command::ResourcesSubcommand::List { server_name }) => {
+                        self.handle_resources_list(server_name.as_deref()).await?;
+                    },
+                    Some(command::ResourcesSubcommand::Read { uri, server_name }) => {
+                        self.handle_resource_read(&uri, server_name.as_deref()).await?;
+                    },
+                    Some(command::ResourcesSubcommand::Templates { server_name }) => {
+                        self.handle_resource_templates(server_name.as_deref()).await?;
+                    },
+                    None => {
+                        // Default to list
+                        self.handle_resources_list(None).await?;
+                    },
+                }
+                execute!(self.output, style::Print("\n"))?;
+                ChatState::PromptUser {
+                    tool_uses: Some(tool_uses),
+                    pending_tool_index,
+                    skip_printing_tools: true,
+                }
+            },
             Command::Usage => {
                 let state = self.conversation_state.backend_conversation_state(true, true).await;
 
@@ -3534,7 +3562,18 @@ impl ChatContext {
             tool_telemetry = tool_telemetry.and_modify(|ev| ev.is_accepted = true);
 
             let tool_start = std::time::Instant::now();
-            let invoke_result = tool.tool.invoke(&self.ctx, &mut self.output).await;
+            let invoke_result = match &tool.tool {
+                Tool::McpResource(mcp_resource) => {
+                    // Special handling for MCP resource tools - they need access to the tool manager
+                    // We need to drop the telemetry borrow before calling the method
+                    drop(tool_telemetry);
+                    let result = self.invoke_mcp_resource_tool(mcp_resource).await;
+                    // Re-acquire the telemetry entry
+                    tool_telemetry = self.tool_use_telemetry_events.entry(tool.id.clone());
+                    result
+                },
+                _ => tool.tool.invoke(&self.ctx, &mut self.output).await,
+            };
 
             if self.interactive && self.spinner.is_some() {
                 queue!(
@@ -4289,6 +4328,506 @@ impl ChatContext {
             )
             .await
             .ok();
+    }
+
+    /// Handle the resources list command
+    async fn handle_resources_list(&mut self, _server_name: Option<&str>) -> Result<(), ChatError> {
+        let terminal_width = self.terminal_width();
+
+        // Add usage guidance at the top
+        queue!(
+            self.output,
+            style::Print("\n"),
+            style::SetAttribute(Attribute::Bold),
+            style::Print("Available MCP Resources"),
+            style::SetAttribute(Attribute::Reset),
+            style::Print("\n"),
+            style::Print(format!("{}\n", "▔".repeat(terminal_width))),
+        )?;
+
+        // Get resources from MCP servers
+        // First, get a reference to the tool manager to avoid holding the lock across await
+        let tool_manager = &self.conversation_state.tool_manager;
+
+        // Refresh resources cache
+        if let Err(e) = tool_manager.refresh_resources().await {
+            tracing::warn!("Failed to refresh resources: {}", e);
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::Yellow),
+                style::Print("Warning: Failed to refresh resources from MCP servers.\n"),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        }
+
+        // Now get the resources after refreshing
+        let resources = self.conversation_state.tool_manager.resources.read().map_err(|e| {
+            ChatError::Custom(format!("Poison error encountered while retrieving resources: {}", e).into())
+        })?;
+
+        if resources.is_empty() {
+            queue!(
+                self.output,
+                style::Print("No MCP servers with resources are currently available.\n"),
+            )?;
+        } else {
+            // Add usage instructions
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::DarkGrey),
+                style::Print(
+                    "Use '/resources read <uri>' to read a resource, e.g., '/resources read echo://world'\n\n"
+                ),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+            // Display resources grouped by server
+            let mut resources_by_server: Vec<_> = resources
+                .iter()
+                .fold(
+                    HashMap::<&String, Vec<(&String, &crate::cli::chat::tool_manager::ResourceBundle)>>::new(),
+                    |mut acc, (uri, bundles)| {
+                        for bundle in bundles {
+                            acc.entry(&bundle.server_name).or_default().push((uri, bundle));
+                        }
+                        acc
+                    },
+                )
+                .into_iter()
+                .collect();
+
+            resources_by_server.sort_by_key(|(server_name, _)| *server_name);
+
+            for (server_name, resources) in resources_by_server {
+                queue!(
+                    self.output,
+                    style::SetForegroundColor(Color::Cyan),
+                    style::Print(format!("\n{}:\n", server_name)),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+
+                for (uri, bundle) in resources {
+                    let mime_type = bundle
+                        .resource
+                        .get("mimeType")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown");
+
+                    let name = bundle
+                        .resource
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("unnamed");
+
+                    let description = bundle.resource.get("description").and_then(|d| d.as_str());
+
+                    // Display the resource with URI prominently
+                    queue!(
+                        self.output,
+                        style::Print("  "),
+                        style::SetForegroundColor(Color::Yellow),
+                        style::Print(uri.to_string()),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print(format!(" - {} ", name)),
+                        style::SetForegroundColor(Color::DarkGrey),
+                        style::Print(format!("({})", mime_type)),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+
+                    if let Some(desc) = description {
+                        queue!(
+                            self.output,
+                            style::Print("\n    "),
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print(desc),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                    }
+
+                    queue!(self.output, style::Print("\n"))?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle the resource read command
+    async fn handle_resource_read(&mut self, uri: &str, server_name: Option<&str>) -> Result<(), ChatError> {
+        queue!(
+            self.output,
+            style::Print("\n"),
+            style::SetForegroundColor(Color::Cyan),
+            style::Print("Reading resource: "),
+            style::SetForegroundColor(Color::Yellow),
+            style::Print(uri),
+            style::SetForegroundColor(Color::Reset),
+            style::Print("\n"),
+        )?;
+
+        if let Some(server) = server_name {
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::Cyan),
+                style::Print("Server: "),
+                style::SetForegroundColor(Color::Yellow),
+                style::Print(server),
+                style::SetForegroundColor(Color::Reset),
+                style::Print("\n"),
+            )?;
+        }
+
+        // Try to read the resource from MCP servers
+        let mut found = false;
+
+        for (client_server_name, client) in &self.conversation_state.tool_manager.clients {
+            // If a specific server is requested, only use that server
+            if let Some(requested_server) = server_name {
+                if client_server_name != requested_server {
+                    continue;
+                }
+            }
+
+            match client.read_resource(uri).await {
+                Ok(response) => {
+                    found = true;
+
+                    // Debug: log the raw response to help troubleshoot
+                    tracing::debug!("Raw resource response for {}: {:?}", uri, response);
+
+                    let terminal_width = self.terminal_width();
+                    queue!(
+                        self.output,
+                        style::Print("\n"),
+                        style::SetForegroundColor(Color::Green),
+                        style::Print("Resource content:\n"),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print("─".repeat(terminal_width)),
+                        style::Print("\n"),
+                    )?;
+
+                    // Handle MCP resource response format
+                    // According to MCP spec, resources/read returns { "contents": [...] }
+                    if let Some(contents) = response.get("contents") {
+                        if let Some(contents_array) = contents.as_array() {
+                            for content_item in contents_array {
+                                // Each content item should have "type" and content fields
+                                if let Some(content_type) = content_item.get("type").and_then(|t| t.as_str()) {
+                                    match content_type {
+                                        "text" => {
+                                            if let Some(text) = content_item.get("text").and_then(|t| t.as_str()) {
+                                                queue!(self.output, style::Print(text))?;
+                                            }
+                                        },
+                                        "resource" => {
+                                            if let Some(resource_data) = content_item.get("resource") {
+                                                match serde_json::to_string_pretty(resource_data) {
+                                                    Ok(formatted) => queue!(self.output, style::Print(formatted))?,
+                                                    Err(_) => queue!(
+                                                        self.output,
+                                                        style::Print(format!("{:?}", resource_data))
+                                                    )?,
+                                                }
+                                            }
+                                        },
+                                        _ => {
+                                            // Handle other content types or unknown types
+                                            match serde_json::to_string_pretty(content_item) {
+                                                Ok(formatted) => queue!(self.output, style::Print(formatted))?,
+                                                Err(_) => {
+                                                    queue!(self.output, style::Print(format!("{:?}", content_item)))?;
+                                                },
+                                            }
+                                        },
+                                    }
+                                } else {
+                                    // Fallback: try to display the content item as-is
+                                    match serde_json::to_string_pretty(content_item) {
+                                        Ok(formatted) => queue!(self.output, style::Print(formatted))?,
+                                        Err(_) => queue!(self.output, style::Print(format!("{:?}", content_item)))?,
+                                    }
+                                }
+                            }
+                        } else {
+                            // contents is not an array, try to display it directly
+                            match serde_json::to_string_pretty(contents) {
+                                Ok(formatted) => queue!(self.output, style::Print(formatted))?,
+                                Err(_) => queue!(self.output, style::Print(format!("{:?}", contents)))?,
+                            }
+                        }
+                    } else {
+                        // No "contents" field, try to extract "text" field directly
+                        if let Some(text) = response.get("text").and_then(|t| t.as_str()) {
+                            queue!(self.output, style::Print(text))?;
+                        } else if let Some(blob) = response.get("blob").and_then(|b| b.as_str()) {
+                            // For image/binary content, show the blob data
+                            queue!(self.output, style::Print(blob))?;
+                        } else {
+                            // Fallback: display the entire response
+                            match serde_json::to_string_pretty(&response) {
+                                Ok(formatted) => queue!(self.output, style::Print(formatted))?,
+                                Err(_) => queue!(self.output, style::Print(format!("{:?}", response)))?,
+                            }
+                        }
+                    }
+
+                    let terminal_width = self.terminal_width();
+                    queue!(
+                        self.output,
+                        style::Print("\n"),
+                        style::Print("─".repeat(terminal_width)),
+                        style::Print("\n"),
+                    )?;
+                    break;
+                },
+                Err(e) => {
+                    tracing::debug!(
+                        "Failed to read resource {} from server {}: {}",
+                        uri,
+                        client_server_name,
+                        e
+                    );
+                    // Show more detailed error information to help with debugging
+                    if server_name.is_some() {
+                        queue!(
+                            self.output,
+                            style::SetForegroundColor(Color::Yellow),
+                            style::Print(format!(
+                                "Warning: Failed to read resource from server {}: {}\n",
+                                client_server_name, e
+                            )),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                    }
+                    continue;
+                },
+            }
+        }
+
+        if !found {
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::Red),
+                style::Print("Error: Resource not found or not accessible.\n"),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+
+            if server_name.is_some() {
+                queue!(
+                    self.output,
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print("Try running '/resources list' to see available resources.\n"),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handle the resource templates command
+    async fn handle_resource_templates(&mut self, server_name: Option<&str>) -> Result<(), ChatError> {
+        let terminal_width = self.terminal_width();
+        queue!(
+            self.output,
+            style::Print("\n"),
+            style::SetAttribute(Attribute::Bold),
+            style::Print("Resource Templates"),
+            style::SetAttribute(Attribute::Reset),
+            style::Print("\n"),
+            style::Print("─".repeat(terminal_width)),
+            style::Print("\n"),
+        )?;
+
+        if let Some(server) = server_name {
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::Cyan),
+                style::Print("Server: "),
+                style::SetForegroundColor(Color::Yellow),
+                style::Print(server),
+                style::SetForegroundColor(Color::Reset),
+                style::Print("\n\n"),
+            )?;
+        }
+
+        let mut found_any = false;
+
+        // Query each MCP server for resource templates
+        for (client_server_name, client) in &self.conversation_state.tool_manager.clients {
+            // If a specific server is requested, only use that server
+            if let Some(requested_server) = server_name {
+                if client_server_name != requested_server {
+                    continue;
+                }
+            }
+
+            match client.list_resource_templates(None).await {
+                Ok(templates_result) => {
+                    if !templates_result.resource_templates.is_empty() {
+                        found_any = true;
+
+                        queue!(
+                            self.output,
+                            style::SetForegroundColor(Color::Cyan),
+                            style::Print(format!("{}:\n", client_server_name)),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+
+                        for template in &templates_result.resource_templates {
+                            let name = template.get("name").and_then(|n| n.as_str()).unwrap_or("unnamed");
+
+                            let description = template
+                                .get("description")
+                                .and_then(|d| d.as_str())
+                                .unwrap_or("No description");
+
+                            let uri_template = template
+                                .get("uriTemplate")
+                                .and_then(|u| u.as_str())
+                                .unwrap_or("No URI template");
+
+                            queue!(
+                                self.output,
+                                style::Print(format!("  {} - {}\n", name, description)),
+                                style::SetForegroundColor(Color::DarkGrey),
+                                style::Print(format!("    Template: {}\n", uri_template)),
+                                style::SetForegroundColor(Color::Reset),
+                            )?;
+                        }
+                        queue!(self.output, style::Print("\n"))?;
+                    }
+                },
+                Err(e) => {
+                    tracing::debug!(
+                        "Failed to list resource templates from server {}: {}",
+                        client_server_name,
+                        e
+                    );
+                    continue;
+                },
+            }
+        }
+
+        if !found_any {
+            queue!(
+                self.output,
+                style::SetForegroundColor(Color::Yellow),
+                style::Print("No resource templates are currently available from MCP servers.\n"),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Special handler for MCP resource tools that need access to the tool manager
+    async fn invoke_mcp_resource_tool(
+        &mut self,
+        mcp_resource: &crate::cli::chat::tools::mcp_resource::McpResource,
+    ) -> Result<crate::cli::chat::tools::InvokeOutput> {
+        use crate::cli::chat::tools::{
+            InvokeOutput,
+            OutputKind,
+        };
+
+        debug!(?mcp_resource.uri, ?mcp_resource.server_name, "Reading MCP resource via tool");
+
+        // Try to find the specified server
+        let client = self
+            .conversation_state
+            .tool_manager
+            .clients
+            .get(&mcp_resource.server_name)
+            .ok_or_else(|| eyre::eyre!("MCP server '{}' not found or not connected", mcp_resource.server_name))?;
+
+        // Read the resource from the MCP server
+        match client.read_resource(&mcp_resource.uri).await {
+            Ok(response) => {
+                debug!("Raw resource response for {}: {:?}", mcp_resource.uri, response);
+
+                // Extract content from MCP response format
+                let content = Self::extract_content_from_mcp_response(&response)?;
+
+                Ok(InvokeOutput {
+                    output: OutputKind::Text(content),
+                })
+            },
+            Err(e) => Err(eyre::eyre!(
+                "Failed to read resource '{}' from server '{}': {}",
+                mcp_resource.uri,
+                mcp_resource.server_name,
+                e
+            )),
+        }
+    }
+
+    /// Extract readable content from MCP resource response
+    fn extract_content_from_mcp_response(response: &serde_json::Value) -> Result<String> {
+        // Handle MCP resource response format
+        // According to MCP spec, resources/read returns { "contents": [...] }
+        if let Some(contents) = response.get("contents") {
+            if let Some(contents_array) = contents.as_array() {
+                let mut result = String::new();
+
+                for content_item in contents_array {
+                    // Each content item should have "type" and content fields
+                    if let Some(content_type) = content_item.get("type").and_then(|t| t.as_str()) {
+                        match content_type {
+                            "text" => {
+                                if let Some(text) = content_item.get("text").and_then(|t| t.as_str()) {
+                                    result.push_str(text);
+                                }
+                            },
+                            "resource" => {
+                                if let Some(resource_data) = content_item.get("resource") {
+                                    match serde_json::to_string_pretty(resource_data) {
+                                        Ok(formatted) => result.push_str(&formatted),
+                                        Err(_) => result.push_str(&format!("{:?}", resource_data)),
+                                    }
+                                }
+                            },
+                            _ => {
+                                // Handle other content types or unknown types
+                                match serde_json::to_string_pretty(content_item) {
+                                    Ok(formatted) => result.push_str(&formatted),
+                                    Err(_) => result.push_str(&format!("{:?}", content_item)),
+                                }
+                            },
+                        }
+                    } else {
+                        // Fallback: try to display the content item as-is
+                        match serde_json::to_string_pretty(content_item) {
+                            Ok(formatted) => result.push_str(&formatted),
+                            Err(_) => result.push_str(&format!("{:?}", content_item)),
+                        }
+                    }
+                }
+
+                return Ok(result);
+            } else {
+                // contents is not an array, try to display it directly
+                match serde_json::to_string_pretty(contents) {
+                    Ok(formatted) => return Ok(formatted),
+                    Err(_) => return Ok(format!("{:?}", contents)),
+                }
+            }
+        }
+
+        // No "contents" field, try to extract "text" field directly
+        if let Some(text) = response.get("text").and_then(|t| t.as_str()) {
+            return Ok(text.to_string());
+        }
+
+        // Try "blob" field for binary content
+        if let Some(blob) = response.get("blob").and_then(|b| b.as_str()) {
+            return Ok(format!("Binary content (base64): {}", blob));
+        }
+
+        // Fallback: display the entire response
+        match serde_json::to_string_pretty(response) {
+            Ok(formatted) => Ok(formatted),
+            Err(_) => Ok(format!("{:?}", response)),
+        }
     }
 }
 

@@ -80,6 +80,7 @@ use crate::cli::chat::tools::execute::ExecuteCommand;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
 use crate::cli::chat::tools::gh_issue::GhIssue;
+use crate::cli::chat::tools::mcp_resource::McpResource;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
 use crate::cli::chat::tools::{
@@ -716,6 +717,7 @@ impl ToolManagerBuilder {
             conversation_id,
             clients,
             prompts,
+            resources: Arc::new(SyncRwLock::new(HashMap::new())),
             pending_clients: pending,
             notify: Some(notify),
             loading_status_sender,
@@ -738,6 +740,17 @@ pub struct PromptBundle {
     pub server_name: String,
     /// The prompt get (info with which a prompt is retrieved) cached
     pub prompt_get: PromptGet,
+}
+
+#[derive(Clone, Debug)]
+/// A collection of information that is used for the following purposes:
+/// - Checking if resource info cached is out of date
+/// - Retrieve new resource info
+pub struct ResourceBundle {
+    /// The server name from which the resource is offered / exposed
+    pub server_name: String,
+    /// The resource information cached
+    pub resource: serde_json::Value,
 }
 
 /// Categorizes different types of tool name validation failures:
@@ -787,6 +800,13 @@ pub struct ToolManager {
     /// cases where multiple servers offer prompts with the same name.
     pub prompts: Arc<SyncRwLock<HashMap<String, Vec<PromptBundle>>>>,
 
+    /// Cache for resources collected from different servers.
+    /// Key: resource URI
+    /// Value: a list of ResourceBundle that has a resource with this URI.
+    /// This cache helps resolve resource requests efficiently and handles
+    /// cases where multiple servers offer resources with the same URI.
+    pub resources: Arc<SyncRwLock<HashMap<String, Vec<ResourceBundle>>>>,
+
     /// A notifier to understand if the initial loading has completed.
     /// This is only used for initial loading and is discarded after.
     notify: Option<Arc<Notify>>,
@@ -826,6 +846,7 @@ impl Clone for ToolManager {
             has_new_stuff: self.has_new_stuff.clone(),
             new_tool_specs: self.new_tool_specs.clone(),
             prompts: self.prompts.clone(),
+            resources: self.resources.clone(),
             tn_map: self.tn_map.clone(),
             schema: self.schema.clone(),
             is_interactive: self.is_interactive,
@@ -994,6 +1015,7 @@ impl ToolManager {
             },
             "use_aws" => Tool::UseAws(serde_json::from_value::<UseAws>(value.args).map_err(map_err)?),
             "report_issue" => Tool::GhIssue(serde_json::from_value::<GhIssue>(value.args).map_err(map_err)?),
+            "mcp_resource" => Tool::McpResource(serde_json::from_value::<McpResource>(value.args).map_err(map_err)?),
             "thinking" => Tool::Thinking(serde_json::from_value::<Thinking>(value.args).map_err(map_err)?),
             // Note that this name is namespaced with server_name{DELIMITER}tool_name
             name => {
@@ -1272,6 +1294,39 @@ impl ToolManager {
                 acc
             },
         );
+        Ok(())
+    }
+
+    /// Refresh the resources cache by querying all connected MCP servers
+    pub async fn refresh_resources(&self) -> Result<(), eyre::Report> {
+        let mut new_resources = HashMap::<String, Vec<ResourceBundle>>::new();
+
+        for (server_name, client) in &self.clients {
+            match client.list_resources(None).await {
+                Ok(resources_list) => {
+                    for resource in resources_list.resources {
+                        // Extract URI from resource - MCP resources should have a "uri" field
+                        if let Some(uri) = resource.get("uri").and_then(|u| u.as_str()) {
+                            let bundle = ResourceBundle {
+                                server_name: server_name.clone(),
+                                resource: resource.clone(),
+                            };
+                            new_resources.entry(uri.to_string()).or_default().push(bundle);
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to list resources from server {}: {}", server_name, e);
+                },
+            }
+        }
+
+        // Now acquire the lock only when we're ready to update
+        let mut resources_wl = self
+            .resources
+            .write()
+            .map_err(|e| eyre::eyre!("Poison error encountered while retrieving resources: {}", e))?;
+        *resources_wl = new_resources;
         Ok(())
     }
 

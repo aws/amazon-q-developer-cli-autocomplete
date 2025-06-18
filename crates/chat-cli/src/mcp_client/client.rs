@@ -111,6 +111,12 @@ pub enum ClientError {
     ProcessKillError(String),
     #[error("{0}")]
     PoisonError(String),
+    #[error("JSON-RPC error {code}: {message}")]
+    JsonRpc {
+        code: i32,
+        message: String,
+        data: Option<serde_json::Value>,
+    },
 }
 
 impl From<(tokio::time::error::Elapsed, String)> for ClientError {
@@ -564,6 +570,41 @@ where
         }
         tracing::trace!(target: "mcp", "From {}:\n{:#?}", self.server_name, resp);
         Ok(resp)
+    }
+
+    /// Lists available resources from the MCP server
+    pub async fn list_resources(&self, cursor: Option<String>) -> Result<ResourcesListResult, ClientError> {
+        let params = cursor.map(|c| serde_json::json!({"cursor": c}));
+        let response = self.request("resources/list", params).await?;
+        serde_json::from_value(response.result.unwrap_or_default()).map_err(ClientError::Serialization)
+    }
+
+    /// Lists available resource templates from the MCP server
+    pub async fn list_resource_templates(
+        &self,
+        cursor: Option<String>,
+    ) -> Result<ResourceTemplatesListResult, ClientError> {
+        let params = cursor.map(|c| serde_json::json!({"cursor": c}));
+        let response = self.request("resources/templates/list", params).await?;
+        serde_json::from_value(response.result.unwrap_or_default()).map_err(ClientError::Serialization)
+    }
+
+    /// Reads content from a specific resource URI
+    pub async fn read_resource(&self, uri: &str) -> Result<serde_json::Value, ClientError> {
+        let params = serde_json::json!({"uri": uri});
+        let response = self.request("resources/read", Some(params)).await?;
+
+        // Check if there's an error in the response
+        if let Some(error) = response.error {
+            return Err(ClientError::JsonRpc {
+                code: error.code,
+                message: error.message,
+                data: error.data,
+            });
+        }
+
+        // Return the result or default if no error
+        Ok(response.result.unwrap_or_default())
     }
 
     /// Sends a notification to the server associated.

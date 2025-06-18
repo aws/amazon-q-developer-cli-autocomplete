@@ -148,6 +148,35 @@ impl CustomToolClient {
         }
     }
 
+    /// Lists available resources from the MCP server
+    pub async fn list_resources(
+        &self,
+        cursor: Option<String>,
+    ) -> Result<crate::mcp_client::facilitator_types::ResourcesListResult> {
+        match self {
+            CustomToolClient::Stdio { client, .. } => client.list_resources(cursor).await.map_err(|e| eyre::eyre!(e)),
+        }
+    }
+
+    /// Lists available resource templates from the MCP server
+    pub async fn list_resource_templates(
+        &self,
+        cursor: Option<String>,
+    ) -> Result<crate::mcp_client::facilitator_types::ResourceTemplatesListResult> {
+        match self {
+            CustomToolClient::Stdio { client, .. } => {
+                client.list_resource_templates(cursor).await.map_err(|e| eyre::eyre!(e))
+            },
+        }
+    }
+
+    /// Reads a resource from the MCP server
+    pub async fn read_resource(&self, uri: &str) -> Result<serde_json::Value> {
+        match self {
+            CustomToolClient::Stdio { client, .. } => client.read_resource(uri).await.map_err(|e| eyre::eyre!(e)),
+        }
+    }
+
     pub fn prompts_updated(&self) {
         match self {
             CustomToolClient::Stdio { client, .. } => client.is_prompts_out_of_date.store(false, Ordering::Relaxed),
