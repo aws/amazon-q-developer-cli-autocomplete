@@ -254,13 +254,29 @@ impl ToolManagerBuilder {
         mut self,
         telemetry: &TelemetryThread,
         mut output: Box<dyn Write + Send + Sync + 'static>,
+        interactive: bool,
     ) -> eyre::Result<ToolManager> {
         let McpServerConfig { mcp_servers } = self.mcp_server_config.ok_or(eyre::eyre!("Missing mcp server config"))?;
         debug_assert!(self.conversation_id.is_some());
         let conversation_id = self.conversation_id.ok_or(eyre::eyre!("Missing conversation id"))?;
         let regex = regex::Regex::new(VALID_TOOL_NAME)?;
         let mut hasher = DefaultHasher::new();
-        let pre_initialized = mcp_servers
+
+        // Separate enabled and disabled servers
+        let (enabled_servers, disabled_servers): (Vec<_>, Vec<_>) = mcp_servers
+            .into_iter()
+            .partition(|(_, server_config)| !server_config.disabled);
+
+        // Prepare disabled servers for display
+        let disabled_servers_display: Vec<String> = disabled_servers
+            .iter()
+            .map(|(server_name, _)| {
+                let snaked_cased_name = server_name.to_case(convert_case::Case::Snake);
+                sanitize_name(snaked_cased_name, &regex, &mut hasher)
+            })
+            .collect();
+
+        let pre_initialized = enabled_servers
             .into_iter()
             .map(|(server_name, server_config)| {
                 let snaked_cased_name = server_name.to_case(convert_case::Case::Snake);
@@ -280,7 +296,9 @@ impl ToolManagerBuilder {
         // Spawn a task for displaying the mcp loading statuses.
         // This is only necessary when we are in interactive mode AND there are servers to load.
         // Otherwise we do not need to be spawning this.
-        let (_loading_display_task, loading_status_sender) = if total > 0 {
+        let (_loading_display_task, loading_status_sender) = if interactive
+            && (total > 0 || !disabled_servers_display.is_empty())
+        {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<LoadingMsg>(50);
             let disabled_servers_display_clone = disabled_servers_display.clone();
             (
@@ -677,6 +695,7 @@ impl ToolManagerBuilder {
             loading_status_sender,
             new_tool_specs,
             has_new_stuff,
+            is_interactive: interactive,
             mcp_load_record: load_record,
             disabled_servers: disabled_servers_display,
             ..Default::default()

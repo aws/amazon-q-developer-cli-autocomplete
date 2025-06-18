@@ -164,6 +164,9 @@ pub struct ChatArgs {
     /// '--trust-tools=fs_read,fs_write', trust no tools: '--trust-tools='
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
+    /// Whether the command should run without expecting user input
+    #[arg(long)]
+    pub non_interactive: bool,
 }
 
 impl ChatArgs {
@@ -248,7 +251,7 @@ impl ChatArgs {
             .prompt_list_sender(prompt_response_sender)
             .prompt_list_receiver(prompt_request_receiver)
             .conversation_id(&conversation_id)
-            .build(telemetry, tool_manager_output)
+            .build(telemetry, tool_manager_output, !self.non_interactive)
             .await?;
         let tool_config = tool_manager.load_tools(database, &mut output).await?;
         let mut tool_permissions = ToolPermissions::new(tool_config.len());
@@ -580,7 +583,7 @@ impl ChatSession {
             ChatState::HandleResponseStream(response) => tokio::select! {
                 res = self.handle_response(ctx, database, telemetry, response) => res,
                 Ok(_) = ctrl_c_stream => {
-                    self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None, None).await;
+                    self.send_chat_telemetry(database, telemetry, None, TelemetryResult::Cancelled, None, None, None).await;
                     Err(ChatError::Interrupted { tool_uses: None })
                 }
             },
@@ -598,7 +601,7 @@ impl ChatSession {
         // We encountered an error. Handle it.
         error!(?err, "An error occurred processing the current state");
         let (reason, reason_desc) = get_error_reason(&err);
-        self.send_error_telemetry(database, telemetry, reason, Some(reason_desc))
+        self.send_error_telemetry(database, telemetry, reason, Some(reason_desc), err.status_code())
             .await;
 
         if self.spinner.is_some() {
@@ -640,7 +643,7 @@ impl ChatSession {
             ChatError::Client(err) => match err {
                 // Errors from attempting to send too large of a conversation history. In
                 // this case, attempt to automatically compact the history for the user.
-                ApiClientError::ContextWindowOverflow => {
+                ApiClientError::ContextWindowOverflow { .. } => {
                     if !self.conversation.can_create_summary_request(ctx).await? {
                         execute!(
                             self.output,
@@ -671,8 +674,8 @@ impl ChatSession {
                         Report::from(err),
                     )
                 },
-                ApiClientError::QuotaBreach(msg) => (msg, Report::from(err)),
-                ApiClientError::ModelOverloadedError { request_id } => {
+                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err)),
+                ApiClientError::ModelOverloadedError { request_id, .. } => {
                     let err = format!(
                         "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again.{}\n\n",
                         match request_id {
@@ -683,7 +686,7 @@ impl ChatSession {
                     self.conversation.append_transcript(err.clone());
                     ("Amazon Q is having trouble responding right now", eyre!(err))
                 },
-                ApiClientError::MonthlyLimitReached => {
+                ApiClientError::MonthlyLimitReached { .. } => {
                     let subscription_status = get_subscription_status(database).await;
                     if subscription_status.is_err() {
                         execute!(
@@ -958,8 +961,8 @@ impl ChatSession {
         // retry except with less context included.
         let response = match response {
             Ok(res) => res,
-            Err(e) => {
-                let (reason, reason_desc) = get_error_reason(&e);
+            Err(err) => {
+                let (reason, reason_desc) = get_error_reason(&err);
                 self.send_chat_telemetry(
                     database,
                     telemetry,
@@ -967,11 +970,11 @@ impl ChatSession {
                     TelemetryResult::Failed,
                     Some(reason),
                     Some(reason_desc),
-                    e.status_code(),
+                    err.status_code(),
                 )
                 .await;
-                match e {
-                    crate::api_client::ApiClientError::ContextWindowOverflow => {
+                match err {
+                    ApiClientError::ContextWindowOverflow { .. } => {
                         self.conversation.clear(true);
 
                         self.spinner.take();
@@ -990,7 +993,7 @@ impl ChatSession {
                             skip_printing_tools: true,
                         });
                     },
-                    e => return Err(e.into()),
+                    err => return Err(err.into()),
                 }
             },
         };
@@ -2014,6 +2017,7 @@ impl ChatSession {
                 result,
                 reason,
                 reason_desc,
+                status_code,
                 self.conversation.model.clone(),
             )
             .await

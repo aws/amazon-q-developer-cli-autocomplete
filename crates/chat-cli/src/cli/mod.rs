@@ -364,6 +364,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })),
             verbose: 2,
             help_all: false,
@@ -402,6 +403,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -417,6 +419,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -432,6 +435,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -447,6 +451,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
         assert_parse!(
@@ -458,6 +463,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -473,6 +479,7 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -488,6 +495,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["".to_string()]),
+                non_interactive: false
             })
         );
     }
@@ -503,6 +511,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["fs_read".to_string(), "fs_write".to_string()]),
+                non_interactive: false
             })
         );
     }
