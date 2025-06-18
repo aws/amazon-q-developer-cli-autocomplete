@@ -115,6 +115,7 @@ impl ApiClientError {
             ApiClientError::AuthError(_) => None,
             ApiClientError::ModelOverloadedError { status_code, .. } => *status_code,
             ApiClientError::MonthlyLimitReached { status_code } => *status_code,
+            ApiClientError::Credentials(_e) => None
         }
     }
 }

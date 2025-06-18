@@ -108,7 +108,7 @@ impl StreamingClient {
     }
     
     // Add SigV4 client creation method
-    async fn new_qdeveloper_client(
+    pub async fn new_qdeveloper_client(
         database: &Database,
         endpoint: &Endpoint,
     ) -> Result<Self, ApiClientError> {
@@ -238,6 +238,7 @@ impl StreamingClient {
                 match response {
                     Ok(resp) => Ok(SendMessageOutput::QDeveloper(resp)),
                     Err(e) => {
+                        let status_code = e.raw_response().map(|res| res.status().as_u16());
                         let is_quota_breach = e.raw_response().is_some_and(|resp| resp.status().as_u16() == 429);
                         let is_context_window_overflow = e.as_service_error().is_some_and(|err| {
                             matches!(err, err if err.meta().code() == Some("ValidationException")
@@ -245,9 +246,12 @@ impl StreamingClient {
                         });
 
                         if is_quota_breach {
-                            Err(ApiClientError::QuotaBreach("quota has reached its limit"))
+                            Err(ApiClientError::QuotaBreach {
+                                message: "quota has reached its limit",
+                                status_code,
+                            })
                         } else if is_context_window_overflow {
-                            Err(ApiClientError::ContextWindowOverflow)
+                            Err(ApiClientError::ContextWindowOverflow { status_code })
                         } else {
                             Err(e.into())
                         }
