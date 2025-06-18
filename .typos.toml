@@ -2,3 +2,4 @@
 
 [default.extend-words]
 mmaped = "mmaped"
+caf = "caf" # used in chat tools test

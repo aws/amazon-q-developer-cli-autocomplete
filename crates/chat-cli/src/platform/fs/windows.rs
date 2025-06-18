@@ -36,11 +36,15 @@ pub(super) fn append(a: impl AsRef<Path>, b: impl AsRef<Path>) -> PathBuf {
         let b_normal_components: Vec<_> = cleaned_b.components().collect();
 
         if b_normal_components.len() >= a_normal_components.len() {
-            // Check if the beginning of b matches a
+            // Check if the beginning of b matches a (case-insensitive on Windows)
             let matches = a_normal_components
                 .iter()
                 .zip(b_normal_components.iter())
-                .all(|(a_comp, b_comp)| a_comp == b_comp);
+                .all(|(a_comp, b_comp)| {
+                    // Case-insensitive comparison for Windows
+                    a_comp.as_os_str().to_string_lossy().to_lowercase()
+                        == b_comp.as_os_str().to_string_lossy().to_lowercase()
+                });
 
             if matches {
                 // Create a new path with a's components removed from the beginning of b

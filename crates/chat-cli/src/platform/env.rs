@@ -135,11 +135,6 @@ impl Env {
         }
     }
 
-    pub fn in_cloudshell(&self) -> bool {
-        self.get("AWS_EXECUTION_ENV")
-            .is_ok_and(|v| v.trim().eq_ignore_ascii_case("cloudshell"))
-    }
-
     pub fn in_ssh(&self) -> bool {
         self.get("SSH_CLIENT").is_ok() || self.get("SSH_CONNECTION").is_ok() || self.get("SSH_TTY").is_ok()
     }
@@ -193,16 +188,10 @@ mod tests {
     #[test]
     fn test_in_envs() {
         let env = Env::from_slice(&[]);
-        assert!(!env.in_cloudshell());
         assert!(!env.in_ssh());
 
-        let env = Env::from_slice(&[("AWS_EXECUTION_ENV", "CloudShell"), ("SSH_CLIENT", "1")]);
-        assert!(env.in_cloudshell());
+        let env = Env::from_slice(&[("SSH_CLIENT", "1")]);
         assert!(env.in_ssh());
-
-        let env = Env::from_slice(&[("AWS_EXECUTION_ENV", "CLOUDSHELL\n")]);
-        assert!(env.in_cloudshell());
-        assert!(!env.in_ssh());
 
         let env = Env::from_slice(&[("APPIMAGE", "/tmp/.mount-asdf/usr")]);
         assert!(env.in_appimage());

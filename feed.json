@@ -12,49 +12,101 @@
     },
     {
       "type": "release",
+      "date": "2025-06-17",
+      "version": "1.12.1",
+      "title": "Version 1.12.1",
+      "changes": [
+        {
+          "type": "changed",
+          "description": "The default `q chat` model to Sonnet 4 for users in the IAD region - [#219](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/219)"
+        },
+        {
+          "type": "added",
+          "description": "Support for passing arguments to MCP server configuration in the CLI - [#262](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/262)"
+        },
+        {
+          "type": "added",
+          "description": "Support for disabling MCP servers with `disabled: true` - [#257](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/257)"
+        },
+        {
+          "type": "added",
+          "description": "Instructions on using `/prompts` in `q chat` - [#208](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/208)"
+        },
+        {
+          "type": "fixed",
+          "description": "Validation errors with `/compact` in `q chat` - [#224](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/224)"
+        },
+        {
+          "type": "fixed",
+          "description": "Issues resolving relative paths with `fs_write` in `q chat` - [#256](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/256)"
+        }
+      ]
+    },
+    {
+      "type": "release",
+      "date": "2025-06-11",
+      "version": "1.12.0",
+      "title": "Version 1.12.0",
+      "changes": [
+        {
+          "type": "added",
+          "description": "Support for upgrading to a pro subscription with `/subscribe` in `q chat` - [#143](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/143)"
+        },
+        {
+          "type": "fixed",
+          "description": "`q chat` failing to launch in some Linux installations - [#169](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/169)"
+        }
+      ]
+    },
+    {
+      "type": "release",
+      "date": "2025-06-04",
+      "version": "1.11.0",
+      "title": "Version 1.11.0",
+      "changes": [
+        {
+          "type": "added",
+          "description": "Model selection and Sonnet v4 support with `/model` in `q chat` - [#157](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/157)"
+        },
+        {
+          "type": "fixed",
+          "description": "Formatting issues with the `fs_read` tool in `q chat` - [#122](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/122)"
+        },
+        {
+          "type": "fixed",
+          "description": "Various issues in `q chat`"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-05-21",
       "version": "1.10.2",
       "title": "Version 1.10.2",
       "changes": [
+        {
+          "type": "added",
+          "description": "Server load timeout for no interactive mode - [#1851](https://github.com/aws/amazon-q-developer-cli/pull/1851)"
+        },
+        {
+          "type": "added",
+          "description": "`chat.editMode` to tips - [#1900](https://github.com/aws/amazon-q-developer-cli/pull/1900)"
+        },
         {
           "type": "fixed",
           "description": "Unqualified tools from being included in the tools schema - [#84](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/84)"
         },
         {
           "type": "fixed",
-          "description": "Update stalled stream protection to 12s - [#75](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/75)"
-        },
-        {
-          "type": "fixed",
-          "description": "Token refresh - [#1920](https://github.com/aws/amazon-q-developer-cli/pull/1920)"
-        },
-        {
-          "type": "fixed",
-          "description": "An issue where early error from an mcp server will cause loading status to be terminated prematurely - [#1919](https://github.com/aws/amazon-q-developer-cli/pull/1919)"
-        },
-        {
-          "type": "fixed",
-          "description": "Readme in dashboard app - [#1868](https://github.com/aws/amazon-q-developer-cli/pull/1868)"
-        },
-        {
-          "type": "added",
-          "description": "chat.editMode to tips - [#1900](https://github.com/aws/amazon-q-developer-cli/pull/1900)"
-        },
-        {
-          "type": "added",
-          "description": "Multi platform process kill - [#1875](https://github.com/aws/amazon-q-developer-cli/pull/1875)"
-        },
-        {
-          "type": "added",
-          "description": "Server load timeout for no interactive mode - [#1851](https://github.com/aws/amazon-q-developer-cli/pull/1851)"
+          "description": "An issue where an early error from an mcp server will cause loading status to be terminated prematurely - [#1919](https://github.com/aws/amazon-q-developer-cli/pull/1919)"
         },
         {
           "type": "fixed",
           "description": "Tools and prompts not being sorted - [#1809](https://github.com/aws/amazon-q-developer-cli/pull/1809)"
         },
         {
-          "type": "added",
-          "description": "Semantic search crate to Q CLI - [#1860](https://github.com/aws/amazon-q-developer-cli/pull/1860)"
+          "type": "fixed",
+          "description": "Various issues with `q chat`"
         }
       ]
     },
@@ -274,7 +326,7 @@
         },
         {
           "type": "added",
-          "description": "An option `--no-interactive` to invoke `q chat` in a non-interactive mode - [#878](https://github.com/aws/amazon-q-developer-cli/pull/878)"
+          "description": "An option `--non-interactive` to invoke `q chat` headlessly - [#878](https://github.com/aws/amazon-q-developer-cli/pull/878)"
         },
         {
           "type": "added",

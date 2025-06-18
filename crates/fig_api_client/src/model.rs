@@ -646,6 +646,7 @@ pub struct UserInputMessage {
     pub user_input_message_context: Option<UserInputMessageContext>,
     pub user_intent: Option<UserIntent>,
     pub images: Option<Vec<ImageBlock>>,
+    pub model_id: Option<String>,
 }
 
 impl From<UserInputMessage> for amzn_codewhisperer_streaming_client::types::UserInputMessage {
@@ -655,6 +656,7 @@ impl From<UserInputMessage> for amzn_codewhisperer_streaming_client::types::User
             .set_images(value.images.map(|images| images.into_iter().map(Into::into).collect()))
             .set_user_input_message_context(value.user_input_message_context.map(Into::into))
             .set_user_intent(value.user_intent.map(Into::into))
+            .set_model_id(value.model_id)
             .origin(amzn_codewhisperer_streaming_client::types::Origin::Cli)
             .build()
             .expect("Failed to build UserInputMessage")
@@ -668,6 +670,7 @@ impl From<UserInputMessage> for amzn_qdeveloper_streaming_client::types::UserInp
             .set_images(value.images.map(|images| images.into_iter().map(Into::into).collect()))
             .set_user_input_message_context(value.user_input_message_context.map(Into::into))
             .set_user_intent(value.user_intent.map(Into::into))
+            .set_model_id(value.model_id)
             .origin(amzn_qdeveloper_streaming_client::types::Origin::Cli)
             .build()
             .expect("Failed to build UserInputMessage")
@@ -853,6 +856,7 @@ mod tests {
                 })]),
             }),
             user_intent: Some(UserIntent::ApplyCommonBestPractices),
+            model_id: Some("model".to_owned()),
         };
 
         let codewhisper_input =
@@ -866,6 +870,7 @@ mod tests {
             user_input_message_context: None,
             user_intent: None,
             images: None,
+            model_id: Some("model".to_owned()),
         };
 
         let codewhisper_minimal =

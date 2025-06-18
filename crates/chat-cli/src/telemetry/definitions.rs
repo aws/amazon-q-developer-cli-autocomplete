@@ -25,10 +25,13 @@ mod tests {
             value: None,
             credential_start_url: Some("https://example.com".to_owned().into()),
             sso_region: Some("us-east-1".to_owned().into()),
-            codewhispererterminal_in_cloudshell: Some(false.into()),
+            codewhispererterminal_in_cloudshell: None,
             codewhispererterminal_utterance_id: Some("message_id".to_owned().into()),
             result: crate::telemetry::definitions::types::Result::new("Succeeded".to_string()),
             reason: None,
+            reason_desc: None,
+            status_code: None,
+            codewhispererterminal_model: None,
         });
 
         let s = serde_json::to_string_pretty(&metric_datum_init).unwrap();

@@ -4,7 +4,6 @@ use std::sync::{
 };
 
 use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
-use amzn_qdeveloper_streaming_client::Client as QDeveloperStreamingClient;
 use aws_types::request_id::RequestId;
 use tracing::{
     debug,
@@ -13,7 +12,6 @@ use tracing::{
 
 use super::shared::{
     bearer_sdk_config,
-    sigv4_sdk_config,
     stalled_stream_protection_config,
 };
 use crate::api_client::interceptor::opt_out::OptOutInterceptor;
@@ -42,14 +40,12 @@ mod inner {
     };
 
     use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
-    use amzn_qdeveloper_streaming_client::Client as QDeveloperStreamingClient;
 
     use crate::api_client::model::ChatResponseStream;
 
     #[derive(Clone, Debug)]
     pub enum Inner {
         Codewhisperer(CodewhispererStreamingClient),
-        QDeveloper(QDeveloperStreamingClient),
         Mock(Arc<Mutex<std::vec::IntoIter<Vec<ChatResponseStream>>>>),
     }
 }
@@ -62,15 +58,7 @@ pub struct StreamingClient {
 
 impl StreamingClient {
     pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
-        Ok(
-            if crate::util::system_info::in_cloudshell()
-                || std::env::var("Q_USE_SENDMESSAGE").is_ok_and(|v| !v.is_empty())
-            {
-                Self::new_qdeveloper_client(database, &Endpoint::load_q(database)).await?
-            } else {
-                Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await?
-            },
-        )
+        Self::new_codewhisperer_client(database, &Endpoint::load_codewhisperer(database)).await
     }
 
     pub fn mock(events: Vec<Vec<ChatResponseStream>>) -> Self {
@@ -108,37 +96,17 @@ impl StreamingClient {
         Ok(Self { inner, profile })
     }
 
-    pub async fn new_qdeveloper_client(database: &Database, endpoint: &Endpoint) -> Result<Self, ApiClientError> {
-        let conf_builder: amzn_qdeveloper_streaming_client::config::Builder =
-            (&sigv4_sdk_config(database, endpoint).await?).into();
-        let conf = conf_builder
-            .http_client(crate::aws_common::http_client::client())
-            .interceptor(OptOutInterceptor::new(database))
-            .interceptor(UserAgentOverrideInterceptor::new())
-            .app_name(app_name())
-            .endpoint_url(endpoint.url())
-            .stalled_stream_protection(stalled_stream_protection_config())
-            .build();
-        let client = QDeveloperStreamingClient::from_conf(conf);
-        Ok(Self {
-            inner: inner::Inner::QDeveloper(client),
-            profile: None,
-        })
-    }
-
-    pub async fn send_message(
-        &self,
-        conversation_state: ConversationState,
-    ) -> Result<SendMessageOutput, ApiClientError> {
-        debug!("Sending conversation: {:#?}", conversation_state);
+    pub async fn send_message(&self, conversation: ConversationState) -> Result<SendMessageOutput, ApiClientError> {
+        debug!("Sending conversation: {:#?}", conversation);
         let ConversationState {
             conversation_id,
             user_input_message,
             history,
-        } = conversation_state;
+        } = conversation;
 
         match &self.inner {
             inner::Inner::Codewhisperer(client) => {
+                let model_id_opt: Option<String> = user_input_message.model_id.clone();
                 let conversation_state = amzn_codewhisperer_streaming_client::types::ConversationState::builder()
                     .set_conversation_id(conversation_id)
                     .current_message(
@@ -153,7 +121,8 @@ impl StreamingClient {
                             .transpose()?,
                     )
                     .build()
-                    .expect("building conversation_state should not fail");
+                    .expect("building conversation should not fail");
+
                 let response = client
                     .generate_assistant_response()
                     .conversation_state(conversation_state)
@@ -164,42 +133,52 @@ impl StreamingClient {
                 match response {
                     Ok(resp) => Ok(SendMessageOutput::Codewhisperer(resp)),
                     Err(e) => {
-                        let is_quota_breach = e.raw_response().is_some_and(|resp| resp.status().as_u16() == 429);
+                        let status_code = e.raw_response().map(|res| res.status().as_u16());
+
+                        let is_quota_breach = status_code.is_some_and(|status| status == 429);
                         let is_context_window_overflow = e.as_service_error().is_some_and(|err| {
                             matches!(err, err if err.meta().code() == Some("ValidationException")
                                 && err.meta().message() == Some("Input is too long."))
                         });
 
+                        let is_model_unavailable = model_id_opt.is_some()
+                            && status_code.is_some_and(|status| status == 500)
+                            && e.as_service_error().is_some_and(|err| {
+                                err.meta().message()
+                                == Some("Encountered unexpectedly high load when processing the request, please try again.")
+                            });
+                        let is_monthly_limit_err = e
+                            .raw_response()
+                            .and_then(|resp| resp.body().bytes())
+                            .and_then(|bytes| match String::from_utf8(bytes.to_vec()) {
+                                Ok(s) => Some(s.contains("MONTHLY_REQUEST_COUNT")),
+                                Err(_) => None,
+                            })
+                            .unwrap_or(false);
+
                         if is_quota_breach {
-                            Err(ApiClientError::QuotaBreach("quota has reached its limit"))
+                            Err(ApiClientError::QuotaBreach {
+                                message: "quota has reached its limit",
+                                status_code,
+                            })
                         } else if is_context_window_overflow {
-                            Err(ApiClientError::ContextWindowOverflow)
+                            Err(ApiClientError::ContextWindowOverflow { status_code })
+                        } else if is_model_unavailable {
+                            let request_id = e
+                                .as_service_error()
+                                .and_then(|err| err.meta().request_id())
+                                .map(|s| s.to_string());
+                            Err(ApiClientError::ModelOverloadedError {
+                                request_id,
+                                status_code,
+                            })
+                        } else if is_monthly_limit_err {
+                            Err(ApiClientError::MonthlyLimitReached { status_code })
                         } else {
                             Err(e.into())
                         }
                     },
                 }
-            },
-            inner::Inner::QDeveloper(client) => {
-                let conversation_state_builder = amzn_qdeveloper_streaming_client::types::ConversationState::builder()
-                    .set_conversation_id(conversation_id)
-                    .current_message(amzn_qdeveloper_streaming_client::types::ChatMessage::UserInputMessage(
-                        user_input_message.into(),
-                    ))
-                    .chat_trigger_type(amzn_qdeveloper_streaming_client::types::ChatTriggerType::Manual)
-                    .set_history(
-                        history
-                            .map(|v| v.into_iter().map(|i| i.try_into()).collect::<Result<Vec<_>, _>>())
-                            .transpose()?,
-                    );
-
-                Ok(SendMessageOutput::QDeveloper(
-                    client
-                        .send_message()
-                        .conversation_state(conversation_state_builder.build().expect("fix me"))
-                        .send()
-                        .await?,
-                ))
             },
             inner::Inner::Mock(events) => {
                 let mut new_events = events.lock().unwrap().next().unwrap_or_default().clone();
@@ -215,7 +194,6 @@ pub enum SendMessageOutput {
     Codewhisperer(
         amzn_codewhisperer_streaming_client::operation::generate_assistant_response::GenerateAssistantResponseOutput,
     ),
-    QDeveloper(amzn_qdeveloper_streaming_client::operation::send_message::SendMessageOutput),
     Mock(Vec<ChatResponseStream>),
 }
 
@@ -223,7 +201,6 @@ impl SendMessageOutput {
     pub fn request_id(&self) -> Option<&str> {
         match self {
             SendMessageOutput::Codewhisperer(output) => output.request_id(),
-            SendMessageOutput::QDeveloper(output) => output.request_id(),
             SendMessageOutput::Mock(_) => None,
         }
     }
@@ -235,7 +212,6 @@ impl SendMessageOutput {
                 .recv()
                 .await?
                 .map(|s| s.into())),
-            SendMessageOutput::QDeveloper(output) => Ok(output.send_message_response.recv().await?.map(|s| s.into())),
             SendMessageOutput::Mock(vec) => Ok(vec.pop()),
         }
     }
@@ -245,7 +221,6 @@ impl RequestId for SendMessageOutput {
     fn request_id(&self) -> Option<&str> {
         match self {
             SendMessageOutput::Codewhisperer(output) => output.request_id(),
-            SendMessageOutput::QDeveloper(output) => output.request_id(),
             SendMessageOutput::Mock(_) => Some("<mock-request-id>"),
         }
     }
@@ -267,7 +242,6 @@ mod tests {
 
         let _ = StreamingClient::new(&mut database).await;
         let _ = StreamingClient::new_codewhisperer_client(&mut database, &endpoint).await;
-        let _ = StreamingClient::new_qdeveloper_client(&database, &endpoint).await;
     }
 
     #[tokio::test]
@@ -291,6 +265,7 @@ mod tests {
                     content: "Hello".into(),
                     user_input_message_context: None,
                     user_intent: None,
+                    model_id: Some("model".to_owned()),
                 },
                 history: None,
             })
@@ -317,6 +292,7 @@ mod tests {
                     content: "How about rustc?".into(),
                     user_input_message_context: None,
                     user_intent: None,
+                    model_id: Some("model".to_owned()),
                 },
                 history: Some(vec![
                     ChatMessage::UserInputMessage(UserInputMessage {
@@ -324,6 +300,7 @@ mod tests {
                         content: "What language is the linux kernel written in, and who wrote it?".into(),
                         user_input_message_context: None,
                         user_intent: None,
+                        model_id: None,
                     }),
                     ChatMessage::AssistantResponseMessage(AssistantResponseMessage {
                         content: "It is written in C by Linus Torvalds.".into(),

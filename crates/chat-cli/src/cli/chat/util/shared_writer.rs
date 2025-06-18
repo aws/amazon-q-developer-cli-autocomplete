@@ -30,10 +30,6 @@ impl SharedWriter {
     pub fn stderr() -> Self {
         Self::new(io::stderr())
     }
-
-    pub fn null() -> Self {
-        Self::new(NullWriter {})
-    }
 }
 
 impl std::fmt::Debug for SharedWriter {
@@ -53,7 +49,7 @@ impl Write for SharedWriter {
 }
 
 #[derive(Debug, Clone)]
-pub struct NullWriter {}
+pub struct NullWriter;
 
 impl Write for NullWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

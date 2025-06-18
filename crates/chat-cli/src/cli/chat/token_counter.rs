@@ -1,15 +1,15 @@
 use std::ops::Deref;
 
-use super::conversation_state::{
-    BackendConversationState,
-    ConversationSize,
-};
 use super::message::{
     AssistantMessage,
     ToolUseResult,
     ToolUseResultBlock,
     UserMessage,
     UserMessageContent,
+};
+use crate::cli::chat::conversation::{
+    BackendConversationState,
+    ConversationSize,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +75,7 @@ impl std::fmt::Display for TokenCount {
 pub struct TokenCounter;
 
 impl TokenCounter {
-    pub const TOKEN_TO_CHAR_RATIO: usize = 3;
+    pub const TOKEN_TO_CHAR_RATIO: usize = 4;
 
     /// Estimates the number of tokens in the input content.
     /// Currently uses a simple heuristic: content length / TOKEN_TO_CHAR_RATIO

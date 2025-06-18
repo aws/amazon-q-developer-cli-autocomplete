@@ -286,6 +286,7 @@ mod tests {
                     content: "Hello".into(),
                     user_input_message_context: None,
                     user_intent: None,
+                    model_id: Some("model".to_owned()),
                 },
                 history: None,
             })
@@ -311,6 +312,7 @@ mod tests {
                     content: "How about rustc?".into(),
                     user_input_message_context: None,
                     user_intent: None,
+                    model_id: Some("model".to_owned()),
                 },
                 history: Some(vec![
                     ChatMessage::UserInputMessage(UserInputMessage {
@@ -318,6 +320,7 @@ mod tests {
                         content: "What language is the linux kernel written in, and who wrote it?".into(),
                         user_input_message_context: None,
                         user_intent: None,
+                        model_id: Some("model".to_owned()),
                     }),
                     ChatMessage::AssistantResponseMessage(AssistantResponseMessage {
                         content: "It is written in C by Linus Torvalds.".into(),

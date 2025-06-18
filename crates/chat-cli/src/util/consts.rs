@@ -1,6 +1,3 @@
-#[cfg(windows)]
-pub const APP_PROCESS_NAME: &str = "q_desktop.exe";
-
 /// TODO(brandonskiser): revert back to "qchat" for prompting login after standalone releases.
 pub const CLI_BINARY_NAME: &str = "q";
 pub const CHAT_BINARY_NAME: &str = "qchat";
@@ -10,6 +7,8 @@ pub const PRODUCT_NAME: &str = "Amazon Q";
 pub const GITHUB_REPO_NAME: &str = "aws/amazon-q-developer-cli";
 
 pub const MCP_SERVER_TOOL_DELIMITER: &str = "/";
+
+pub const GOV_REGIONS: &[&str] = &["us-gov-east-1", "us-gov-west-1"];
 
 /// Build time env vars
 pub mod build {

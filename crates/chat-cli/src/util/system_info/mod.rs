@@ -175,13 +175,7 @@ pub fn in_wsl() -> bool {
 /// Is the calling binary running on a remote instance
 pub fn is_remote() -> bool {
     // TODO(chay): Add detection for inside docker container
-    in_ssh() || in_cloudshell() || in_wsl() || std::env::var_os("Q_FAKE_IS_REMOTE").is_some()
-}
-
-/// This true if the env var `AWS_EXECUTION_ENV=CloudShell`
-pub fn in_cloudshell() -> bool {
-    static IN_CLOUDSHELL: OnceLock<bool> = OnceLock::new();
-    *IN_CLOUDSHELL.get_or_init(|| Env::new().in_cloudshell())
+    in_ssh() || in_wsl() || std::env::var_os("Q_FAKE_IS_REMOTE").is_some()
 }
 
 pub fn in_codespaces() -> bool {

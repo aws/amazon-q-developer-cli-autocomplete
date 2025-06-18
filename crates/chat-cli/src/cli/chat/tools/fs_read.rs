@@ -6,6 +6,7 @@ use crossterm::queue;
 use crossterm::style::{
     self,
     Color,
+    Stylize,
 };
 use eyre::{
     Result,
@@ -38,12 +39,16 @@ use crate::cli::agent::{
     PermissionCandidate,
     PermissionEvalResult,
 };
+use crate::cli::chat::CONTINUATION_LINE;
 use crate::cli::chat::util::images::{
     handle_images_from_paths,
     is_supported_image_type,
     pre_process,
 };
 use crate::platform::Context;
+
+const CHECKMARK: &str = "✔";
+const CROSS: &str = "✘";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "mode")]
@@ -199,7 +204,7 @@ impl FsImage {
                 if !is_supported_image_type(&processed_path) {
                     bail!("'{}' is not a supported image type", &processed_path);
                 }
-                let is_file = ctx.fs().symlink_metadata(&processed_path).await?.is_file();
+                let is_file = ctx.fs.symlink_metadata(&processed_path).await?.is_file();
                 if !is_file {
                     bail!("'{}' is not a file", &processed_path);
                 }
@@ -247,7 +252,7 @@ impl FsLine {
         if !path.exists() {
             bail!("'{}' does not exist", self.path);
         }
-        let is_file = ctx.fs().symlink_metadata(&path).await?.is_file();
+        let is_file = ctx.fs.symlink_metadata(&path).await?.is_file();
         if !is_file {
             bail!("'{}' is not a file", self.path);
         }
@@ -256,7 +261,9 @@ impl FsLine {
 
     pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let line_count = ctx.fs().read_to_string(&path).await?.lines().count();
+        let file_bytes = ctx.fs.read(&path).await?;
+        let file_content = String::from_utf8_lossy(&file_bytes);
+        let line_count = file_content.lines().count();
         queue!(
             updates,
             style::Print("Reading file: "),
@@ -295,8 +302,9 @@ impl FsLine {
     pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
         debug!(?path, "Reading");
-        let file = ctx.fs().read_to_string(&path).await?;
-        let line_count = file.lines().count();
+        let file_bytes = ctx.fs.read(&path).await?;
+        let file_content = String::from_utf8_lossy(&file_bytes);
+        let line_count = file_content.lines().count();
         let (start, end) = (
             convert_negative_index(line_count, self.start_line()),
             convert_negative_index(line_count, self.end_line()),
@@ -315,7 +323,7 @@ impl FsLine {
         }
 
         // The range should be inclusive on both ends.
-        let file_contents = file
+        let file_contents = file_content
             .lines()
             .skip(start)
             .take(end - start + 1)
@@ -359,11 +367,11 @@ impl FsSearch {
 
     pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let relative_path = format_path(ctx.env().current_dir()?, &path);
+        let relative_path = format_path(ctx.env.current_dir()?, &path);
         if !path.exists() {
             bail!("File not found: {}", relative_path);
         }
-        if !ctx.fs().symlink_metadata(path).await?.is_file() {
+        if !ctx.fs.symlink_metadata(path).await?.is_file() {
             bail!("Path is not a file: {}", relative_path);
         }
         if self.pattern.is_empty() {
@@ -383,6 +391,7 @@ impl FsSearch {
             style::SetForegroundColor(Color::Green),
             style::Print(&self.pattern.to_lowercase()),
             style::ResetColor,
+            style::Print("\n"),
         )?;
         Ok(())
     }
@@ -390,9 +399,9 @@ impl FsSearch {
     pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
         let file_path = sanitize_path_tool_arg(ctx, &self.path);
         let pattern = &self.pattern;
-        let relative_path = format_path(ctx.env().current_dir()?, &file_path);
 
-        let file_content = ctx.fs().read_to_string(&file_path).await?;
+        let file_bytes = ctx.fs.read(&file_path).await?;
+        let file_content = String::from_utf8_lossy(&file_bytes);
         let lines: Vec<&str> = LinesWithEndings::from(&file_content).collect();
 
         let mut results = Vec::new();
@@ -422,16 +431,35 @@ impl FsSearch {
                 });
             }
         }
+        let match_text = if total_matches == 1 {
+            "1 match".to_string()
+        } else {
+            format!("{} matches", total_matches)
+        };
+
+        let color = if total_matches == 0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+
+        let result = if total_matches == 0 {
+            CROSS.yellow()
+        } else {
+            CHECKMARK.green()
+        };
 
         queue!(
             updates,
             style::SetForegroundColor(Color::Yellow),
             style::ResetColor,
-            style::Print(format!(
-                "Found {} matches for pattern '{}' in {}\n",
-                total_matches, pattern, relative_path
-            )),
+            style::Print(CONTINUATION_LINE),
             style::Print("\n"),
+            style::Print(" "),
+            style::Print(result),
+            style::Print(" Found: "),
+            style::SetForegroundColor(color),
+            style::Print(match_text),
             style::ResetColor,
         )?;
 
@@ -457,11 +485,11 @@ impl FsDirectory {
 
     pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
         let path = sanitize_path_tool_arg(ctx, &self.path);
-        let relative_path = format_path(ctx.env().current_dir()?, &path);
+        let relative_path = format_path(ctx.env.current_dir()?, &path);
         if !path.exists() {
             bail!("Directory not found: {}", relative_path);
         }
-        if !ctx.fs().symlink_metadata(path).await?.is_dir() {
+        if !ctx.fs.symlink_metadata(path).await?.is_dir() {
             bail!("Path is not a directory: {}", relative_path);
         }
         Ok(())
@@ -494,7 +522,7 @@ impl FsDirectory {
             if depth > max_depth {
                 break;
             }
-            let mut read_dir = ctx.fs().read_dir(path).await?;
+            let mut read_dir = ctx.fs.read_dir(path).await?;
 
             #[cfg(windows)]
             while let Some(ent) = read_dir.next_entry().await? {
@@ -516,10 +544,8 @@ impl FsDirectory {
                     ent.path().to_string_lossy()
                 ));
 
-                if md.is_dir() {
-                    if md.is_dir() {
-                        dir_queue.push_back((ent.path(), depth + 1));
-                    }
+                if md.is_dir() && md.is_dir() {
+                    dir_queue.push_back((ent.path(), depth + 1));
                 }
             }
 
@@ -633,39 +659,12 @@ fn format_mode(mode: u32) -> [char; 9] {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-
-    const TEST_FILE_CONTENTS: &str = "\
-1: Hello world!
-2: This is line 2
-3: asdf
-4: Hello world!
-";
-
-    const TEST_FILE_PATH: &str = "/test_file.txt";
-    const TEST_HIDDEN_FILE_PATH: &str = "/aaaa2/.hidden";
-
-    /// Sets up the following filesystem structure:
-    /// ```text
-    /// test_file.txt
-    /// /home/testuser/
-    /// /aaaa1/
-    ///     /bbbb1/
-    ///         /cccc1/
-    /// /aaaa2/
-    ///     .hidden
-    /// ```
-    async fn setup_test_directory() -> Arc<Context> {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
-        fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
-        fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
-        fs.create_dir_all("/aaaa2").await.unwrap();
-        fs.write(TEST_HIDDEN_FILE_PATH, "this is a hidden file").await.unwrap();
-        ctx
-    }
+    use crate::cli::chat::util::test::{
+        TEST_FILE_CONTENTS,
+        TEST_FILE_PATH,
+        setup_test_directory,
+    };
 
     #[test]
     fn test_negative_index_conversion() {
@@ -853,5 +852,248 @@ mod tests {
                 FsSearch::CONTEXT_LINE_PREFIX
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_non_utf8_binary_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let binary_data = vec![0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8];
+        let binary_file_path = "/binary_test.dat";
+        ctx.fs.write(binary_file_path, &binary_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": binary_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains('�'), "Binary data should contain replacement characters");
+            assert_eq!(text.chars().count(), 8, "Should have 8 replacement characters");
+            assert!(
+                text.chars().all(|c| c == '�'),
+                "All characters should be replacement characters"
+            );
+        } else {
+            panic!("expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_latin1_encoded_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let latin1_data = vec![99, 97, 102, 233]; // "café" in Latin-1
+        let latin1_file_path = "/latin1_test.txt";
+        ctx.fs.write(latin1_file_path, &latin1_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": latin1_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Latin-1 byte 233 (é) is invalid UTF-8, so it becomes a replacement character
+            assert!(text.starts_with("caf"), "Should start with 'caf'");
+            assert!(
+                text.contains('�'),
+                "Should contain replacement character for invalid UTF-8"
+            );
+        } else {
+            panic!("expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_search_non_utf8_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let mut mixed_data = Vec::new();
+        mixed_data.extend_from_slice(b"Hello world\n");
+        mixed_data.extend_from_slice(&[0xff, 0xfe]); // Invalid UTF-8 bytes
+        mixed_data.extend_from_slice(b"\nGoodbye world\n");
+
+        let mixed_file_path = "/mixed_encoding_test.txt";
+        ctx.fs.write(mixed_file_path, &mixed_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": mixed_file_path,
+            "pattern": "hello"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(matches.len(), 1, "Should find one match for 'hello'");
+            assert_eq!(matches[0].line_number, 1, "Match should be on line 1");
+            assert!(
+                matches[0].context.contains("Hello world"),
+                "Should contain the matched line"
+            );
+        } else {
+            panic!("expected Text output");
+        }
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": mixed_file_path,
+            "pattern": "goodbye"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(matches.len(), 1, "Should find one match for 'goodbye'");
+            assert!(
+                matches[0].context.contains("Goodbye world"),
+                "Should contain the matched line"
+            );
+        } else {
+            panic!("expected Text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_windows1252_encoded_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let mut windows1252_data = Vec::new();
+        windows1252_data.extend_from_slice(b"Text with ");
+        windows1252_data.push(0x93); // Left double quotation mark in Windows-1252
+        windows1252_data.extend_from_slice(b"smart quotes");
+        windows1252_data.push(0x94); // Right double quotation mark in Windows-1252
+
+        let windows1252_file_path = "/windows1252_test.txt";
+        ctx.fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": windows1252_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains("Text with"), "Should contain readable text");
+            assert!(text.contains("smart quotes"), "Should contain readable text");
+            assert!(
+                text.contains('�'),
+                "Should contain replacement characters for invalid UTF-8"
+            );
+        } else {
+            panic!("expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_search_pattern_with_replacement_chars() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let mut data_with_invalid_utf8 = Vec::new();
+        data_with_invalid_utf8.extend_from_slice(b"Line 1: caf");
+        data_with_invalid_utf8.push(0xe9); // Invalid UTF-8 byte (Latin-1 é)
+        data_with_invalid_utf8.extend_from_slice(b"\nLine 2: hello world\n");
+
+        let invalid_utf8_file_path = "/invalid_utf8_search_test.txt";
+        ctx.fs
+            .write(invalid_utf8_file_path, &data_with_invalid_utf8)
+            .await
+            .unwrap();
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": invalid_utf8_file_path,
+            "pattern": "caf"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(matches.len(), 1, "Should find one match for 'caf'");
+            assert_eq!(matches[0].line_number, 1, "Match should be on line 1");
+            assert!(matches[0].context.contains("caf"), "Should contain 'caf'");
+        } else {
+            panic!("expected Text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_empty_file_with_invalid_utf8() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let invalid_only_data = vec![0xff, 0xfe, 0xfd];
+        let invalid_only_file_path = "/invalid_only_test.txt";
+        ctx.fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": invalid_only_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert_eq!(text.chars().count(), 3, "Should have 3 replacement characters");
+            assert!(text.chars().all(|c| c == '�'), "Should be all replacement characters");
+        } else {
+            panic!("expected text output");
+        }
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": invalid_only_file_path,
+            "pattern": "test"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(
+                matches.len(),
+                0,
+                "Should find no matches in file with only invalid UTF-8"
+            );
+        } else {
+            panic!("expected Text output");
+        }
     }
 }

@@ -1,4 +1,3 @@
-mod cli_context;
 pub mod consts;
 pub mod directories;
 pub mod open;
@@ -15,7 +14,6 @@ use std::io::{
 };
 
 use anstream::stream::IsTerminal;
-pub use cli_context::CliContext;
 pub use consts::*;
 use dialoguer::Select;
 use dialoguer::theme::ColorfulTheme;

@@ -37,13 +37,13 @@ pub struct McpServerConfig {
 
 impl McpServerConfig {
     pub async fn load_from_file(ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let contents = ctx.fs().read_to_string(path.as_ref()).await?;
+        let contents = ctx.fs.read_to_string(path.as_ref()).await?;
         Ok(serde_json::from_str(&contents)?)
     }
 
     pub async fn save_to_file(&self, ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        ctx.fs().write(path.as_ref(), json).await?;
+        ctx.fs.write(path.as_ref(), json).await?;
         Ok(())
     }
 
@@ -200,7 +200,7 @@ impl AgentCollection {
             .ok_or(eyre::eyre!("Persona path associated not found"))?;
         let contents =
             serde_json::to_string_pretty(agent).map_err(|e| eyre::eyre!("Error serializing persona: {:?}", e))?;
-        ctx.fs()
+        ctx.fs
             .write(path, &contents)
             .await
             .map_err(|e| eyre::eyre!("Error writing persona to file: {:?}", e))?;
@@ -227,9 +227,9 @@ impl AgentCollection {
             .map_err(|e| eyre::eyre!("Failed to serialize profile configuration: {}", e))?;
 
         if let Some(parent) = persona_path.parent() {
-            ctx.fs().create_dir_all(parent).await?;
+            ctx.fs.create_dir_all(parent).await?;
         }
-        ctx.fs().write(&persona_path, contents).await?;
+        ctx.fs.write(&persona_path, contents).await?;
 
         self.agents.insert(name.to_string(), agent);
 
@@ -247,7 +247,7 @@ impl AgentCollection {
             .ok_or(eyre::eyre!("Persona '{name}' does not exist"))?;
         match to_delete.path.as_ref() {
             Some(path) if path.exists() => {
-                ctx.fs().remove_file(path).await?;
+                ctx.fs.remove_file(path).await?;
             },
             _ => eyre::bail!("Persona {name} does not have an associated path"),
         }
@@ -276,7 +276,7 @@ impl AgentCollection {
                 Ok(files) => files,
                 Err(e) => {
                     if matches!(e.kind(), io::ErrorKind::NotFound) {
-                        if let Err(e) = ctx.fs().create_dir_all(&path).await {
+                        if let Err(e) = ctx.fs.create_dir_all(&path).await {
                             error!("Error creating global persona dir: {:?}", e);
                         }
                     }

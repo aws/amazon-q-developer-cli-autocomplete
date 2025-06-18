@@ -246,13 +246,6 @@ pub enum LicenseType {
 }
 
 pub async fn profile(database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
-    if !crate::util::system_info::in_cloudshell() && !crate::auth::is_logged_in(database).await {
-        bail!(
-            "You are not logged in, please log in with {}",
-            format!("{CLI_BINARY_NAME} login").bold()
-        );
-    }
-
     if let Ok(Some(token)) = BuilderIdToken::load(database).await {
         if matches!(token.token_type(), TokenType::BuilderId) {
             bail!("This command is only available for Pro users");
