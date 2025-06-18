@@ -638,11 +638,7 @@ impl ChatSession {
                     _ => (),
                 }
 
-<<<<<<< HEAD
                 ("Tool use was interrupted", Report::from(err))
-=======
-                ("Tool use was interupted", Report::from(err))
->>>>>>> origin/main
             },
             ChatError::Client(err) => match err {
                 // Errors from attempting to send too large of a conversation history. In
@@ -2197,10 +2193,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_flow() {
-<<<<<<< HEAD
-=======
-        // let _ = tracing_subscriber::fmt::try_init();
->>>>>>> origin/main
         let mut ctx = Context::new();
         let test_client = create_stream(serde_json::json!([
             [
