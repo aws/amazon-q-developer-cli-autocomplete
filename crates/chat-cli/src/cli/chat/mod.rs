@@ -124,8 +124,8 @@ use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
 use crate::cli::chat::cli::SlashCommand;
 use crate::cli::chat::cli::model::{
-    DEFAULT_MODEL_ID,
     MODEL_OPTIONS,
+    default_model_id,
 };
 use crate::cli::chat::cli::prompts::GetPromptError;
 use crate::database::Database;
@@ -480,19 +480,19 @@ impl ChatSession {
         tool_config: HashMap<String, ToolSpec>,
         tool_permissions: ToolPermissions,
     ) -> Result<Self> {
-        let valid_model_id = match model_id {
-            Some(id) => Some(id),
-            None => database
-                .settings
-                .get_string(Setting::ChatDefaultModel)
-                .and_then(|model_name| {
-                    MODEL_OPTIONS
-                        .iter()
-                        .find(|opt| opt.name == model_name)
-                        .map(|opt| opt.model_id.to_owned())
-                })
-                .or_else(|| Some(DEFAULT_MODEL_ID.to_owned())),
-        };
+        let valid_model_id = model_id
+            .or_else(|| {
+                database
+                    .settings
+                    .get_string(Setting::ChatDefaultModel)
+                    .and_then(|model_name| {
+                        MODEL_OPTIONS
+                            .iter()
+                            .find(|opt| opt.name == model_name)
+                            .map(|opt| opt.model_id.to_owned())
+                    })
+            })
+            .unwrap_or_else(|| default_model_id(database).to_owned());
 
         // Reload prior conversation
         let mut existing_conversation = false;
@@ -519,7 +519,15 @@ impl ChatSession {
                 cs
             },
             false => {
-                ConversationState::new(ctx, conversation_id, tool_config, profile, tool_manager, valid_model_id).await
+                ConversationState::new(
+                    ctx,
+                    conversation_id,
+                    tool_config,
+                    profile,
+                    tool_manager,
+                    Some(valid_model_id),
+                )
+                .await
             },
         };
 
