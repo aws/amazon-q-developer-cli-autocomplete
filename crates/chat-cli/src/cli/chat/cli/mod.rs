@@ -25,7 +25,6 @@ use profile::ProfileSubcommand;
 use prompts::PromptsArgs;
 use tools::ToolsArgs;
 
-use crate::cli::issue;
 use crate::cli::chat::cli::subscribe::SubscribeArgs;
 use crate::cli::chat::cli::usage::UsageArgs;
 use crate::cli::chat::{
@@ -33,6 +32,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
+use crate::cli::issue;
 use crate::database::Database;
 use crate::platform::Context;
 use crate::telemetry::TelemetryThread;
@@ -103,7 +103,7 @@ impl SlashCommand {
                 Ok(ChatState::PromptUser {
                     skip_printing_tools: true,
                 })
-            }
+            },
             Self::Prompts(args) => args.execute(session).await,
             Self::Hooks(args) => args.execute(ctx, session).await,
             Self::Usage(args) => args.execute(ctx, session).await,
