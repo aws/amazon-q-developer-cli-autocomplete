@@ -1269,17 +1269,33 @@ impl ChatSession {
             })
         } else {
             // Check for a pending tool approval
+            let tool_denied_without_reason = ["n", "N"].contains(&input);
+
             if let Some(index) = self.pending_tool_index {
                 let is_trust = ["t", "T"].contains(&input);
+                let tool_use = &mut self.tool_uses[index];
                 if ["y", "Y"].contains(&input) || is_trust {
-                    let tool_use = &mut self.tool_uses[index];
-
                     if is_trust {
                         self.tool_permissions.trust_tool(&tool_use.name);
                     }
                     tool_use.accepted = true;
 
                     return Ok(ChatState::ExecuteTools);
+                // Prompt reason if no selected
+                } else if tool_denied_without_reason {
+                    tool_use.accepted = false;
+                    execute!(
+                        self.output,
+                        style::SetForegroundColor(Color::DarkGrey),
+                        style::Print(
+                            "\nPlease provide a reason for denying this tool use, or otherwise continue your conversation:\n\n"
+                        ),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+
+                    return Ok(ChatState::PromptUser {
+                        skip_printing_tools: true,
+                    });
                 }
             } else if !self.pending_prompts.is_empty() {
                 let prompts = self.pending_prompts.drain(0..).collect();
