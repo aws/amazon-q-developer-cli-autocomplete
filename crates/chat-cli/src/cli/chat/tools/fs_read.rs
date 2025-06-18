@@ -548,39 +548,12 @@ fn format_mode(mode: u32) -> [char; 9] {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-
-    const TEST_FILE_CONTENTS: &str = "\
-1: Hello world!
-2: This is line 2
-3: asdf
-4: Hello world!
-";
-
-    const TEST_FILE_PATH: &str = "/test_file.txt";
-    const TEST_HIDDEN_FILE_PATH: &str = "/aaaa2/.hidden";
-
-    /// Sets up the following filesystem structure:
-    /// ```text
-    /// test_file.txt
-    /// /home/testuser/
-    /// /aaaa1/
-    ///     /bbbb1/
-    ///         /cccc1/
-    /// /aaaa2/
-    ///     .hidden
-    /// ```
-    async fn setup_test_directory() -> Arc<Context> {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
-        fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
-        fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
-        fs.create_dir_all("/aaaa2").await.unwrap();
-        fs.write(TEST_HIDDEN_FILE_PATH, "this is a hidden file").await.unwrap();
-        ctx
-    }
+    use crate::cli::chat::util::test::{
+        TEST_FILE_CONTENTS,
+        TEST_FILE_PATH,
+        setup_test_directory,
+    };
 
     #[test]
     fn test_negative_index_conversion() {
@@ -772,13 +745,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_non_utf8_binary_file() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let binary_data = vec![0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8];
         let binary_file_path = "/binary_test.dat";
-        fs.write(binary_file_path, &binary_data).await.unwrap();
+        ctx.fs.write(binary_file_path, &binary_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": binary_file_path,
@@ -804,13 +776,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_latin1_encoded_file() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let latin1_data = vec![99, 97, 102, 233]; // "café" in Latin-1
         let latin1_file_path = "/latin1_test.txt";
-        fs.write(latin1_file_path, &latin1_data).await.unwrap();
+        ctx.fs.write(latin1_file_path, &latin1_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": latin1_file_path,
@@ -836,8 +807,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_non_utf8_file() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let mut mixed_data = Vec::new();
@@ -846,7 +816,7 @@ mod tests {
         mixed_data.extend_from_slice(b"\nGoodbye world\n");
 
         let mixed_file_path = "/mixed_encoding_test.txt";
-        fs.write(mixed_file_path, &mixed_data).await.unwrap();
+        ctx.fs.write(mixed_file_path, &mixed_data).await.unwrap();
 
         let v = serde_json::json!({
             "mode": "Search",
@@ -896,8 +866,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_windows1252_encoded_file() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let mut windows1252_data = Vec::new();
@@ -907,7 +876,7 @@ mod tests {
         windows1252_data.push(0x94); // Right double quotation mark in Windows-1252
 
         let windows1252_file_path = "/windows1252_test.txt";
-        fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
+        ctx.fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": windows1252_file_path,
@@ -933,8 +902,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_pattern_with_replacement_chars() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let mut data_with_invalid_utf8 = Vec::new();
@@ -943,7 +911,10 @@ mod tests {
         data_with_invalid_utf8.extend_from_slice(b"\nLine 2: hello world\n");
 
         let invalid_utf8_file_path = "/invalid_utf8_search_test.txt";
-        fs.write(invalid_utf8_file_path, &data_with_invalid_utf8).await.unwrap();
+        ctx.fs
+            .write(invalid_utf8_file_path, &data_with_invalid_utf8)
+            .await
+            .unwrap();
 
         let v = serde_json::json!({
             "mode": "Search",
@@ -968,13 +939,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_empty_file_with_invalid_utf8() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let invalid_only_data = vec![0xff, 0xfe, 0xfd];
         let invalid_only_file_path = "/invalid_only_test.txt";
-        fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
+        ctx.fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": invalid_only_file_path,

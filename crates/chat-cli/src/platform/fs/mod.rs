@@ -471,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn test_real() {
         let dir = tempfile::tempdir().unwrap();
-        let fs = Fs::new();
+        let fs = Fs::Real;
 
         fs.create_dir(dir.path().join("create_dir")).await.unwrap();
         fs.create_dir_all(dir.path().join("create/dir/all")).await.unwrap();

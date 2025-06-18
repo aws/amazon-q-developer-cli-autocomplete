@@ -394,7 +394,7 @@ pub enum ChatError {
     #[error("interrupted")]
     Interrupted { tool_uses: Option<Vec<QueuedTool>> },
     #[error(
-        "Tool approval required but --no-interactive was specified. Use --trust-all-tools to automatically approve tools."
+        "Tool approval required but --non-interactive was specified. Use --trust-all-tools to automatically approve tools."
     )]
     NonInteractiveToolApproval,
     #[error(transparent)]
@@ -638,7 +638,7 @@ impl ChatSession {
                     _ => (),
                 }
 
-                ("Tool use was interupted", Report::from(err))
+                ("Tool use was interrupted", Report::from(err))
             },
             ChatError::Client(err) => match err {
                 // Errors from attempting to send too large of a conversation history. In
@@ -2193,7 +2193,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_flow() {
-        // let _ = tracing_subscriber::fmt::try_init();
         let mut ctx = Context::new();
         let test_client = create_stream(serde_json::json!([
             [
@@ -2242,7 +2241,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .next(&mut ctx, &mut database, &telemetry)
+        .spawn(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 

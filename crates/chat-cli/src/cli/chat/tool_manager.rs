@@ -903,7 +903,7 @@ impl ToolManager {
                     let _ = queue!(
                         output,
                         style::Print(
-                            "Not all mcp servers loaded. Configure no-interactive timeout with q settings mcp.noInteractiveTimeout"
+                            "Not all mcp servers loaded. Configure non-interactive timeout with q settings mcp.noInteractiveTimeout"
                         ),
                         style::Print("\n------\n")
                     );

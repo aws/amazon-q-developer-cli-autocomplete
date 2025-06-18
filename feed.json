@@ -326,7 +326,7 @@
         },
         {
           "type": "added",
-          "description": "An option `--no-interactive` to invoke `q chat` in a non-interactive mode - [#878](https://github.com/aws/amazon-q-developer-cli/pull/878)"
+          "description": "An option `--non-interactive` to invoke `q chat` headlessly - [#878](https://github.com/aws/amazon-q-developer-cli/pull/878)"
         },
         {
           "type": "added",
