@@ -64,7 +64,7 @@ pub struct StreamingClient {
 impl StreamingClient {
     pub async fn new(database: &mut Database) -> Result<Self, ApiClientError> {
         // If SIGV4_AUTH_ENABLED is true, use Q developer client
-        if std::env::var("SIGV4_AUTH_ENABLED").is_ok_and(|v| !v.is_empty() && v.to_lowercase() == "true") {
+        if std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty()) {
             Self::new_qdeveloper_client(database, &Endpoint::load_q(database)).await
         } else {
             // Default to CodeWhisperer client
