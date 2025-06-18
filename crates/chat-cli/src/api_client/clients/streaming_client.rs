@@ -108,7 +108,7 @@ impl StreamingClient {
     }
     
     // Add SigV4 client creation method
-    pub async fn new_qdeveloper_client(
+    async fn new_qdeveloper_client(
         database: &Database,
         endpoint: &Endpoint,
     ) -> Result<Self, ApiClientError> {
