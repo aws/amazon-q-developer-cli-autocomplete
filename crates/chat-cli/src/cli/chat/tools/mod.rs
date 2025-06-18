@@ -76,28 +76,28 @@ impl Tool {
     }
 
     /// Invokes the tool asynchronously
-    pub async fn invoke(&self, context: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.invoke(context, updates).await,
-            Tool::FsWrite(fs_write) => fs_write.invoke(context, updates).await,
-            Tool::ExecuteCommand(execute_command) => execute_command.invoke(updates).await,
-            Tool::UseAws(use_aws) => use_aws.invoke(context, updates).await,
-            Tool::Custom(custom_tool) => custom_tool.invoke(context, updates).await,
-            Tool::GhIssue(gh_issue) => gh_issue.invoke(updates).await,
-            Tool::Thinking(think) => think.invoke(updates).await,
+            Tool::FsRead(fs_read) => fs_read.invoke(ctx, output).await,
+            Tool::FsWrite(fs_write) => fs_write.invoke(ctx, output).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.invoke(output).await,
+            Tool::UseAws(use_aws) => use_aws.invoke(ctx, output).await,
+            Tool::Custom(custom_tool) => custom_tool.invoke(ctx, output).await,
+            Tool::GhIssue(gh_issue) => gh_issue.invoke(ctx, output).await,
+            Tool::Thinking(think) => think.invoke(output).await,
         }
     }
 
     /// Queues up a tool's intention in a human readable format
-    pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.queue_description(ctx, updates).await,
-            Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, updates),
-            Tool::ExecuteCommand(execute_command) => execute_command.queue_description(updates),
-            Tool::UseAws(use_aws) => use_aws.queue_description(updates),
-            Tool::Custom(custom_tool) => custom_tool.queue_description(updates),
-            Tool::GhIssue(gh_issue) => gh_issue.queue_description(updates),
-            Tool::Thinking(thinking) => thinking.queue_description(updates),
+            Tool::FsRead(fs_read) => fs_read.queue_description(ctx, output).await,
+            Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, output),
+            Tool::ExecuteCommand(execute_command) => execute_command.queue_description(output),
+            Tool::UseAws(use_aws) => use_aws.queue_description(output),
+            Tool::Custom(custom_tool) => custom_tool.queue_description(output),
+            Tool::GhIssue(gh_issue) => gh_issue.queue_description(output),
+            Tool::Thinking(thinking) => thinking.queue_description(output),
         }
     }
 
@@ -311,7 +311,7 @@ pub fn sanitize_path_tool_arg(ctx: &Context, path: impl AsRef<Path>) -> PathBuf 
     let mut path = path.as_ref().components();
     match path.next() {
         Some(p) if p.as_os_str() == "~" => {
-            res.push(ctx.env().home().unwrap_or_default());
+            res.push(ctx.env.home().unwrap_or_default());
         },
         Some(p) => res.push(p),
         None => return res,
@@ -321,7 +321,7 @@ pub fn sanitize_path_tool_arg(ctx: &Context, path: impl AsRef<Path>) -> PathBuf 
     }
     // For testing scenarios, we need to make sure paths are appropriately handled in chroot test
     // file systems since they are passed directly from the model.
-    ctx.fs().chroot_path(res)
+    ctx.fs.chroot_path(res)
 }
 
 /// Converts `path` to a relative path according to the current working directory `cwd`.
@@ -371,7 +371,7 @@ fn format_path(cwd: impl AsRef<Path>, path: impl AsRef<Path>) -> String {
 
 fn supports_truecolor(ctx: &Context) -> bool {
     // Simple override to disable truecolor since shell_color doesn't use Context.
-    !ctx.env().get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
+    !ctx.env.get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
         && shell_color::get_color_support().contains(shell_color::ColorSupport::TERM24BIT)
 }
 
@@ -382,25 +382,24 @@ mod tests {
     use chat_cli::platform::ACTIVE_USER_HOME;
 
     use super::*;
-    use crate::platform::EnvProvider;
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
 
         let actual = sanitize_path_tool_arg(&ctx, "~");
-        let expected_home = ctx.env().home().unwrap_or_default();
-        assert_eq!(actual, ctx.fs().chroot_path(&expected_home), "tilde should expand");
+        let expected_home = ctx.env.home().unwrap_or_default();
+        assert_eq!(actual, ctx.fs.chroot_path(&expected_home), "tilde should expand");
         let actual = sanitize_path_tool_arg(&ctx, "~/hello");
         assert_eq!(
             actual,
-            ctx.fs().chroot_path(expected_home.join("hello")),
+            ctx.fs.chroot_path(expected_home.join("hello")),
             "tilde should expand"
         );
         let actual = sanitize_path_tool_arg(&ctx, "/~");
         assert_eq!(
             actual,
-            ctx.fs().chroot_path("/~"),
+            ctx.fs.chroot_path("/~"),
             "tilde should not expand when not the first component"
         );
     }
@@ -408,10 +407,10 @@ mod tests {
     #[tokio::test]
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
-            let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-            let fs = ctx.fs();
+            let ctx = Context::new();
             let cwd = sanitize_path_tool_arg(&ctx, cwd);
             let path = sanitize_path_tool_arg(&ctx, path);
+            let fs = ctx.fs;
             fs.create_dir_all(&cwd).await.unwrap();
             fs.create_dir_all(&path).await.unwrap();
 

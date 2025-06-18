@@ -44,7 +44,7 @@ pub type RichImageBlock = (ImageBlock, ImageMetadata);
 /// However, the model will just treat it as a normal space and return the wrong path string to the
 /// `fs_read` tool. This will lead to file-not-found errors.
 pub fn pre_process(ctx: &Context, path: &str) -> String {
-    if ctx.platform().os() == platform::Os::Mac && path.contains("Screenshot") {
+    if ctx.platform.os() == platform::Os::Mac && path.contains("Screenshot") {
         let mac_screenshot_regex =
             regex::Regex::new(r"Screenshot \d{4}-\d{2}-\d{2} at \d{1,2}\.\d{2}\.\d{2} [AP]M").unwrap();
         if mac_screenshot_regex.is_match(path) {

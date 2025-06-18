@@ -66,20 +66,23 @@ pub enum FsWrite {
 }
 
 impl FsWrite {
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
-        let fs = ctx.fs();
-        let cwd = ctx.env().current_dir()?;
+    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
+        let cwd = ctx.env.current_dir()?;
         match self {
             FsWrite::Create { path, .. } => {
                 let file_text = self.canonical_create_command_text();
                 let path = sanitize_path_tool_arg(ctx, path);
                 if let Some(parent) = path.parent() {
-                    fs.create_dir_all(parent).await?;
+                    ctx.fs.create_dir_all(parent).await?;
                 }
 
-                let invoke_description = if fs.exists(&path) { "Replacing: " } else { "Creating: " };
+                let invoke_description = if ctx.fs.exists(&path) {
+                    "Replacing: "
+                } else {
+                    "Creating: "
+                };
                 queue!(
-                    updates,
+                    output,
                     style::Print(invoke_description),
                     style::SetForegroundColor(Color::Green),
                     style::Print(format_path(cwd, &path)),
@@ -92,10 +95,10 @@ impl FsWrite {
             },
             FsWrite::StrReplace { path, old_str, new_str } => {
                 let path = sanitize_path_tool_arg(ctx, path);
-                let file = fs.read_to_string(&path).await?;
+                let file = ctx.fs.read_to_string(&path).await?;
                 let matches = file.match_indices(old_str).collect::<Vec<_>>();
                 queue!(
-                    updates,
+                    output,
                     style::Print("Updating: "),
                     style::SetForegroundColor(Color::Green),
                     style::Print(format_path(cwd, &path)),
@@ -106,7 +109,7 @@ impl FsWrite {
                     0 => Err(eyre!("no occurrences of \"{old_str}\" were found")),
                     1 => {
                         let file = file.replacen(old_str, new_str, 1);
-                        fs.write(path, file).await?;
+                        ctx.fs.write(path, file).await?;
                         Ok(Default::default())
                     },
                     x => Err(eyre!("{x} occurrences of old_str were found when only 1 is expected")),
@@ -118,9 +121,9 @@ impl FsWrite {
                 new_str,
             } => {
                 let path = sanitize_path_tool_arg(ctx, path);
-                let mut file = fs.read_to_string(&path).await?;
+                let mut file = ctx.fs.read_to_string(&path).await?;
                 queue!(
-                    updates,
+                    output,
                     style::Print("Updating: "),
                     style::SetForegroundColor(Color::Green),
                     style::Print(format_path(cwd, &path)),
@@ -144,7 +147,7 @@ impl FsWrite {
                 let path = sanitize_path_tool_arg(ctx, path);
 
                 queue!(
-                    updates,
+                    output,
                     style::Print("Appending to: "),
                     style::SetForegroundColor(Color::Green),
                     style::Print(format_path(cwd, &path)),
@@ -152,7 +155,7 @@ impl FsWrite {
                     style::Print("\n"),
                 )?;
 
-                let mut file = fs.read_to_string(&path).await?;
+                let mut file = ctx.fs.read_to_string(&path).await?;
                 if !file.ends_with_newline() {
                     file.push('\n');
                 }
@@ -163,22 +166,21 @@ impl FsWrite {
         }
     }
 
-    pub fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
-        let cwd = ctx.env().current_dir()?;
-        self.print_relative_path(ctx, updates)?;
+    pub fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+        let cwd = ctx.env.current_dir()?;
+        self.print_relative_path(ctx, output)?;
         match self {
             FsWrite::Create { path, .. } => {
                 let file_text = self.canonical_create_command_text();
-                let path = sanitize_path_tool_arg(ctx, path);
-                let relative_path = format_path(cwd, &path);
-                let prev = if ctx.fs().exists(&path) {
-                    let file = ctx.fs().read_to_string_sync(&path)?;
-                    stylize_output_if_able(ctx, &path, &file)
+                let relative_path = format_path(cwd, path);
+                let prev = if ctx.fs.exists(path) {
+                    let file = ctx.fs.read_to_string_sync(path)?;
+                    stylize_output_if_able(ctx, path, &file)
                 } else {
                     Default::default()
                 };
                 let new = stylize_output_if_able(ctx, &relative_path, &file_text);
-                print_diff(updates, &prev, &new, 1)?;
+                print_diff(output, &prev, &new, 1)?;
                 Ok(())
             },
             FsWrite::Insert {
@@ -186,9 +188,8 @@ impl FsWrite {
                 insert_line,
                 new_str,
             } => {
-                let path = sanitize_path_tool_arg(ctx, path);
-                let relative_path = format_path(cwd, &path);
-                let file = ctx.fs().read_to_string_sync(&path)?;
+                let relative_path = format_path(cwd, path);
+                let file = ctx.fs.read_to_string_sync(&relative_path)?;
 
                 // Diff the old with the new by adding extra context around the line being inserted
                 // at.
@@ -202,29 +203,27 @@ impl FsWrite {
 
                 let old = stylize_output_if_able(ctx, &relative_path, &old);
                 let new = stylize_output_if_able(ctx, &relative_path, &new);
-                print_diff(updates, &old, &new, start_line)?;
+                print_diff(output, &old, &new, start_line)?;
                 Ok(())
             },
             FsWrite::StrReplace { path, old_str, new_str } => {
-                let path = sanitize_path_tool_arg(ctx, path);
-                let relative_path = format_path(cwd, &path);
-                let file = ctx.fs().read_to_string_sync(&path)?;
+                let relative_path = format_path(cwd, path);
+                let file = ctx.fs.read_to_string_sync(&relative_path)?;
                 let (start_line, _) = match line_number_at(&file, old_str) {
                     Some((start_line, end_line)) => (start_line, end_line),
                     _ => (0, 0),
                 };
                 let old_str = stylize_output_if_able(ctx, &relative_path, old_str);
                 let new_str = stylize_output_if_able(ctx, &relative_path, new_str);
-                print_diff(updates, &old_str, &new_str, start_line)?;
+                print_diff(output, &old_str, &new_str, start_line)?;
 
                 Ok(())
             },
             FsWrite::Append { path, new_str } => {
-                let path = sanitize_path_tool_arg(ctx, path);
-                let relative_path = format_path(cwd, &path);
-                let start_line = ctx.fs().read_to_string_sync(&path)?.lines().count() + 1;
+                let relative_path = format_path(cwd, path);
+                let start_line = ctx.fs.read_to_string_sync(&relative_path)?.lines().count() + 1;
                 let file = stylize_output_if_able(ctx, &relative_path, new_str);
-                print_diff(updates, &Default::default(), &file, start_line)?;
+                print_diff(output, &Default::default(), &file, start_line)?;
                 Ok(())
             },
         }
@@ -256,8 +255,8 @@ impl FsWrite {
         Ok(())
     }
 
-    fn print_relative_path(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
-        let cwd = ctx.env().current_dir()?;
+    fn print_relative_path(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+        let cwd = ctx.env.current_dir()?;
         let path = match self {
             FsWrite::Create { path, .. } => path,
             FsWrite::StrReplace { path, .. } => path,
@@ -268,7 +267,7 @@ impl FsWrite {
         let path = sanitize_path_tool_arg(ctx, path);
         let relative_path = format_path(cwd, &path);
         queue!(
-            updates,
+            output,
             style::Print("Path: "),
             style::SetForegroundColor(Color::Green),
             style::Print(&relative_path),
@@ -308,15 +307,8 @@ async fn write_to_file(ctx: &Context, path: impl AsRef<Path>, mut content: Strin
     if !content.ends_with_newline() {
         content.push('\n');
     }
-
-    // Try to write the file and provide better error context
-    match ctx.fs().write(path_ref, content).await {
-        Ok(_) => Ok(()),
-        Err(e) => {
-            tracing::error!("Failed to write to file {:?}: {}", path_ref, e);
-            Err(eyre::eyre!("Failed to write to file {:?}: {}", path_ref, e))
-        },
-    }
+    ctx.fs.write(path.as_ref(), content).await?;
+    Ok(())
 }
 
 /// Returns a prefix/suffix pair before and after the content dictated by `[start_line, end_line]`
@@ -379,7 +371,7 @@ fn get_lines_with_context(
 /// Prints a git-diff style comparison between `old_str` and `new_str`.
 /// - `start_line` - 1-indexed line number that `old_str` and `new_str` start at.
 fn print_diff(
-    updates: &mut impl Write,
+    output: &mut impl Write,
     old_str: &StylizedFile,
     new_str: &StylizedFile,
     start_line: usize,
@@ -435,15 +427,15 @@ fn print_diff(
         let new_i_str = fmt_index(change.new_index(), start_line);
 
         // Print the gutter and line numbers.
-        queue!(updates, style::SetBackgroundColor(gutter_bg_color))?;
+        queue!(output, style::SetBackgroundColor(gutter_bg_color))?;
         queue!(
-            updates,
+            output,
             style::SetForegroundColor(text_color),
             style::Print(sign),
             style::Print(" ")
         )?;
         queue!(
-            updates,
+            output,
             style::Print(format!(
                 "{:>old_line_num_width$}",
                 old_i_str,
@@ -451,12 +443,12 @@ fn print_diff(
             ))
         )?;
         if sign == " " {
-            queue!(updates, style::Print(", "))?;
+            queue!(output, style::Print(", "))?;
         } else {
-            queue!(updates, style::Print("  "))?;
+            queue!(output, style::Print("  "))?;
         }
         queue!(
-            updates,
+            output,
             style::Print(format!(
                 "{:>new_line_num_width$}",
                 new_i_str,
@@ -465,7 +457,7 @@ fn print_diff(
         )?;
         // Print the line.
         queue!(
-            updates,
+            output,
             style::SetForegroundColor(style::Color::Reset),
             style::Print(":"),
             style::SetForegroundColor(text_color),
@@ -476,7 +468,7 @@ fn print_diff(
         )?;
     }
     queue!(
-        updates,
+        output,
         crossterm::terminal::Clear(crossterm::terminal::ClearType::UntilNewLine),
         style::Print("\n"),
     )?;
@@ -603,39 +595,12 @@ fn syntect_to_crossterm_color(syntect: syntect::highlighting::Color) -> style::C
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::*;
-
-    const TEST_FILE_CONTENTS: &str = "\
-1: Hello world!
-2: This is line 2
-3: asdf
-4: Hello world!
-";
-
-    const TEST_FILE_PATH: &str = "/test_file.txt";
-    const TEST_HIDDEN_FILE_PATH: &str = "/aaaa2/.hidden";
-
-    /// Sets up the following filesystem structure:
-    /// ```text
-    /// test_file.txt
-    /// /home/testuser/
-    /// /aaaa1/
-    ///     /bbbb1/
-    ///         /cccc1/
-    /// /aaaa2/
-    ///     .hidden
-    /// ```
-    async fn setup_test_directory() -> Arc<Context> {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let fs = ctx.fs();
-        fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
-        fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
-        fs.create_dir_all("/aaaa2").await.unwrap();
-        fs.write(TEST_HIDDEN_FILE_PATH, "this is a hidden file").await.unwrap();
-        ctx
-    }
+    use crate::cli::chat::util::test::{
+        TEST_FILE_CONTENTS,
+        TEST_FILE_PATH,
+        setup_test_directory,
+    };
 
     #[test]
     fn test_fs_write_deserialize() {
@@ -699,7 +664,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            ctx.fs().read_to_string("/my-file").await.unwrap(),
+            ctx.fs.read_to_string("/my-file").await.unwrap(),
             format!("{}\n", file_text)
         );
 
@@ -717,7 +682,7 @@ mod tests {
 
         // File should end with a newline
         assert_eq!(
-            ctx.fs().read_to_string("/my-file").await.unwrap(),
+            ctx.fs.read_to_string("/my-file").await.unwrap(),
             format!("{}\n", file_text)
         );
 
@@ -734,7 +699,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            ctx.fs().read_to_string("/my-file").await.unwrap(),
+            ctx.fs.read_to_string("/my-file").await.unwrap(),
             format!("{}\n", file_text)
         );
     }
@@ -787,7 +752,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            ctx.fs()
+            ctx.fs
                 .read_to_string(TEST_FILE_PATH)
                 .await
                 .unwrap()
@@ -816,7 +781,7 @@ mod tests {
             .invoke(&ctx, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs().read_to_string(TEST_FILE_PATH).await.unwrap();
+        let actual = ctx.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
         assert_eq!(
             format!("{}\n", actual.lines().next().unwrap()),
             new_str,
@@ -848,7 +813,7 @@ mod tests {
             .invoke(&ctx, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs().read_to_string(TEST_FILE_PATH).await.unwrap();
+        let actual = ctx.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
         assert_eq!(
             format!("{}\n", actual.lines().nth(1).unwrap()),
             new_str,
@@ -864,12 +829,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_insert_when_no_newlines_in_file() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
         let mut stdout = std::io::stdout();
 
         let test_file_path = "/file.txt";
         let test_file_contents = "hello there";
-        ctx.fs().write(test_file_path, test_file_contents).await.unwrap();
+        ctx.fs.write(test_file_path, test_file_contents).await.unwrap();
 
         let new_str = "test";
 
@@ -885,7 +850,7 @@ mod tests {
             .invoke(&ctx, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs().read_to_string(test_file_path).await.unwrap();
+        let actual = ctx.fs.read_to_string(test_file_path).await.unwrap();
         assert_eq!(actual, format!("{}{}\n", test_file_contents, new_str));
 
         // Then, test prepending
@@ -900,7 +865,7 @@ mod tests {
             .invoke(&ctx, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs().read_to_string(test_file_path).await.unwrap();
+        let actual = ctx.fs.read_to_string(test_file_path).await.unwrap();
         assert_eq!(actual, format!("{}{}{}\n", new_str, test_file_contents, new_str));
     }
 
@@ -923,7 +888,7 @@ mod tests {
             .await
             .unwrap();
 
-        let actual = ctx.fs().read_to_string(TEST_FILE_PATH).await.unwrap();
+        let actual = ctx.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
         assert_eq!(
             actual,
             format!("{}{}\n", TEST_FILE_CONTENTS, content_to_append),
@@ -968,74 +933,75 @@ mod tests {
         assert_eq!(terminal_width_required_for_line_count(100), 3);
         assert_eq!(terminal_width_required_for_line_count(999), 3);
     }
-}
-#[tokio::test]
-async fn test_fs_write_with_tilde_paths() {
-    // Create a test context
-    let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-    let mut stdout = std::io::stdout();
 
-    // Get the home directory from the context
-    let home_dir = ctx.env().home().unwrap_or_default();
-    println!("Test home directory: {:?}", home_dir);
+    #[tokio::test]
+    async fn test_fs_write_with_tilde_paths() {
+        // Create a test context
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
 
-    // Create a file directly in the home directory first to ensure it exists
-    let home_path = ctx.fs().chroot_path(&home_dir);
-    println!("Chrooted home path: {:?}", home_path);
+        // Get the home directory from the context
+        let home_dir = ctx.env.home().unwrap_or_default();
+        println!("Test home directory: {:?}", home_dir);
 
-    // Ensure the home directory exists
-    ctx.fs().create_dir_all(&home_path).await.unwrap();
+        // Create a file directly in the home directory first to ensure it exists
+        let home_path = ctx.fs.chroot_path(&home_dir);
+        println!("Chrooted home path: {:?}", home_path);
 
-    let v = serde_json::json!({
-        "path": "~/file.txt",
-        "command": "create",
-        "file_text": "content in home file"
-    });
+        // Ensure the home directory exists
+        ctx.fs.create_dir_all(&home_path).await.unwrap();
 
-    let result = serde_json::from_value::<FsWrite>(v)
-        .unwrap()
-        .invoke(&ctx, &mut stdout)
-        .await;
+        let v = serde_json::json!({
+            "path": "~/file.txt",
+            "command": "create",
+            "file_text": "content in home file"
+        });
 
-    match &result {
-        Ok(_) => println!("Writing to ~/file.txt succeeded"),
-        Err(e) => println!("Writing to ~/file.txt failed: {:?}", e),
+        let result = serde_json::from_value::<FsWrite>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await;
+
+        match &result {
+            Ok(_) => println!("Writing to ~/file.txt succeeded"),
+            Err(e) => println!("Writing to ~/file.txt failed: {:?}", e),
+        }
+
+        assert!(result.is_ok(), "Writing to ~/file.txt should succeed");
+
+        // Verify content was written correctly
+        let file_path = home_path.join("file.txt");
+        println!("Checking file at: {:?}", file_path);
+
+        let content_result = ctx.fs.read_to_string(&file_path).await;
+        match &content_result {
+            Ok(content) => println!("Read content: {:?}", content),
+            Err(e) => println!("Failed to read content: {:?}", e),
+        }
+
+        assert!(content_result.is_ok(), "Should be able to read from expanded path");
+        assert_eq!(content_result.unwrap(), "content in home file\n");
+
+        // Test with "~/nested/path/file.txt" to ensure deep paths work
+        let nested_dir = home_path.join("nested").join("path");
+        ctx.fs.create_dir_all(&nested_dir).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": "~/nested/path/file.txt",
+            "command": "create",
+            "file_text": "content in nested path"
+        });
+
+        let result = serde_json::from_value::<FsWrite>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await;
+
+        assert!(result.is_ok(), "Writing to ~/nested/path/file.txt should succeed");
+
+        // Verify nested path content
+        let nested_file_path = nested_dir.join("file.txt");
+        let nested_content = ctx.fs.read_to_string(&nested_file_path).await.unwrap();
+        assert_eq!(nested_content, "content in nested path\n");
     }
-
-    assert!(result.is_ok(), "Writing to ~/file.txt should succeed");
-
-    // Verify content was written correctly
-    let file_path = home_path.join("file.txt");
-    println!("Checking file at: {:?}", file_path);
-
-    let content_result = ctx.fs().read_to_string(&file_path).await;
-    match &content_result {
-        Ok(content) => println!("Read content: {:?}", content),
-        Err(e) => println!("Failed to read content: {:?}", e),
-    }
-
-    assert!(content_result.is_ok(), "Should be able to read from expanded path");
-    assert_eq!(content_result.unwrap(), "content in home file\n");
-
-    // Test with "~/nested/path/file.txt" to ensure deep paths work
-    let nested_dir = home_path.join("nested").join("path");
-    ctx.fs().create_dir_all(&nested_dir).await.unwrap();
-
-    let v = serde_json::json!({
-        "path": "~/nested/path/file.txt",
-        "command": "create",
-        "file_text": "content in nested path"
-    });
-
-    let result = serde_json::from_value::<FsWrite>(v)
-        .unwrap()
-        .invoke(&ctx, &mut stdout)
-        .await;
-
-    assert!(result.is_ok(), "Writing to ~/nested/path/file.txt should succeed");
-
-    // Verify nested path content
-    let nested_file_path = nested_dir.join("file.txt");
-    let nested_content = ctx.fs().read_to_string(&nested_file_path).await.unwrap();
-    assert_eq!(nested_content, "content in nested path\n");
 }

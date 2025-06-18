@@ -20,6 +20,7 @@ use clap::{
     ArgAction,
     CommandFactory,
     Parser,
+    Subcommand,
     ValueEnum,
 };
 use crossterm::style::Stylize;
@@ -40,14 +41,16 @@ use crate::cli::user::{
     LoginArgs,
     WhoamiArgs,
 };
+use crate::database::Database;
 use crate::logging::{
     LogArgs,
     initialize_logging,
 };
+use crate::platform::Context;
+use crate::telemetry::TelemetryThread;
 use crate::util::directories::logs_dir;
 use crate::util::{
     CLI_BINARY_NAME,
-    CliContext,
     GOV_REGIONS,
 };
 
@@ -80,7 +83,7 @@ impl OutputFormat {
 
 /// The Amazon Q CLI
 #[deny(missing_docs)]
-#[derive(Debug, PartialEq, clap::Subcommand)]
+#[derive(Debug, PartialEq, Subcommand)]
 pub enum RootSubcommand {
     /// AI assistant in your terminal
     Chat(ChatArgs),
@@ -123,6 +126,39 @@ impl RootSubcommand {
 
     pub fn requires_auth(&self) -> bool {
         matches!(self, Self::Chat(_) | Self::Profile)
+    }
+
+    pub async fn execute(
+        self,
+        ctx: &mut Context,
+        database: &mut Database,
+        telemetry: &TelemetryThread,
+    ) -> Result<ExitCode> {
+        // Check for auth on subcommands that require it.
+        if self.requires_auth() && !crate::auth::is_logged_in(database).await {
+            bail!(
+                "You are not logged in, please log in with {}",
+                format!("{CLI_BINARY_NAME} login").bold()
+            );
+        }
+
+        // Send executed telemetry.
+        if self.valid_for_telemetry() {
+            telemetry.send_cli_subcommand_executed(&self).ok();
+        }
+
+        match self {
+            Self::Diagnostic(args) => args.execute().await,
+            Self::Login(args) => args.execute(database, telemetry).await,
+            Self::Logout => user::logout(database).await,
+            Self::Whoami(args) => args.execute(database).await,
+            Self::Profile => user::profile(database, telemetry).await,
+            Self::Settings(settings_args) => settings_args.execute(ctx, database).await,
+            Self::Issue(args) => args.execute().await,
+            Self::Version { changelog } => Cli::print_version(changelog),
+            Self::Chat(args) => args.execute(ctx, database, telemetry).await,
+            Self::Mcp(args) => args.execute(&mut std::io::stderr()).await,
+        }
     }
 }
 
@@ -199,40 +235,13 @@ impl Cli {
 
         debug!(command =? std::env::args().collect::<Vec<_>>(), "Command being ran");
 
-        let env = crate::platform::Env::new();
+        let mut ctx = Context::new();
         let mut database = crate::database::Database::new().await?;
-        let telemetry = crate::telemetry::TelemetryThread::new(&env, &mut database).await?;
+        let telemetry = crate::telemetry::TelemetryThread::new(&ctx.env, &mut database).await?;
 
-        // Check for auth on subcommands that require it.
-        if subcommand.requires_auth() && !crate::auth::is_logged_in(&mut database).await {
-            bail!(
-                "You are not logged in, please log in with {}",
-                format!("{CLI_BINARY_NAME} login").bold()
-            );
-        }
-
-        // Send executed telemetry.
-        if subcommand.valid_for_telemetry() {
-            telemetry.send_cli_subcommand_executed(&subcommand).ok();
-        }
-
-        let cli_context = CliContext::new();
-
-        let result = match subcommand {
-            RootSubcommand::Diagnostic(args) => args.execute().await,
-            RootSubcommand::Login(args) => args.execute(&mut database, &telemetry).await,
-            RootSubcommand::Logout => user::logout(&mut database).await,
-            RootSubcommand::Whoami(args) => args.execute(&mut database).await,
-            RootSubcommand::Profile => user::profile(&mut database, &telemetry).await,
-            RootSubcommand::Settings(settings_args) => settings_args.execute(&mut database, &cli_context).await,
-            RootSubcommand::Issue(args) => args.execute().await,
-            RootSubcommand::Version { changelog } => Self::print_version(changelog),
-            RootSubcommand::Chat(args) => args.execute(&mut database, &telemetry).await,
-            RootSubcommand::Mcp(args) => args.execute().await,
-        };
+        let result = subcommand.execute(&mut ctx, &mut database, &telemetry).await;
 
         let telemetry_result = telemetry.finish().await;
-
         let exit_code = result?;
         telemetry_result?;
         Ok(exit_code)
@@ -349,14 +358,13 @@ mod test {
 
         assert_eq!(Cli::parse_from([CHAT_BINARY_NAME, "chat", "-vv"]), Cli {
             subcommand: Some(RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: false,
                 resume: false,
                 input: None,
                 profile: None,
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })),
             verbose: 2,
             help_all: false,
@@ -389,14 +397,13 @@ mod test {
         assert_parse!(
             ["chat", "--profile", "my-profile"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: false,
                 resume: false,
                 input: None,
                 profile: Some("my-profile".to_string()),
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -406,14 +413,13 @@ mod test {
         assert_parse!(
             ["chat", "--profile", "my-profile", "Hello"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: false,
                 resume: false,
                 input: Some("Hello".to_string()),
                 profile: Some("my-profile".to_string()),
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -421,16 +427,15 @@ mod test {
     #[test]
     fn test_chat_with_context_profile_and_accept_all() {
         assert_parse!(
-            ["chat", "--profile", "my-profile", "--accept-all"],
+            ["chat", "--profile", "my-profile", "--trust-all-tools"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: true,
-                no_interactive: false,
                 resume: false,
                 input: None,
                 profile: Some("my-profile".to_string()),
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -438,29 +443,27 @@ mod test {
     #[test]
     fn test_chat_with_no_interactive_and_resume() {
         assert_parse!(
-            ["chat", "--no-interactive", "--resume"],
+            ["chat", "--non-interactive", "--resume"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: true,
                 resume: true,
                 input: None,
                 profile: None,
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
         assert_parse!(
-            ["chat", "--no-interactive", "-r"],
+            ["chat", "--non-interactive", "-r"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: true,
                 resume: true,
                 input: None,
                 profile: None,
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -470,14 +473,13 @@ mod test {
         assert_parse!(
             ["chat", "--trust-all-tools"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: false,
                 resume: false,
                 input: None,
                 profile: None,
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
+                non_interactive: false
             })
         );
     }
@@ -487,14 +489,13 @@ mod test {
         assert_parse!(
             ["chat", "--trust-tools="],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: false,
                 resume: false,
                 input: None,
                 profile: None,
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["".to_string()]),
+                non_interactive: false
             })
         );
     }
@@ -504,14 +505,13 @@ mod test {
         assert_parse!(
             ["chat", "--trust-tools=fs_read,fs_write"],
             RootSubcommand::Chat(ChatArgs {
-                accept_all: false,
-                no_interactive: false,
                 resume: false,
                 input: None,
                 profile: None,
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["fs_read".to_string(), "fs_write".to_string()]),
+                non_interactive: false
             })
         );
     }

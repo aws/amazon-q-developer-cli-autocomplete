@@ -172,7 +172,7 @@ pub struct CustomTool {
 }
 
 impl CustomTool {
-    pub async fn invoke(&self, _ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, _ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
         // Assuming a response shape as per https://spec.modelcontextprotocol.io/specification/2024-11-05/server/tools/#calling-tools
         let resp = self.client.request(self.method.as_str(), self.params.clone()).await?;
         let result = match resp.result {
@@ -205,9 +205,9 @@ impl CustomTool {
         }
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         queue!(
-            updates,
+            output,
             style::Print("Running "),
             style::SetForegroundColor(style::Color::Green),
             style::Print(&self.name),
@@ -223,13 +223,13 @@ impl CustomTool {
                 _ => format!("{:?}", params),
             };
             queue!(
-                updates,
+                output,
                 style::Print(" with the param:\n"),
                 style::Print(params),
                 style::ResetColor,
             )?;
         } else {
-            queue!(updates, style::Print("\n"))?;
+            queue!(output, style::Print("\n"))?;
         }
         Ok(())
     }

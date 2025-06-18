@@ -24,9 +24,10 @@ use skim::prelude::*;
 use tempfile::NamedTempFile;
 
 use super::context::ContextManager;
+use crate::platform::Context;
 
-pub fn select_profile_with_skim(context_manager: &ContextManager) -> Result<Option<String>> {
-    let profiles = context_manager.list_profiles_blocking()?;
+pub fn select_profile_with_skim(ctx: &Context, context_manager: &ContextManager) -> Result<Option<String>> {
+    let profiles = context_manager.list_profiles_blocking(ctx)?;
 
     launch_skim_selector(&profiles, "Select profile: ", false)
         .map(|selected| selected.and_then(|s| s.into_iter().next()))
@@ -55,8 +56,11 @@ impl ConditionalEventHandler for SkimCommandSelector {
         _positive: bool,
         _ctx: &EventContext<'_>,
     ) -> Option<Cmd> {
+        // TODO: Remove this line... I hate traits
+        let context = Context::new();
+
         // Launch skim command selector with the context manager if available
-        match select_command(self.context_manager.as_ref(), &self.tool_names) {
+        match select_command(&context, self.context_manager.as_ref(), &self.tool_names) {
             Ok(Some(command)) => Some(Cmd::Insert(1, command)),
             _ => {
                 // If cancelled or error, do nothing
@@ -229,7 +233,7 @@ pub fn select_context_paths_with_skim(context_manager: &ContextManager) -> Resul
 }
 
 /// Launch the command selector and handle the selected command
-pub fn select_command(context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
+pub fn select_command(ctx: &Context, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
     let commands = get_available_commands();
 
     match launch_skim_selector(&commands, "Select command: ", false)? {
@@ -287,7 +291,7 @@ pub fn select_command(context_manager: &ContextManager, tools: &[String]) -> Res
                 },
                 Some(cmd @ CommandType::Profile(_)) if cmd.needs_profile_selection() => {
                     // For profile operations that need a profile name, show profile selector
-                    match select_profile_with_skim(context_manager)? {
+                    match select_profile_with_skim(ctx, context_manager)? {
                         Some(profile) => {
                             let full_cmd = format!("{} {}", selected_command, profile);
                             Ok(Some(full_cmd))

@@ -1,6 +1,8 @@
 pub mod images;
 pub mod issue;
 pub mod shared_writer;
+#[cfg(test)]
+pub mod test;
 pub mod ui;
 
 use std::io::Write;

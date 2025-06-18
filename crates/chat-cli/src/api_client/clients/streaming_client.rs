@@ -129,16 +129,13 @@ impl StreamingClient {
         })
     }
 
-    pub async fn send_message(
-        &self,
-        conversation_state: ConversationState,
-    ) -> Result<SendMessageOutput, ApiClientError> {
-        debug!("Sending conversation: {:#?}", conversation_state);
+    pub async fn send_message(&self, conversation: ConversationState) -> Result<SendMessageOutput, ApiClientError> {
+        debug!("Sending conversation: {:#?}", conversation);
         let ConversationState {
             conversation_id,
             user_input_message,
             history,
-        } = conversation_state;
+        } = conversation;
 
         match &self.inner {
             inner::Inner::Codewhisperer(client) => {
@@ -157,7 +154,8 @@ impl StreamingClient {
                             .transpose()?,
                     )
                     .build()
-                    .expect("building conversation_state should not fail");
+                    .expect("building conversation should not fail");
+
                 let response = client
                     .generate_assistant_response()
                     .conversation_state(conversation_state)
