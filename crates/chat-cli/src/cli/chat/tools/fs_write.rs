@@ -263,7 +263,9 @@ impl FsWrite {
             FsWrite::Insert { path, .. } => path,
             FsWrite::Append { path, .. } => path,
         };
-        let relative_path = format_path(cwd, path);
+        // Sanitize the path to handle tilde expansion
+        let path = sanitize_path_tool_arg(ctx, path);
+        let relative_path = format_path(cwd, &path);
         queue!(
             output,
             style::Print("Path: "),
@@ -297,6 +299,11 @@ impl FsWrite {
 
 /// Writes `content` to `path`, adding a newline if necessary.
 async fn write_to_file(ctx: &Context, path: impl AsRef<Path>, mut content: String) -> Result<()> {
+    let path_ref = path.as_ref();
+
+    // Log the path being written to
+    tracing::debug!("Writing to file: {:?}", path_ref);
+
     if !content.ends_with_newline() {
         content.push('\n');
     }
@@ -953,4 +960,74 @@ mod tests {
         assert_eq!(terminal_width_required_for_line_count(100), 3);
         assert_eq!(terminal_width_required_for_line_count(999), 3);
     }
+}
+#[tokio::test]
+async fn test_fs_write_with_tilde_paths() {
+    // Create a test context
+    let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+    let mut stdout = std::io::stdout();
+
+    // Get the home directory from the context
+    let home_dir = ctx.env().home().unwrap_or_default();
+    println!("Test home directory: {:?}", home_dir);
+
+    // Create a file directly in the home directory first to ensure it exists
+    let home_path = ctx.fs().chroot_path(&home_dir);
+    println!("Chrooted home path: {:?}", home_path);
+
+    // Ensure the home directory exists
+    ctx.fs().create_dir_all(&home_path).await.unwrap();
+
+    let v = serde_json::json!({
+        "path": "~/file.txt",
+        "command": "create",
+        "file_text": "content in home file"
+    });
+
+    let result = serde_json::from_value::<FsWrite>(v)
+        .unwrap()
+        .invoke(&ctx, &mut stdout)
+        .await;
+
+    match &result {
+        Ok(_) => println!("Writing to ~/file.txt succeeded"),
+        Err(e) => println!("Writing to ~/file.txt failed: {:?}", e),
+    }
+
+    assert!(result.is_ok(), "Writing to ~/file.txt should succeed");
+
+    // Verify content was written correctly
+    let file_path = home_path.join("file.txt");
+    println!("Checking file at: {:?}", file_path);
+
+    let content_result = ctx.fs().read_to_string(&file_path).await;
+    match &content_result {
+        Ok(content) => println!("Read content: {:?}", content),
+        Err(e) => println!("Failed to read content: {:?}", e),
+    }
+
+    assert!(content_result.is_ok(), "Should be able to read from expanded path");
+    assert_eq!(content_result.unwrap(), "content in home file\n");
+
+    // Test with "~/nested/path/file.txt" to ensure deep paths work
+    let nested_dir = home_path.join("nested").join("path");
+    ctx.fs().create_dir_all(&nested_dir).await.unwrap();
+
+    let v = serde_json::json!({
+        "path": "~/nested/path/file.txt",
+        "command": "create",
+        "file_text": "content in nested path"
+    });
+
+    let result = serde_json::from_value::<FsWrite>(v)
+        .unwrap()
+        .invoke(&ctx, &mut stdout)
+        .await;
+
+    assert!(result.is_ok(), "Writing to ~/nested/path/file.txt should succeed");
+
+    // Verify nested path content
+    let nested_file_path = nested_dir.join("file.txt");
+    let nested_content = ctx.fs().read_to_string(&nested_file_path).await.unwrap();
+    assert_eq!(nested_content, "content in nested path\n");
 }

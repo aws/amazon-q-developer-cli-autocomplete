@@ -312,27 +312,38 @@ const SMALL_SCREEN_WELCOME_TEXT: &str = color_print::cstr! {"<em>Welcome to <cya
 const RESUME_TEXT: &str = color_print::cstr! {"<em>Picking up where we left off...</em>"};
 
 // Only show the model-related tip for now to make users aware of this feature.
-const ROTATING_TIPS: [&str; 2] = [
-    // color_print::cstr! {"You can resume the last conversation from your current directory by launching with
-    // <green!>q chat --resume</green!>"}, color_print::cstr! {"Get notified whenever Q CLI finishes responding.
-    // Just run <green!>q settings chat.enableNotifications true</green!>"}, color_print::cstr! {"You can use
-    // <green!>/editor</green!> to edit your prompt with a vim-like experience"}, color_print::cstr!
-    // {"<green!>/usage</green!> shows you a visual breakdown of your current context window usage"},
-    // color_print::cstr! {"Get notified whenever Q CLI finishes responding. Just run <green!>q settings
-    // chat.enableNotifications true</green!>"}, color_print::cstr! {"You can execute bash commands by typing
-    // <green!>!</green!> followed by the command"}, color_print::cstr! {"Q can use tools without asking for
-    // confirmation every time. Give <green!>/tools trust</green!> a try"}, color_print::cstr! {"You can
-    // programmatically inject context to your prompts by using hooks. Check out <green!>/context hooks
-    // help</green!>"}, color_print::cstr! {"You can use <green!>/compact</green!> to replace the conversation
-    // history with its summary to free up the context space"}, color_print::cstr! {"If you want to file an issue
-    // to the Q CLI team, just tell me, or run <green!>q issue</green!>"}, color_print::cstr! {"You can enable
-    // custom tools with <green!>MCP servers</green!>. Learn more with /help"}, color_print::cstr! {"You can
-    // specify wait time (in ms) for mcp server loading with <green!>q settings mcp.initTimeout {timeout in
-    // int}</green!>. Servers that takes longer than the specified time will continue to load in the background. Use
-    // /tools to see pending servers."}, color_print::cstr! {"You can see the server load status as well as any
-    // warnings or errors associated with <green!>/mcp</green!>"},
+const ROTATING_TIPS: [&str; 16] = [
+    color_print::cstr! {"You can resume the last conversation from your current directory by launching with
+    <green!>q chat --resume</green!>"},
+    color_print::cstr! {"Get notified whenever Q CLI finishes responding.
+    Just run <green!>q settings chat.enableNotifications true</green!>"},
+    color_print::cstr! {"You can use
+    <green!>/editor</green!> to edit your prompt with a vim-like experience"},
+    color_print::cstr! {"<green!>/usage</green!> shows you a visual breakdown of your current context window usage"},
+    color_print::cstr! {"Get notified whenever Q CLI finishes responding. Just run <green!>q settings
+    chat.enableNotifications true</green!>"},
+    color_print::cstr! {"You can execute bash commands by typing
+    <green!>!</green!> followed by the command"},
+    color_print::cstr! {"Q can use tools without asking for
+    confirmation every time. Give <green!>/tools trust</green!> a try"},
+    color_print::cstr! {"You can
+    programmatically inject context to your prompts by using hooks. Check out <green!>/context hooks
+    help</green!>"},
+    color_print::cstr! {"You can use <green!>/compact</green!> to replace the conversation
+    history with its summary to free up the context space"},
+    color_print::cstr! {"If you want to file an issue
+    to the Q CLI team, just tell me, or run <green!>q issue</green!>"},
+    color_print::cstr! {"You can enable
+    custom tools with <green!>MCP servers</green!>. Learn more with /help"},
+    color_print::cstr! {"You can
+    specify wait time (in ms) for mcp server loading with <green!>q settings mcp.initTimeout {timeout in
+    int}</green!>. Servers that takes longer than the specified time will continue to load in the background. Use
+    /tools to see pending servers."},
+    color_print::cstr! {"You can see the server load status as well as any
+    warnings or errors associated with <green!>/mcp</green!>"},
     color_print::cstr! {"Use <green!>/model</green!> to select the model to use for this conversation"},
     color_print::cstr! {"Set a default model by running <green!>q settings chat.defaultModel MODEL</green!>. Run <green!>/model</green!> to learn more."},
+    color_print::cstr! {"Run <green!>/prompts</green!> to learn how to build & run repeatable workflows"},
 ];
 
 const GREETING_BREAK_POINT: usize = 80;
@@ -385,6 +396,22 @@ pub enum ChatError {
     NonInteractiveToolApproval,
     #[error(transparent)]
     GetPromptError(#[from] GetPromptError),
+}
+
+impl ChatError {
+    fn status_code(&self) -> Option<u16> {
+        match self {
+            ChatError::Client(e) => e.status_code(),
+            ChatError::Auth(_) => None,
+            ChatError::ResponseStream(_) => None,
+            ChatError::Std(_) => None,
+            ChatError::Readline(_) => None,
+            ChatError::Custom(_) => None,
+            ChatError::Interrupted { .. } => None,
+            ChatError::NonInteractiveToolApproval => None,
+            ChatError::GetPromptError(_) => None,
+        }
+    }
 }
 
 impl ReasonCode for ChatError {
@@ -940,6 +967,7 @@ impl ChatSession {
                     TelemetryResult::Failed,
                     Some(reason),
                     Some(reason_desc),
+                    e.status_code(),
                 )
                 .await;
                 match e {
@@ -988,6 +1016,7 @@ impl ChatSession {
                             TelemetryResult::Failed,
                             Some(reason),
                             Some(reason_desc),
+                            err.status_code(),
                         )
                         .await;
                         return Err(err.into());
@@ -1006,8 +1035,16 @@ impl ChatSession {
             )?;
         }
 
-        self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
-            .await;
+        self.send_chat_telemetry(
+            database,
+            telemetry,
+            request_id,
+            TelemetryResult::Succeeded,
+            None,
+            None,
+            None,
+        )
+        .await;
 
         self.conversation.replace_history_with_summary(summary.clone());
 
@@ -1372,7 +1409,7 @@ impl ChatSession {
                         style::SetAttribute(Attribute::Bold),
                         style::Print(format!(" ● Completed in {}s", tool_time)),
                         style::SetForegroundColor(Color::Reset),
-                        style::Print("\n"),
+                        style::Print("\n\n"),
                     )?;
 
                     tool_telemetry = tool_telemetry.and_modify(|ev| ev.is_success = Some(true));
@@ -1532,6 +1569,7 @@ impl ChatSession {
                         TelemetryResult::Failed,
                         Some(reason),
                         Some(reason_desc),
+                        recv_error.status_code(),
                     )
                     .await;
 
@@ -1650,8 +1688,16 @@ impl ChatSession {
             }
 
             if ended {
-                self.send_chat_telemetry(database, telemetry, request_id, TelemetryResult::Succeeded, None, None)
-                    .await;
+                self.send_chat_telemetry(
+                    database,
+                    telemetry,
+                    request_id,
+                    TelemetryResult::Succeeded,
+                    None,
+                    None,
+                    None,
+                )
+                .await;
 
                 if database
                     .settings
@@ -1947,6 +1993,7 @@ impl ChatSession {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_chat_telemetry(
         &self,
         database: &Database,
@@ -1955,6 +2002,7 @@ impl ChatSession {
         result: TelemetryResult,
         reason: Option<String>,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
     ) {
         telemetry
             .send_chat_added_message(
@@ -1978,6 +2026,7 @@ impl ChatSession {
         telemetry: &TelemetryThread,
         reason: String,
         reason_desc: Option<String>,
+        status_code: Option<u16>,
     ) {
         telemetry
             .send_response_error(
@@ -1987,6 +2036,7 @@ impl ChatSession {
                 TelemetryResult::Failed,
                 Some(reason),
                 reason_desc,
+                status_code,
             )
             .await
             .ok();
@@ -2316,11 +2366,13 @@ mod tests {
                 "/tools untrust fs_write".to_string(),
                 "create a file".to_string(), // prompt again due to untrust
                 "n".to_string(),             // cancel
+                "no reason".to_string(),     // dummy reason
                 "/tools trust fs_write".to_string(),
                 "create a file".to_string(), // again without prompting due to '/tools trust'
                 "/tools reset".to_string(),
                 "create a file".to_string(), // prompt again due to reset
                 "n".to_string(),             // cancel
+                "no reason".to_string(),     // dummy reason
                 "exit".to_string(),
             ]),
             false,

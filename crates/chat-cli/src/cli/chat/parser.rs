@@ -27,9 +27,25 @@ pub struct RecvError {
     pub source: RecvErrorKind,
 }
 
+impl RecvError {
+    pub fn status_code(&self) -> Option<u16> {
+        match &self.source {
+            RecvErrorKind::Client(e) => e.status_code(),
+            RecvErrorKind::Json(_) => None,
+            RecvErrorKind::StreamTimeout { .. } => None,
+            RecvErrorKind::UnexpectedToolUseEos { .. } => None,
+        }
+    }
+}
+
 impl ReasonCode for RecvError {
     fn reason_code(&self) -> String {
-        "RecvError".to_string()
+        match &self.source {
+            RecvErrorKind::Client(_) => "RecvErrorApiClient".to_string(),
+            RecvErrorKind::Json(_) => "RecvErrorJson".to_string(),
+            RecvErrorKind::StreamTimeout { .. } => "RecvErrorStreamTimeout".to_string(),
+            RecvErrorKind::UnexpectedToolUseEos { .. } => "RecvErrorUnexpectedToolUseEos".to_string(),
+        }
     }
 }
 

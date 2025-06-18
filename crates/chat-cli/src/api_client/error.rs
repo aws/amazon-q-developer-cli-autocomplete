@@ -12,6 +12,7 @@ use amzn_qdeveloper_streaming_client::types::error::ChatResponseStreamError as Q
 use aws_sdk_ssooidc::error::ProvideErrorMetadata;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 pub use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_runtime_api::http::Response;
 use aws_smithy_types::event_stream::RawMessage;
 use thiserror::Error;
 
@@ -51,11 +52,14 @@ pub enum ApiClientError {
 
     // quota breach
     #[error("quota has reached its limit")]
-    QuotaBreach(&'static str),
+    QuotaBreach {
+        message: &'static str,
+        status_code: Option<u16>,
+    },
 
     // Separate from quota breach (somehow)
     #[error("monthly query limit reached")]
-    MonthlyLimitReached,
+    MonthlyLimitReached { status_code: Option<u16> },
 
     #[error("{}", SdkErrorDisplay(.0))]
     CreateSubscriptionToken(#[from] SdkError<CreateSubscriptionTokenError, HttpResponse>),
@@ -66,7 +70,7 @@ pub enum ApiClientError {
     /// Note that we currently do not receive token usage information regarding how large the
     /// context window is.
     #[error("the context window has overflowed")]
-    ContextWindowOverflow,
+    ContextWindowOverflow { status_code: Option<u16> },
 
     #[error(transparent)]
     SmithyBuild(#[from] aws_smithy_types::error::operation::BuildError),
@@ -80,7 +84,34 @@ pub enum ApiClientError {
     #[error(
         "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again."
     )]
-    ModelOverloadedError { request_id: Option<String> },
+    ModelOverloadedError {
+        request_id: Option<String>,
+        status_code: Option<u16>,
+    },
+}
+
+impl ApiClientError {
+    pub fn status_code(&self) -> Option<u16> {
+        match self {
+            ApiClientError::GenerateCompletions(e) => sdk_status_code(e),
+            ApiClientError::GenerateRecommendations(e) => sdk_status_code(e),
+            ApiClientError::ListAvailableCustomizations(e) => sdk_status_code(e),
+            ApiClientError::ListAvailableServices(e) => sdk_status_code(e),
+            ApiClientError::CodewhispererGenerateAssistantResponse(e) => sdk_status_code(e),
+            ApiClientError::QDeveloperSendMessage(e) => sdk_status_code(e),
+            ApiClientError::CodewhispererChatResponseStream(_) => None,
+            ApiClientError::QDeveloperChatResponseStream(_) => None,
+            ApiClientError::ListAvailableProfilesError(e) => sdk_status_code(e),
+            ApiClientError::SendTelemetryEvent(e) => sdk_status_code(e),
+            ApiClientError::CreateSubscriptionToken(e) => sdk_status_code(e),
+            ApiClientError::QuotaBreach { status_code, .. } => *status_code,
+            ApiClientError::ContextWindowOverflow { status_code } => *status_code,
+            ApiClientError::SmithyBuild(_) => None,
+            ApiClientError::AuthError(_) => None,
+            ApiClientError::ModelOverloadedError { status_code, .. } => *status_code,
+            ApiClientError::MonthlyLimitReached { status_code } => *status_code,
+        }
+    }
 }
 
 impl ReasonCode for ApiClientError {
@@ -97,12 +128,12 @@ impl ReasonCode for ApiClientError {
             ApiClientError::ListAvailableProfilesError(e) => sdk_error_code(e),
             ApiClientError::SendTelemetryEvent(e) => sdk_error_code(e),
             ApiClientError::CreateSubscriptionToken(e) => sdk_error_code(e),
-            ApiClientError::QuotaBreach(_) => "QuotaBreachError".to_string(),
-            ApiClientError::ContextWindowOverflow => "ContextWindowOverflow".to_string(),
+            ApiClientError::QuotaBreach { .. } => "QuotaBreachError".to_string(),
+            ApiClientError::ContextWindowOverflow { .. } => "ContextWindowOverflow".to_string(),
             ApiClientError::SmithyBuild(_) => "SmithyBuildError".to_string(),
             ApiClientError::AuthError(_) => "AuthError".to_string(),
             ApiClientError::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
-            ApiClientError::MonthlyLimitReached => "MonthlyLimitReached".to_string(),
+            ApiClientError::MonthlyLimitReached { .. } => "MonthlyLimitReached".to_string(),
         }
     }
 }
@@ -114,6 +145,10 @@ where
     e.as_service_error()
         .and_then(|se| se.meta().code().map(str::to_string))
         .unwrap_or_else(|| e.to_string())
+}
+
+fn sdk_status_code<E>(e: &SdkError<E, Response>) -> Option<u16> {
+    e.raw_response().map(|res| res.status().as_u16())
 }
 
 #[cfg(test)]

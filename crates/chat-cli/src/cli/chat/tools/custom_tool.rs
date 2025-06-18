@@ -42,6 +42,8 @@ pub struct CustomToolConfig {
     pub env: Option<HashMap<String, String>>,
     #[serde(default = "default_timeout")]
     pub timeout: u64,
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 pub fn default_timeout() -> u64 {
@@ -65,6 +67,7 @@ impl CustomToolClient {
             args,
             env,
             timeout,
+            disabled: _,
         } = config;
         let mcp_client_config = McpClientConfig {
             server_name: server_name.clone(),

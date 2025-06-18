@@ -30,6 +30,7 @@ mod tests {
             result: crate::telemetry::definitions::types::Result::new("Succeeded".to_string()),
             reason: None,
             reason_desc: None,
+            status_code: None,
             codewhispererterminal_model: None,
         });
 
