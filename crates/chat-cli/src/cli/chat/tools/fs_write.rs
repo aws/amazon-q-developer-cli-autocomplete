@@ -241,6 +241,9 @@ impl FsWrite {
                 // Display summary as purpose if available after the diff
                 super::display_purpose(self.get_summary(), output)?;
 
+                // Display summary if available after the diff
+                super::display_summary(self.get_summary(), updates)?;
+
                 Ok(())
             },
             FsWrite::Append { path, new_str, .. } => {
