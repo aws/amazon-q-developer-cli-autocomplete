@@ -434,7 +434,7 @@ mod test {
                 input: None,
                 profile: Some("my-profile".to_string()),
                 model: None,
-                trust_all_tools: false,
+                trust_all_tools: true,
                 trust_tools: None,
                 non_interactive: false
             })
@@ -452,7 +452,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: true
             })
         );
         assert_parse!(
@@ -464,7 +464,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: true
             })
         );
     }

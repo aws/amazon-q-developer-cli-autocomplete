@@ -414,8 +414,8 @@ mod tests {
     use crate::cli::chat::util::shared_writer::NullWriter;
     use crate::util::test::assert_parse;
 
-    #[test]
-    fn test_scope_and_profile_defaults_to_workspace() {
+    #[tokio::test]
+    async fn test_scope_and_profile_defaults_to_workspace() {
         let ctx = Context::new();
         let path = resolve_scope_profile(&ctx, None).unwrap();
         assert_eq!(
@@ -425,8 +425,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_resolve_paths() {
+    #[tokio::test]
+    async fn test_resolve_paths() {
         let ctx = Context::new();
         // workspace
         let p = resolve_scope_profile(&ctx, Some(Scope::Workspace)).unwrap();

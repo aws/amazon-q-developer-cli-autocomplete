@@ -1278,8 +1278,6 @@ impl ChatSession {
             })
         } else {
             // Check for a pending tool approval
-            let tool_denied_without_reason = ["n", "N"].contains(&input);
-
             if let Some(index) = self.pending_tool_index {
                 let is_trust = ["t", "T"].contains(&input);
                 let tool_use = &mut self.tool_uses[index];
@@ -1290,21 +1288,6 @@ impl ChatSession {
                     tool_use.accepted = true;
 
                     return Ok(ChatState::ExecuteTools);
-                // Prompt reason if no selected
-                } else if tool_denied_without_reason {
-                    tool_use.accepted = false;
-                    execute!(
-                        self.output,
-                        style::SetForegroundColor(Color::DarkGrey),
-                        style::Print(
-                            "\nPlease provide a reason for denying this tool use, or otherwise continue your conversation:\n\n"
-                        ),
-                        style::SetForegroundColor(Color::Reset),
-                    )?;
-
-                    return Ok(ChatState::PromptUser {
-                        skip_printing_tools: true,
-                    });
                 }
             } else if !self.pending_prompts.is_empty() {
                 let prompts = self.pending_prompts.drain(0..).collect();
@@ -1892,6 +1875,7 @@ impl ChatSession {
         }
 
         self.tool_uses = queued_tools;
+        self.pending_tool_index = Some(0);
         Ok(ChatState::ExecuteTools)
     }
 
@@ -2417,13 +2401,11 @@ mod tests {
                 "/tools untrust fs_write".to_string(),
                 "create a file".to_string(), // prompt again due to untrust
                 "n".to_string(),             // cancel
-                "no reason".to_string(),     // dummy reason
                 "/tools trust fs_write".to_string(),
                 "create a file".to_string(), // again without prompting due to '/tools trust'
                 "/tools reset".to_string(),
                 "create a file".to_string(), // prompt again due to reset
                 "n".to_string(),             // cancel
-                "no reason".to_string(),     // dummy reason
                 "exit".to_string(),
             ]),
             false,
@@ -2436,7 +2418,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .next(&mut ctx, &mut database, &telemetry)
+        .spawn(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2536,7 +2518,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .next(&mut ctx, &mut database, &telemetry)
+        .spawn(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2599,7 +2581,7 @@ mod tests {
             SharedWriter::stdout(),
             None,
             InputSource::new_mock(vec![
-                "/tools trustall".to_string(),
+                "/tools trust-all".to_string(),
                 "create a new file".to_string(),
                 "/tools reset".to_string(),
                 "create a new file".to_string(),
@@ -2615,7 +2597,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .next(&mut ctx, &mut database, &telemetry)
+        .spawn(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
@@ -2672,7 +2654,7 @@ mod tests {
         )
         .await
         .unwrap()
-        .next(&mut ctx, &mut database, &telemetry)
+        .spawn(&mut ctx, &mut database, &telemetry)
         .await
         .unwrap();
 
