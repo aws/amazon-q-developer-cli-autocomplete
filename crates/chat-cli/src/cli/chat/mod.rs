@@ -1397,6 +1397,8 @@ impl ChatSession {
                 continue;
             }
 
+            self.pending_tool_index = Some(i);
+
             return Ok(ChatState::PromptUser {
                 skip_printing_tools: false,
             });
@@ -2643,6 +2645,7 @@ mod tests {
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
         let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
+        let agents = AgentCollection::default();
 
         let buf = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
         let test_writer = TestWriterWithSink { sink: buf.clone() };
@@ -2655,6 +2658,7 @@ mod tests {
             &mut ctx,
             &mut database,
             "fake_conv_id",
+            agents,
             output,
             None,
             InputSource::new_mock(vec!["/subscribe".to_string(), "y".to_string(), "/quit".to_string()]),
@@ -2662,7 +2666,6 @@ mod tests {
             create_stream(serde_json::json!([])),
             || Some(80),
             tool_manager,
-            None,
             None,
             tool_config,
             ToolPermissions::new(0),
