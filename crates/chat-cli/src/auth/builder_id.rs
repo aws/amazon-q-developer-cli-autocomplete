@@ -520,7 +520,7 @@ pub async fn poll_create_token(
 
 pub async fn is_logged_in(database: &mut Database) -> bool {
     // Check for BuilderId if not using Sigv4
-    std::env::var("SIGV4_ENABLED_KEY").is_ok_and(|v| !v.is_empty()) || 
+    std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty()) || 
     matches!(BuilderIdToken::load(database).await, Ok(Some(_)))
 }
 
