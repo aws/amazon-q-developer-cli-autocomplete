@@ -39,6 +39,7 @@ pub enum ContextSubcommand {
     Show {
         /// Print out each matched file's content, hook configurations, and last
         /// session.conversation summary
+        #[arg(long)]
         expand: bool,
     },
     /// Add context rules (filenames or glob patterns)

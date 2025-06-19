@@ -88,6 +88,21 @@ impl PromptsArgs {
                 optimal_case
             }
         };
+        // Add usage guidance at the top
+        queue!(
+            session.output,
+            style::Print("\n"),
+            style::SetAttribute(Attribute::Bold),
+            style::Print("Usage: "),
+            style::SetAttribute(Attribute::Reset),
+            style::Print("You can use a prompt by typing "),
+            style::SetAttribute(Attribute::Bold),
+            style::SetForegroundColor(Color::Green),
+            style::Print("'@<prompt name> [...args]'"),
+            style::SetForegroundColor(Color::Reset),
+            style::SetAttribute(Attribute::Reset),
+            style::Print("\n\n"),
+        )?;
         queue!(
             session.output,
             style::Print("\n"),

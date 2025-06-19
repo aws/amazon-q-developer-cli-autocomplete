@@ -18,7 +18,11 @@ use crate::platform::Context;
 #[derive(Debug, PartialEq, Subcommand)]
 pub enum PersistSubcommand {
     /// Save the current conversation
-    Save { path: String, force: bool },
+    Save {
+        path: String,
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Load a previous conversation
     Load { path: String },
 }
