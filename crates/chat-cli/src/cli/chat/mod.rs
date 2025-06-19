@@ -1223,13 +1223,17 @@ impl ChatSession {
             args.insert(0, "q".to_owned());
             match SlashCommand::try_parse_from(args) {
                 Ok(command) => {
-                    if let Err(err) = command.execute(ctx, database, telemetry, self).await {
-                        queue!(
-                            self.output,
-                            style::SetForegroundColor(Color::Red),
-                            style::Print(format!("Failed to execute command: {}\n", err)),
-                            style::SetForegroundColor(Color::Reset)
-                        )?;
+                    match command.execute(ctx, database, telemetry, self).await {
+                        Ok(chat_state) if matches!(chat_state, ChatState::Exit) => return Ok(chat_state),
+                        Err(err) => {
+                            queue!(
+                                self.output,
+                                style::SetForegroundColor(Color::Red),
+                                style::Print(format!("Failed to execute command: {}\n", err)),
+                                style::SetForegroundColor(Color::Reset)
+                            )?;
+                        },
+                        _ => {},
                     }
 
                     writeln!(self.output)?;
