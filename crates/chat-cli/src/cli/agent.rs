@@ -47,6 +47,7 @@ impl McpServerConfig {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn from_slice(slice: &[u8], output: &mut impl Write, location: &str) -> eyre::Result<McpServerConfig> {
         match serde_json::from_slice::<Self>(slice) {
             Ok(config) => Ok(config),
@@ -424,7 +425,7 @@ pub trait AgentSubscriber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::chat::util::shared_writer::SharedWriter;
+    use crate::cli::chat::util::shared_writer::NullWriter;
 
     const INPUT: &str = r#"
             {
@@ -554,8 +555,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_persona() {
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        let mut output = SharedWriter::null();
+        let ctx = Context::new();
+        let mut output = NullWriter;
         let mut collection = AgentCollection::load(&ctx, None, &mut output).await;
 
         struct ToolManager;
@@ -600,7 +601,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_persona() {
         let mut collection = AgentCollection::default();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
 
         let persona_name = "test_persona";
         let result = collection.create_persona(&ctx, persona_name).await;
@@ -631,7 +632,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_persona() {
         let mut collection = AgentCollection::default();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let ctx = Context::new();
 
         let persona_name_one = "test_persona_one";
         collection

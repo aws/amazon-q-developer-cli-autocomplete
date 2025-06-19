@@ -71,8 +71,7 @@ impl Tool {
         match self {
             Tool::FsRead(fs_read) => agent.eval_perm(fs_read),
             Tool::FsWrite(fs_write) => agent.eval_perm(fs_write),
-            // TODO: fix this
-            Tool::ExecuteCommand(execute_command) => PermissionEvalResult::Ask,
+            Tool::ExecuteCommand(execute_command) => agent.eval_perm(execute_command),
             Tool::UseAws(use_aws) => agent.eval_perm(use_aws),
             Tool::Custom(custom_tool) => agent.eval_perm(custom_tool),
             Tool::GhIssue(_) => PermissionEvalResult::Allow,
