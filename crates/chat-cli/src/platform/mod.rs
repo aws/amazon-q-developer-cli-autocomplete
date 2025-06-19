@@ -1,14 +1,10 @@
 #![allow(dead_code)]
-#![allow(unused_variables)]
 
 pub mod diagnostics;
 mod env;
 mod fs;
 mod os;
-mod providers;
 mod sysinfo;
-
-use std::sync::Arc;
 
 pub use env::Env;
 pub use fs::Fs;
@@ -16,12 +12,16 @@ pub use os::{
     Os,
     Platform,
 };
-pub use providers::{
-    EnvProvider,
-    FsProvider,
-    SysInfoProvider,
-};
 pub use sysinfo::SysInfo;
+
+const WINDOWS_USER_HOME: &str = "C:\\Users\\testuser";
+const UNIX_USER_HOME: &str = "/home/testuser";
+
+pub const ACTIVE_USER_HOME: &str = if cfg!(windows) {
+    WINDOWS_USER_HOME
+} else {
+    UNIX_USER_HOME
+};
 
 /// Struct that contains the interface to every system related IO operation.
 ///
@@ -30,143 +30,48 @@ pub use sysinfo::SysInfo;
 /// code paths in unit tests.
 #[derive(Debug, Clone)]
 pub struct Context {
-    fs: Fs,
-    env: Env,
-    sysinfo: SysInfo,
-    platform: Platform,
+    pub fs: Fs,
+    pub env: Env,
+    pub sysinfo: SysInfo,
+    pub platform: Platform,
 }
 
 impl Context {
-    /// Returns a new [Context] with real implementations of each OS shim.
-    pub fn new() -> Arc<Self> {
-        match cfg!(test) {
-            true => Arc::new(Self {
+    pub fn new() -> Self {
+        if cfg!(test) {
+            let env = match cfg!(windows) {
+                true => Env::from_slice(&[("USERPROFILE", ACTIVE_USER_HOME), ("USERNAME", "testuser")]),
+                false => Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser")]),
+            };
+
+            Self {
+                fs: Fs::new(),
+                env,
+                sysinfo: SysInfo::new(),
+                platform: Platform::new(),
+            }
+        } else {
+            Self {
                 fs: Fs::new(),
                 env: Env::new(),
                 sysinfo: SysInfo::new(),
                 platform: Platform::new(),
-            }),
-            false => Arc::new_cyclic(|_| Self {
-                fs: Default::default(),
-                env: Default::default(),
-                sysinfo: SysInfo::default(),
-                platform: Platform::new(),
-            }),
+            }
         }
     }
 
-    pub fn builder() -> ContextBuilder {
-        ContextBuilder::new()
-    }
-
-    pub fn fs(&self) -> &Fs {
-        &self.fs
-    }
-
-    pub fn env(&self) -> &Env {
-        &self.env
-    }
-
-    pub fn sysinfo(&self) -> &SysInfo {
-        &self.sysinfo
-    }
-
-    pub fn platform(&self) -> &Platform {
-        &self.platform
+    /// TODO: delete this function
+    #[cfg(test)]
+    #[must_use]
+    pub fn with_env_var(self, key: &str, value: &str) -> Self {
+        unsafe { self.env.set_var(key, value) }
+        self
     }
 }
 
-#[derive(Default, Debug)]
-pub struct ContextBuilder {
-    fs: Option<Fs>,
-    env: Option<Env>,
-    sysinfo: Option<SysInfo>,
-    platform: Option<Platform>,
-}
-
-pub const WINDOWS_USER_HOME: &str = "C:\\Users\\testuser";
-pub const UNIX_USER_HOME: &str = "/home/testuser";
-
-pub const ACTIVE_USER_HOME: &str = if cfg!(windows) {
-    WINDOWS_USER_HOME
-} else {
-    UNIX_USER_HOME
-};
-
-impl ContextBuilder {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Builds an immutable [Context] using real implementations for each field by default.
-    pub fn build(self) -> Arc<Context> {
-        let fs = self.fs.unwrap_or_default();
-        let env = self.env.unwrap_or_default();
-        let sysinfo = self.sysinfo.unwrap_or_default();
-        let platform = self.platform.unwrap_or_default();
-        Arc::new_cyclic(|_| Context {
-            fs,
-            env,
-            sysinfo,
-            platform,
-        })
-    }
-
-    /// Builds an immutable [Context] using fake implementations for each field by default.
-    pub fn build_fake(self) -> Arc<Context> {
-        let fs = self.fs.unwrap_or_default();
-        let env = self.env.unwrap_or_default();
-        let sysinfo = self.sysinfo.unwrap_or_default();
-        let platform = self.platform.unwrap_or_default();
-        Arc::new_cyclic(|_| Context {
-            fs,
-            env,
-            sysinfo,
-            platform,
-        })
-    }
-
-    pub fn with_env(mut self, env: Env) -> Self {
-        self.env = Some(env);
-        self
-    }
-
-    pub fn with_fs(mut self, fs: Fs) -> Self {
-        self.fs = Some(fs);
-        self
-    }
-
-    /// Creates a chroot filesystem and fake environment so that `$HOME`
-    /// points to `<tempdir>/home/testuser`. Note that this replaces the
-    /// [Fs] and [Env] currently set with the builder.
-    #[cfg(test)]
-    pub async fn with_test_home(mut self) -> Result<Self, std::io::Error> {
-        let fs = Fs::new_chroot();
-        fs.create_dir_all(ACTIVE_USER_HOME).await?;
-        self.fs = Some(fs);
-
-        if cfg!(windows) {
-            self.env = Some(Env::from_slice(&[
-                ("USERPROFILE", ACTIVE_USER_HOME),
-                ("USERNAME", "testuser"),
-            ]));
-        } else {
-            self.env = Some(Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser")]));
-        }
-
-        Ok(self)
-    }
-
-    #[cfg(test)]
-    pub fn with_env_var(mut self, key: &str, value: &str) -> Self {
-        self.env = match self.env {
-            Some(env) if cfg!(test) => {
-                unsafe { env.set_var(key, value) };
-                Some(env)
-            },
-            _ => Some(Env::from_slice(&[(key, value)])),
-        };
-        self
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -176,24 +81,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_builder_with_test_home() {
-        let ctx = ContextBuilder::new()
-            .with_test_home()
-            .await
-            .unwrap()
-            .with_env_var("hello", "world")
-            .build();
+        let ctx = Context::new().with_env_var("hello", "world");
 
         #[cfg(windows)]
         {
-            assert!(ctx.fs().try_exists(WINDOWS_USER_HOME).await.unwrap());
-            assert_eq!(ctx.env().get("USERPROFILE").unwrap(), WINDOWS_USER_HOME);
+            assert!(ctx.fs.try_exists(ACTIVE_USER_HOME).await.unwrap());
+            assert_eq!(ctx.env.get("USERPROFILE").unwrap(), ACTIVE_USER_HOME);
         }
         #[cfg(not(windows))]
         {
-            assert!(ctx.fs().try_exists(UNIX_USER_HOME).await.unwrap());
-            assert_eq!(ctx.env().get("HOME").unwrap(), UNIX_USER_HOME);
+            assert!(ctx.fs.try_exists(ACTIVE_USER_HOME).await.unwrap());
+            assert_eq!(ctx.env.get("HOME").unwrap(), ACTIVE_USER_HOME);
         }
 
-        assert_eq!(ctx.env().get("hello").unwrap(), "world");
+        assert_eq!(ctx.env.get("hello").unwrap(), "world");
     }
 }

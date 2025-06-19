@@ -11,6 +11,7 @@ use crossterm::queue;
 use crossterm::style::{
     self,
     Color,
+    Stylize,
 };
 use eyre::{
     Result,
@@ -45,6 +46,9 @@ use crate::cli::chat::util::images::{
     pre_process,
 };
 use crate::platform::Context;
+
+const CHECKMARK: &str = "✔";
+const CROSS: &str = "✘";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
@@ -251,91 +255,90 @@ time. You tried to read {byte_count} bytes. Try executing with fewer lines speci
 
 /// Helper function to read a directory with specified depth
 async fn read_single_directory(ctx: &Context, path_str: &str, depth: Option<usize>) -> Result<String> {
-     let path = sanitize_path_tool_arg(ctx, path_str);
-        let max_depth = depth.unwrap_or(FsDirectory::DEFAULT_DEPTH);
-        debug!(?path, max_depth, "Reading directory at path with depth");
-        let mut result = Vec::new();
-        let mut dir_queue = VecDeque::new();
-        dir_queue.push_back((path, 0));
-        while let Some((path, depth)) = dir_queue.pop_front() {
-            if depth > max_depth {
-                break;
+    let path = sanitize_path_tool_arg(ctx, path_str);
+    let max_depth = depth.unwrap_or(FsDirectory::DEFAULT_DEPTH);
+    debug!(?path, max_depth, "Reading directory at path with depth");
+    let mut result = Vec::new();
+    let mut dir_queue = VecDeque::new();
+    dir_queue.push_back((path, 0));
+    while let Some((path, depth)) = dir_queue.pop_front() {
+        if depth > max_depth {
+            break;
+        }
+        let mut read_dir = ctx.fs().read_dir(path).await?;
+
+        #[cfg(windows)]
+        while let Some(ent) = read_dir.next_entry().await? {
+            let md = ent.metadata().await?;
+
+            let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
+            let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
+            let formatted_date = datetime
+                .format(time::macros::format_description!(
+                    "[month repr:short] [day] [hour]:[minute]"
+                ))
+                .unwrap();
+
+            result.push(format!(
+                "{} {} {} {}",
+                format_ftype(&md),
+                String::from_utf8_lossy(ent.file_name().as_encoded_bytes()),
+                formatted_date,
+                ent.path().to_string_lossy()
+            ));
+
+            if md.is_dir() && md.is_dir() {
+                dir_queue.push_back((ent.path(), depth + 1));
             }
-            let mut read_dir = ctx.fs().read_dir(path).await?;
+        }
 
-            #[cfg(windows)]
-            while let Some(ent) = read_dir.next_entry().await? {
-                let md = ent.metadata().await?;
-
-                let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
-                let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
-                let formatted_date = datetime
-                    .format(time::macros::format_description!(
-                        "[month repr:short] [day] [hour]:[minute]"
-                    ))
-                    .unwrap();
-
-                result.push(format!(
-                    "{} {} {} {}",
-                    format_ftype(&md),
-                    String::from_utf8_lossy(ent.file_name().as_encoded_bytes()),
-                    formatted_date,
-                    ent.path().to_string_lossy()
-                ));
-
-                if md.is_dir() && md.is_dir() {
-                    dir_queue.push_back((ent.path(), depth + 1));
-                }
-            }
-
-            #[cfg(unix)]
-            while let Some(ent) = read_dir.next_entry().await? {
-                use std::os::unix::fs::{
-                    MetadataExt,
-                    PermissionsExt,
-                };
+        #[cfg(unix)]
+        while let Some(ent) = read_dir.next_entry().await? {
+            use std::os::unix::fs::{
+                MetadataExt,
+                PermissionsExt,
+            };
 
             let md = ent.metadata().await?;
             let formatted_mode = format_mode(md.permissions().mode()).into_iter().collect::<String>();
 
-                let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
-                let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
-                let formatted_date = datetime
-                    .format(time::macros::format_description!(
-                        "[month repr:short] [day] [hour]:[minute]"
-                    ))
-                    .unwrap();
+            let modified_timestamp = md.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs();
+            let datetime = time::OffsetDateTime::from_unix_timestamp(modified_timestamp as i64).unwrap();
+            let formatted_date = datetime
+                .format(time::macros::format_description!(
+                    "[month repr:short] [day] [hour]:[minute]"
+                ))
+                .unwrap();
 
-                // Mostly copying "The Long Format" from `man ls`.
-                // TODO: query user/group database to convert uid/gid to names?
-                result.push(format!(
-                    "{}{} {} {} {} {} {} {}",
-                    format_ftype(&md),
-                    formatted_mode,
-                    md.nlink(),
-                    md.uid(),
-                    md.gid(),
-                    md.size(),
-                    formatted_date,
-                    ent.path().to_string_lossy()
-                ));
-                if md.is_dir() {
-                    dir_queue.push_back((ent.path(), depth + 1));
-                }
+            // Mostly copying "The Long Format" from `man ls`.
+            // TODO: query user/group database to convert uid/gid to names?
+            result.push(format!(
+                "{}{} {} {} {} {} {} {}",
+                format_ftype(&md),
+                formatted_mode,
+                md.nlink(),
+                md.uid(),
+                md.gid(),
+                md.size(),
+                formatted_date,
+                ent.path().to_string_lossy()
+            ));
+            if md.is_dir() {
+                dir_queue.push_back((ent.path(), depth + 1));
             }
         }
+    }
 
-        let file_count = result.len();
-        let result = result.join("\n");
-        let byte_count = result.len();
-        if byte_count > MAX_TOOL_RESPONSE_SIZE {
-            bail!(
-                "This tool only supports reading up to {MAX_TOOL_RESPONSE_SIZE} bytes at a time. You tried to read {byte_count} bytes ({file_count} files). Try executing with fewer lines specified."
-            );
-        }
+    let file_count = result.len();
+    let result = result.join("\n");
+    let byte_count = result.len();
+    if byte_count > MAX_TOOL_RESPONSE_SIZE {
+        bail!(
+            "This tool only supports reading up to {MAX_TOOL_RESPONSE_SIZE} bytes at a time. You tried to read {byte_count} bytes ({file_count} files). Try executing with fewer lines specified."
+        );
+    }
 
-        Ok(result)
-
+    Ok(result)
 }
 
 /// Helper function to search a file with specified substring
@@ -554,7 +557,7 @@ impl FsImage {
                 if !is_supported_image_type(&processed_path) {
                     bail!("'{}' is not a supported image type", &processed_path);
                 }
-                let is_file = ctx.fs().symlink_metadata(&processed_path).await?.is_file();
+                let is_file = ctx.fs.symlink_metadata(&processed_path).await?.is_file();
                 if !is_file {
                     bail!("'{}' is not a file", &processed_path);
                 }
@@ -1432,5 +1435,248 @@ mod tests {
                 FsSearch::CONTEXT_LINE_PREFIX
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_non_utf8_binary_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let binary_data = vec![0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8];
+        let binary_file_path = "/binary_test.dat";
+        ctx.fs.write(binary_file_path, &binary_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": binary_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains('�'), "Binary data should contain replacement characters");
+            assert_eq!(text.chars().count(), 8, "Should have 8 replacement characters");
+            assert!(
+                text.chars().all(|c| c == '�'),
+                "All characters should be replacement characters"
+            );
+        } else {
+            panic!("expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_latin1_encoded_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let latin1_data = vec![99, 97, 102, 233]; // "café" in Latin-1
+        let latin1_file_path = "/latin1_test.txt";
+        ctx.fs.write(latin1_file_path, &latin1_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": latin1_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Latin-1 byte 233 (é) is invalid UTF-8, so it becomes a replacement character
+            assert!(text.starts_with("caf"), "Should start with 'caf'");
+            assert!(
+                text.contains('�'),
+                "Should contain replacement character for invalid UTF-8"
+            );
+        } else {
+            panic!("expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_search_non_utf8_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let mut mixed_data = Vec::new();
+        mixed_data.extend_from_slice(b"Hello world\n");
+        mixed_data.extend_from_slice(&[0xff, 0xfe]); // Invalid UTF-8 bytes
+        mixed_data.extend_from_slice(b"\nGoodbye world\n");
+
+        let mixed_file_path = "/mixed_encoding_test.txt";
+        ctx.fs.write(mixed_file_path, &mixed_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": mixed_file_path,
+            "pattern": "hello"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(matches.len(), 1, "Should find one match for 'hello'");
+            assert_eq!(matches[0].line_number, 1, "Match should be on line 1");
+            assert!(
+                matches[0].context.contains("Hello world"),
+                "Should contain the matched line"
+            );
+        } else {
+            panic!("expected Text output");
+        }
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": mixed_file_path,
+            "pattern": "goodbye"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(matches.len(), 1, "Should find one match for 'goodbye'");
+            assert!(
+                matches[0].context.contains("Goodbye world"),
+                "Should contain the matched line"
+            );
+        } else {
+            panic!("expected Text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_windows1252_encoded_file() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let mut windows1252_data = Vec::new();
+        windows1252_data.extend_from_slice(b"Text with ");
+        windows1252_data.push(0x93); // Left double quotation mark in Windows-1252
+        windows1252_data.extend_from_slice(b"smart quotes");
+        windows1252_data.push(0x94); // Right double quotation mark in Windows-1252
+
+        let windows1252_file_path = "/windows1252_test.txt";
+        ctx.fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": windows1252_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains("Text with"), "Should contain readable text");
+            assert!(text.contains("smart quotes"), "Should contain readable text");
+            assert!(
+                text.contains('�'),
+                "Should contain replacement characters for invalid UTF-8"
+            );
+        } else {
+            panic!("expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_search_pattern_with_replacement_chars() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let mut data_with_invalid_utf8 = Vec::new();
+        data_with_invalid_utf8.extend_from_slice(b"Line 1: caf");
+        data_with_invalid_utf8.push(0xe9); // Invalid UTF-8 byte (Latin-1 é)
+        data_with_invalid_utf8.extend_from_slice(b"\nLine 2: hello world\n");
+
+        let invalid_utf8_file_path = "/invalid_utf8_search_test.txt";
+        ctx.fs
+            .write(invalid_utf8_file_path, &data_with_invalid_utf8)
+            .await
+            .unwrap();
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": invalid_utf8_file_path,
+            "pattern": "caf"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(matches.len(), 1, "Should find one match for 'caf'");
+            assert_eq!(matches[0].line_number, 1, "Match should be on line 1");
+            assert!(matches[0].context.contains("caf"), "Should contain 'caf'");
+        } else {
+            panic!("expected Text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_empty_file_with_invalid_utf8() {
+        let ctx = Context::new();
+        let mut stdout = std::io::stdout();
+
+        let invalid_only_data = vec![0xff, 0xfe, 0xfd];
+        let invalid_only_file_path = "/invalid_only_test.txt";
+        ctx.fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
+
+        let v = serde_json::json!({
+            "path": invalid_only_file_path,
+            "mode": "Line"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert_eq!(text.chars().count(), 3, "Should have 3 replacement characters");
+            assert!(text.chars().all(|c| c == '�'), "Should be all replacement characters");
+        } else {
+            panic!("expected text output");
+        }
+
+        let v = serde_json::json!({
+            "mode": "Search",
+            "path": invalid_only_file_path,
+            "pattern": "test"
+        });
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&ctx, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(value) = output.output {
+            let matches: Vec<SearchMatch> = serde_json::from_str(&value).unwrap();
+            assert_eq!(
+                matches.len(),
+                0,
+                "Should find no matches in file with only invalid UTF-8"
+            );
+        } else {
+            panic!("expected Text output");
+        }
     }
 }

@@ -534,7 +534,7 @@ fn queue_newline_or_advance<'a, 'b>(
     Ok(())
 }
 
-fn queue<'a>(o: &mut impl Write, command: impl Command) -> Result<(), ErrMode<Error<'a>>> {
+fn queue<'a>(mut o: impl Write, command: impl Command) -> Result<(), ErrMode<Error<'a>>> {
     use crossterm::QueueableCommand;
     o.queue(command).map_err(|err| ErrMode::Cut(Error::Stdio(err)))?;
     Ok(())

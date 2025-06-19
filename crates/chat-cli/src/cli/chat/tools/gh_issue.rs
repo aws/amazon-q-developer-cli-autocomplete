@@ -42,14 +42,13 @@ pub struct GhIssueContext {
     pub transcript: VecDeque<String>,
     pub failed_request_ids: Vec<String>,
     pub tool_permissions: HashMap<String, ToolPermission>,
-    pub interactive: bool,
 }
 
 /// Max amount of characters to include in the transcript.
 const MAX_TRANSCRIPT_CHAR_LEN: usize = 3_000;
 
 impl GhIssue {
-    pub async fn invoke(&self, _updates: impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
         let Some(context) = self.context.as_ref() else {
             return Err(eyre!(
                 "report_issue: Required tool context (GhIssueContext) not set by the program."
@@ -60,7 +59,7 @@ impl GhIssue {
         let additional_environment = [
             Self::get_chat_settings(context),
             Self::get_request_ids(context),
-            Self::get_context(context).await,
+            Self::get_context(ctx, context).await,
         ]
         .join("\n\n");
 
@@ -140,7 +139,7 @@ impl GhIssue {
         )
     }
 
-    async fn get_context(context: &GhIssueContext) -> String {
+    async fn get_context(ctx: &Context, context: &GhIssueContext) -> String {
         let mut ctx_str = "[chat-context]\n".to_string();
         let Some(ctx_manager) = &context.context_manager else {
             ctx_str.push_str("No context available.");
@@ -148,7 +147,7 @@ impl GhIssue {
         };
 
         ctx_str.push_str(&format!("current_profile={}\n", ctx_manager.current_profile));
-        match ctx_manager.list_profiles().await {
+        match ctx_manager.list_profiles(ctx).await {
             Ok(profiles) if !profiles.is_empty() => {
                 ctx_str.push_str(&format!("profiles=\n{}\n\n", profiles.join("\n")));
             },
@@ -175,7 +174,7 @@ impl GhIssue {
         }
 
         // Handle context files
-        match ctx_manager.get_context_files().await {
+        match ctx_manager.get_context_files(ctx).await {
             Ok(context_files) if !context_files.is_empty() => {
                 ctx_str.push_str("files=\n");
                 let total_size: usize = context_files
@@ -196,8 +195,6 @@ impl GhIssue {
 
     fn get_chat_settings(context: &GhIssueContext) -> String {
         let mut result_str = "[chat-settings]\n".to_string();
-        result_str.push_str(&format!("interactive={}", context.interactive));
-
         result_str.push_str("\n\n[chat-trusted_tools]");
         for (tool, permission) in context.tool_permissions.iter() {
             result_str.push_str(&format!("\n{tool}={}", permission.trusted));
@@ -206,9 +203,9 @@ impl GhIssue {
         result_str
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
         Ok(queue!(
-            updates,
+            output,
             style::Print("I will prepare a github issue with our conversation history.\n\n"),
             style::SetForegroundColor(Color::Green),
             style::Print(format!("Title: {}\n", &self.title)),

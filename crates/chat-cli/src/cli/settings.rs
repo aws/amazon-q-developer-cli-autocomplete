@@ -17,10 +17,8 @@ use serde_json::json;
 use super::OutputFormat;
 use crate::database::Database;
 use crate::database::settings::Setting;
-use crate::util::{
-    CliContext,
-    directories,
-};
+use crate::platform::Context;
+use crate::util::directories;
 
 #[derive(Clone, Debug, Subcommand, PartialEq, Eq)]
 pub enum SettingsSubcommands {
@@ -57,11 +55,11 @@ pub struct SettingsArgs {
 }
 
 impl SettingsArgs {
-    pub async fn execute(&self, database: &mut Database, cli_context: &CliContext) -> Result<ExitCode> {
+    pub async fn execute(&self, ctx: &Context, database: &mut Database) -> Result<ExitCode> {
         match self.cmd {
             Some(SettingsSubcommands::Open) => {
                 let file = directories::settings_path().context("Could not get settings path")?;
-                if let Ok(editor) = cli_context.context().env().get("EDITOR") {
+                if let Ok(editor) = ctx.env.get("EDITOR") {
                     tokio::process::Command::new(editor).arg(file).spawn()?.wait().await?;
                     Ok(ExitCode::SUCCESS)
                 } else {

@@ -47,7 +47,6 @@ use serde::{
     Deserialize,
     Serialize,
 };
-use thiserror::Error;
 use tokio::signal::ctrl_c;
 use tokio::sync::{
     Mutex,
@@ -59,13 +58,12 @@ use tracing::{
     warn,
 };
 
-use super::util::shared_writer::SharedWriter;
 use crate::api_client::model::{
     ToolResult,
     ToolResultContentBlock,
     ToolResultStatus,
 };
-use crate::cli::chat::command::PromptsGetCommand;
+use crate::cli::chat::cli::prompts::GetPromptError;
 use crate::cli::chat::message::AssistantToolUse;
 use crate::cli::chat::server_messenger::{
     ServerMessengerBuilder,
@@ -105,29 +103,11 @@ const VALID_TOOL_NAME: &str = "^[a-zA-Z][a-zA-Z0-9_]*$";
 const SPINNER_CHARS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
 pub fn workspace_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(ctx.env().current_dir()?.join(".amazonq").join("mcp.json"))
+    Ok(ctx.env.current_dir()?.join(".amazonq").join("mcp.json"))
 }
 
 pub fn global_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
     Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("mcp.json"))
-}
-
-#[derive(Debug, Error)]
-pub enum GetPromptError {
-    #[error("Prompt with name {0} does not exist")]
-    PromptNotFound(String),
-    #[error("Prompt {0} is offered by more than one server. Use one of the following {1}")]
-    AmbiguousPrompt(String, String),
-    #[error("Missing client")]
-    MissingClient,
-    #[error("Missing prompt name")]
-    MissingPromptName,
-    #[error("Synchronization error: {0}")]
-    Synchronization(String),
-    #[error("Missing prompt bundle")]
-    MissingPromptInfo,
-    #[error(transparent)]
-    General(#[from] eyre::Report),
 }
 
 /// Messages used for communication between the tool initialization thread and the loading
@@ -213,13 +193,13 @@ impl McpServerConfig {
     }
 
     pub async fn load_from_file(ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let contents = ctx.fs().read_to_string(path.as_ref()).await?;
+        let contents = ctx.fs.read_to_string(path.as_ref()).await?;
         Ok(serde_json::from_str(&contents)?)
     }
 
     pub async fn save_to_file(&self, ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        ctx.fs().write(path.as_ref(), json).await?;
+        ctx.fs.write(path.as_ref(), json).await?;
         Ok(())
     }
 
@@ -247,7 +227,6 @@ pub struct ToolManagerBuilder {
     prompt_list_sender: Option<std::sync::mpsc::Sender<Vec<String>>>,
     prompt_list_receiver: Option<std::sync::mpsc::Receiver<Option<String>>>,
     conversation_id: Option<String>,
-    is_interactive: bool,
 }
 
 impl ToolManagerBuilder {
@@ -271,23 +250,33 @@ impl ToolManagerBuilder {
         self
     }
 
-    pub fn interactive(mut self, is_interactive: bool) -> Self {
-        self.is_interactive = is_interactive;
-        self
-    }
-
     pub async fn build(
         mut self,
         telemetry: &TelemetryThread,
         mut output: Box<dyn Write + Send + Sync + 'static>,
+        interactive: bool,
     ) -> eyre::Result<ToolManager> {
         let McpServerConfig { mcp_servers } = self.mcp_server_config.ok_or(eyre::eyre!("Missing mcp server config"))?;
         debug_assert!(self.conversation_id.is_some());
         let conversation_id = self.conversation_id.ok_or(eyre::eyre!("Missing conversation id"))?;
         let regex = regex::Regex::new(VALID_TOOL_NAME)?;
         let mut hasher = DefaultHasher::new();
-        let is_interactive = self.is_interactive;
-        let pre_initialized = mcp_servers
+
+        // Separate enabled and disabled servers
+        let (enabled_servers, disabled_servers): (Vec<_>, Vec<_>) = mcp_servers
+            .into_iter()
+            .partition(|(_, server_config)| !server_config.disabled);
+
+        // Prepare disabled servers for display
+        let disabled_servers_display: Vec<String> = disabled_servers
+            .iter()
+            .map(|(server_name, _)| {
+                let snaked_cased_name = server_name.to_case(convert_case::Case::Snake);
+                sanitize_name(snaked_cased_name, &regex, &mut hasher)
+            })
+            .collect();
+
+        let pre_initialized = enabled_servers
             .into_iter()
             .map(|(server_name, server_config)| {
                 let snaked_cased_name = server_name.to_case(convert_case::Case::Snake);
@@ -296,6 +285,7 @@ impl ToolManagerBuilder {
                 (sanitized_server_name, custom_tool_client)
             })
             .collect::<Vec<(String, _)>>();
+
         let mut loading_servers = HashMap::<String, Instant>::new();
         for (server_name, _) in &pre_initialized {
             let init_time = std::time::Instant::now();
@@ -306,14 +296,26 @@ impl ToolManagerBuilder {
         // Spawn a task for displaying the mcp loading statuses.
         // This is only necessary when we are in interactive mode AND there are servers to load.
         // Otherwise we do not need to be spawning this.
-        let (_loading_display_task, loading_status_sender) = if is_interactive && total > 0 {
+        let (_loading_display_task, loading_status_sender) = if interactive
+            && (total > 0 || !disabled_servers_display.is_empty())
+        {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<LoadingMsg>(50);
+            let disabled_servers_display_clone = disabled_servers_display.clone();
             (
                 Some(tokio::task::spawn(async move {
                     let mut spinner_logo_idx: usize = 0;
                     let mut complete: usize = 0;
                     let mut failed: usize = 0;
-                    queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
+
+                    // Show disabled servers immediately
+                    for server_name in &disabled_servers_display_clone {
+                        queue_disabled_message(server_name, &mut output)?;
+                    }
+
+                    if total > 0 {
+                        queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
+                    }
+
                     loop {
                         match tokio::time::timeout(Duration::from_millis(50), rx.recv()).await {
                             Ok(Some(recv_result)) => match recv_result {
@@ -352,7 +354,7 @@ impl ToolManagerBuilder {
                                     queue_init_message(spinner_logo_idx, complete, failed, total, &mut output)?;
                                 },
                                 LoadingMsg::Terminate { still_loading } => {
-                                    if !still_loading.is_empty() {
+                                    if !still_loading.is_empty() && total > 0 {
                                         execute!(
                                             output,
                                             cursor::MoveToColumn(0),
@@ -365,6 +367,14 @@ impl ToolManagerBuilder {
                                         });
                                         let msg = eyre::eyre!(msg);
                                         queue_incomplete_load_message(complete, total, &msg, &mut output)?;
+                                    } else if total > 0 {
+                                        // Clear the loading line if we have enabled servers
+                                        execute!(
+                                            output,
+                                            cursor::MoveToColumn(0),
+                                            cursor::MoveUp(1),
+                                            terminal::Clear(terminal::ClearType::CurrentLine),
+                                        )?;
                                     }
                                     execute!(output, style::Print("\n"),)?;
                                     break;
@@ -685,8 +695,9 @@ impl ToolManagerBuilder {
             loading_status_sender,
             new_tool_specs,
             has_new_stuff,
-            is_interactive,
+            is_interactive: interactive,
             mcp_load_record: load_record,
+            disabled_servers: disabled_servers_display,
             ..Default::default()
         })
     }
@@ -776,6 +787,9 @@ pub struct ToolManager {
     /// invalid characters).
     /// The value is the load message (i.e. load time, warnings, and errors)
     pub mcp_load_record: Arc<Mutex<HashMap<String, Vec<LoadingRecord>>>>,
+
+    /// List of disabled MCP server names for display purposes
+    disabled_servers: Vec<String>,
 }
 
 impl Clone for ToolManager {
@@ -790,6 +804,7 @@ impl Clone for ToolManager {
             schema: self.schema.clone(),
             is_interactive: self.is_interactive,
             mcp_load_record: self.mcp_load_record.clone(),
+            disabled_servers: self.disabled_servers.clone(),
             ..Default::default()
         }
     }
@@ -799,7 +814,7 @@ impl ToolManager {
     pub async fn load_tools(
         &mut self,
         database: &Database,
-        output: &mut SharedWriter,
+        output: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
         let notify = self.notify.take();
@@ -888,7 +903,7 @@ impl ToolManager {
                     let _ = queue!(
                         output,
                         style::Print(
-                            "Not all mcp servers loaded. Configure no-interactive timeout with q settings mcp.noInteractiveTimeout"
+                            "Not all mcp servers loaded. Configure non-interactive timeout with q settings mcp.noInteractiveTimeout"
                         ),
                         style::Print("\n------\n")
                     );
@@ -1074,9 +1089,13 @@ impl ToolManager {
     }
 
     #[allow(clippy::await_holding_lock)]
-    pub async fn get_prompt(&self, get_command: PromptsGetCommand) -> Result<JsonRpcResponse, GetPromptError> {
-        let (server_name, prompt_name) = match get_command.params.name.split_once('/') {
-            None => (None::<String>, Some(get_command.params.name.clone())),
+    pub async fn get_prompt(
+        &self,
+        name: String,
+        arguments: Option<Vec<String>>,
+    ) -> Result<JsonRpcResponse, GetPromptError> {
+        let (server_name, prompt_name) = match name.split_once('/') {
+            None => (None::<String>, Some(name.clone())),
             Some((server_name, prompt_name)) => (Some(server_name.to_string()), Some(prompt_name.to_string())),
         };
         let prompt_name = prompt_name.ok_or(GetPromptError::MissingPromptName)?;
@@ -1158,15 +1177,16 @@ impl ToolManager {
                         }
                         client.prompts_updated();
                     }
-                    let PromptsGetCommand { params, .. } = get_command;
+
                     let PromptBundle { prompt_get, .. } = prompts_wl
                         .get(&prompt_name)
                         .and_then(|bundles| bundles.iter().find(|b| b.server_name == server_name))
                         .ok_or(GetPromptError::MissingPromptInfo)?;
+
                     // Here we need to convert the positional arguments into key value pair
                     // The assignment order is assumed to be the order of args as they are
                     // presented in PromptGet::arguments
-                    let args = if let (Some(schema), Some(value)) = (&prompt_get.arguments, &params.arguments) {
+                    let args = if let (Some(schema), Some(value)) = (&prompt_get.arguments, &arguments) {
                         let params = schema.iter().zip(value.iter()).fold(
                             HashMap::<String, String>::new(),
                             |mut acc, (prompt_get_arg, value)| {
@@ -1469,6 +1489,19 @@ fn queue_warn_message(name: &str, msg: &eyre::Report, time: &str, output: &mut i
         style::ResetColor,
         style::Print(" with the following warning:\n"),
         style::Print(msg),
+        style::ResetColor,
+    )?)
+}
+
+fn queue_disabled_message(name: &str, output: &mut impl Write) -> eyre::Result<()> {
+    Ok(queue!(
+        output,
+        style::SetForegroundColor(style::Color::DarkGrey),
+        style::Print("○ "),
+        style::SetForegroundColor(style::Color::Blue),
+        style::Print(name),
+        style::ResetColor,
+        style::Print(" is disabled\n"),
         style::ResetColor,
     )?)
 }

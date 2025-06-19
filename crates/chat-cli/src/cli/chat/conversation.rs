@@ -3,7 +3,7 @@ use std::collections::{
     HashSet,
     VecDeque,
 };
-use std::sync::Arc;
+use std::io::Write;
 use std::sync::atomic::Ordering;
 
 use crossterm::style::Color;
@@ -28,10 +28,6 @@ use super::consts::{
     MAX_USER_MESSAGE_SIZE,
 };
 use super::context::ContextManager;
-use super::hooks::{
-    Hook,
-    HookTrigger,
-};
 use super::message::{
     AssistantMessage,
     ToolUseResult,
@@ -69,7 +65,15 @@ use crate::api_client::model::{
     UserInputMessage,
     UserInputMessageContext,
 };
-use crate::cli::chat::util::shared_writer::SharedWriter;
+use crate::cli::chat::ChatError;
+use crate::cli::chat::cli::hooks::{
+    Hook,
+    HookTrigger,
+};
+use crate::cli::chat::util::shared_writer::{
+    NullWriter,
+    SharedWriter,
+};
 use crate::database::Database;
 use crate::mcp_client::Prompt;
 use crate::platform::Context;
@@ -103,8 +107,6 @@ pub struct ConversationState {
     context_message_length: Option<usize>,
     /// Stores the latest conversation summary created by /compact
     latest_summary: Option<String>,
-    #[serde(skip)]
-    pub updates: Option<SharedWriter>,
     /// Model explicitly selected by the user in this conversation state via `/model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -112,11 +114,10 @@ pub struct ConversationState {
 
 impl ConversationState {
     pub async fn new(
-        ctx: Arc<Context>,
+        ctx: &mut Context,
         conversation_id: &str,
         tool_config: HashMap<String, ToolSpec>,
         profile: Option<String>,
-        updates: Option<SharedWriter>,
         tool_manager: ToolManager,
         current_model_id: Option<String>,
     ) -> Self {
@@ -125,7 +126,7 @@ impl ConversationState {
             Ok(mut manager) => {
                 // Switch to specified profile if provided
                 if let Some(profile_name) = profile {
-                    if let Err(e) = manager.switch_profile(&profile_name).await {
+                    if let Err(e) = manager.switch_profile(ctx, &profile_name).await {
                         warn!("Failed to switch to profile {}: {}", profile_name, e);
                     }
                 }
@@ -160,16 +161,13 @@ impl ConversationState {
             tool_manager,
             context_message_length: None,
             latest_summary: None,
-            updates,
             model: current_model_id,
         }
     }
 
     /// Reloads necessary fields after being deserialized. This should be called after
     /// deserialization.
-    pub async fn reload_serialized_state(&mut self, ctx: Arc<Context>, updates: Option<SharedWriter>) {
-        self.updates = updates;
-
+    pub async fn reload_serialized_state(&mut self, ctx: &Context) {
         // Try to reload ContextManager, but do not return an error if we fail.
         // TODO: Currently the failure modes around ContextManager is unclear, and we don't return
         // errors in most cases. Thus, we try to preserve the same behavior here and simply have
@@ -177,7 +175,7 @@ impl ConversationState {
         // refactored.
         let mut failed = false;
         if let Some(context_manager) = self.context_manager.as_mut() {
-            match context_manager.reload_config().await {
+            match context_manager.reload_config(ctx).await {
                 Ok(_) => (),
                 Err(err) => {
                     error!(?err, "failed to reload context config");
@@ -191,6 +189,7 @@ impl ConversationState {
                 },
             }
         }
+
         if failed {
             self.context_manager.take();
         }
@@ -431,7 +430,7 @@ impl ConversationState {
     }
 
     /// Sets the next user message with "cancelled" tool results.
-    pub fn abandon_tool_use(&mut self, tools_to_be_abandoned: Vec<QueuedTool>, deny_input: String) {
+    pub fn abandon_tool_use(&mut self, tools_to_be_abandoned: &[QueuedTool], deny_input: String) {
         self.next_message = Some(UserMessage::new_cancelled_tool_uses(
             Some(deny_input),
             tools_to_be_abandoned.iter().map(|t| t.id.as_str()),
@@ -442,13 +441,18 @@ impl ConversationState {
     ///
     /// Params:
     /// - `run_hooks` - whether hooks should be executed and included as context
-    pub async fn as_sendable_conversation_state(&mut self, run_hooks: bool) -> FigConversationState {
+    pub async fn as_sendable_conversation_state(
+        &mut self,
+        ctx: &Context,
+        output: &mut impl Write,
+        run_hooks: bool,
+    ) -> Result<FigConversationState, ChatError> {
         debug_assert!(self.next_message.is_some());
         self.enforce_conversation_invariants();
         self.history.drain(self.valid_history_range.1..);
         self.history.drain(..self.valid_history_range.0);
 
-        let context = self.backend_conversation_state(run_hooks, false).await;
+        let context = self.backend_conversation_state(ctx, run_hooks, output).await?;
         if !context.dropped_context_files.is_empty() {
             let mut output = SharedWriter::stdout();
             execute!(
@@ -464,9 +468,9 @@ impl ConversationState {
             .ok();
         }
 
-        context
+        Ok(context
             .into_fig_conversation_state()
-            .expect("unable to construct conversation state")
+            .expect("unable to construct conversation state"))
     }
 
     pub async fn update_state(&mut self, force_update: bool) {
@@ -500,20 +504,19 @@ impl ConversationState {
 
     /// Returns a conversation state representation which reflects the exact conversation to send
     /// back to the model.
-    pub async fn backend_conversation_state(&mut self, run_hooks: bool, quiet: bool) -> BackendConversationState<'_> {
+    pub async fn backend_conversation_state(
+        &mut self,
+        ctx: &Context,
+        run_hooks: bool,
+        output: &mut impl Write,
+    ) -> Result<BackendConversationState<'_>, ChatError> {
         self.update_state(false).await;
         self.enforce_conversation_invariants();
 
         // Run hooks and add to conversation start and next user message.
         let mut conversation_start_context = None;
         if let (true, Some(cm)) = (run_hooks, self.context_manager.as_mut()) {
-            let mut null_writer = SharedWriter::null();
-            let updates = if quiet {
-                None
-            } else {
-                Some(self.updates.as_mut().unwrap_or(&mut null_writer))
-            };
-            let hook_results = cm.run_hooks(updates).await;
+            let hook_results = cm.run_hooks(output).await?;
             conversation_start_context = Some(format_hook_context(hook_results.iter(), HookTrigger::ConversationStart));
 
             // add per prompt content to next_user_message if available
@@ -522,9 +525,9 @@ impl ConversationState {
             }
         }
 
-        let (context_messages, dropped_context_files) = self.context_messages(conversation_start_context).await;
+        let (context_messages, dropped_context_files) = self.context_messages(ctx, conversation_start_context).await;
 
-        BackendConversationState {
+        Ok(BackendConversationState {
             conversation_id: self.conversation_id.as_str(),
             next_user_message: self.next_message.as_ref(),
             history: self
@@ -534,19 +537,28 @@ impl ConversationState {
             dropped_context_files,
             tools: &self.tools,
             model_id: self.model.as_deref(),
-        }
+        })
     }
 
     /// Whether or not it is possible to create a summary out of this conversation state.
     ///
     /// Currently only checks if we have enough messages in the history to create a summary out of.
-    pub async fn can_create_summary_request(&mut self) -> bool {
-        self.backend_conversation_state(false, true).await.history.len() >= 2
+    pub async fn can_create_summary_request(&mut self, ctx: &Context) -> Result<bool, ChatError> {
+        Ok(self
+            .backend_conversation_state(ctx, false, &mut NullWriter)
+            .await?
+            .history
+            .len()
+            >= 2)
     }
 
     /// Returns a [FigConversationState] capable of replacing the history of the current
     /// conversation with a summary generated by the model.
-    pub async fn create_summary_request(&mut self, custom_prompt: Option<impl AsRef<str>>) -> FigConversationState {
+    pub async fn create_summary_request(
+        &mut self,
+        ctx: &Context,
+        custom_prompt: Option<impl AsRef<str>>,
+    ) -> Result<FigConversationState, ChatError> {
         let summary_content = match custom_prompt {
             Some(custom_prompt) => {
                 // Make the custom instructions much more prominent and directive
@@ -590,7 +602,7 @@ impl ConversationState {
             },
         };
 
-        let conv_state = self.backend_conversation_state(false, true).await;
+        let conv_state = self.backend_conversation_state(ctx, false, &mut NullWriter).await?;
 
         // Include everything but the last message in the history.
         let history_len = conv_state.history.len();
@@ -629,11 +641,11 @@ impl ConversationState {
             self.set_cancelled_tool_results(&mut summary_message, tool_uses);
         }
 
-        FigConversationState {
+        Ok(FigConversationState {
             conversation_id: Some(self.conversation_id.clone()),
             user_input_message: summary_message,
             history: Some(history),
-        }
+        })
     }
 
     pub fn replace_history_with_summary(&mut self, summary: String) {
@@ -686,6 +698,7 @@ impl ConversationState {
     /// - Cache this return for some period of time.
     async fn context_messages(
         &mut self,
+        ctx: &Context,
         conversation_start_context: Option<String>,
     ) -> (Option<Vec<(UserMessage, AssistantMessage)>>, Vec<(String, String)>) {
         let mut context_content = String::new();
@@ -701,7 +714,7 @@ impl ConversationState {
 
         // Add context files if available
         if let Some(context_manager) = self.context_manager.as_mut() {
-            match context_manager.collect_context_files_with_limit().await {
+            match context_manager.collect_context_files_with_limit(ctx).await {
                 Ok((files_to_use, files_dropped)) => {
                     if !files_dropped.is_empty() {
                         dropped_context_files.extend(files_dropped);
@@ -741,19 +754,22 @@ impl ConversationState {
     }
 
     /// Calculate the total character count in the conversation
-    pub async fn calculate_char_count(&mut self) -> CharCount {
-        self.backend_conversation_state(false, true).await.char_count()
+    pub async fn calculate_char_count(&mut self, ctx: &Context) -> Result<CharCount, ChatError> {
+        Ok(self
+            .backend_conversation_state(ctx, false, &mut NullWriter)
+            .await?
+            .char_count())
     }
 
     /// Get the current token warning level
-    pub async fn get_token_warning_level(&mut self) -> TokenWarningLevel {
-        let total_chars = self.calculate_char_count().await;
+    pub async fn get_token_warning_level(&mut self, ctx: &Context) -> Result<TokenWarningLevel, ChatError> {
+        let total_chars = self.calculate_char_count(ctx).await?;
 
-        if *total_chars >= MAX_CHARS {
+        Ok(if *total_chars >= MAX_CHARS {
             TokenWarningLevel::Critical
         } else {
             TokenWarningLevel::None
-        }
+        })
     }
 
     pub fn append_user_transcript(&mut self, message: &str) {
@@ -1068,15 +1084,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
+        let mut ctx = Context::new();
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
         let mut tool_manager = ToolManager::default();
-        let mut conversation_state = ConversationState::new(
-            Context::new(),
+        let mut conversation = ConversationState::new(
+            &mut ctx,
             "fake_conv_id",
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
-            None,
             None,
             tool_manager,
             None,
@@ -1085,40 +1101,45 @@ mod tests {
 
         // First, build a large conversation history. We need to ensure that the order is always
         // User -> Assistant -> User -> Assistant ...and so on.
-        conversation_state.set_next_user_message("start".to_string()).await;
+        conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
-            let s = conversation_state.as_sendable_conversation_state(true).await;
+            let s = conversation
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             assert_conversation_state_invariants(s, i);
-            conversation_state
-                .push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
-            conversation_state.set_next_user_message(i.to_string()).await;
+            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.set_next_user_message(i.to_string()).await;
         }
     }
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_with_tool_results() {
+        let ctx = Context::new();
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
         let tool_config = tool_manager.load_tools(&database, &mut output).await.unwrap();
-        let mut conversation_state = ConversationState::new(
-            Context::new(),
+        let mut conversation = ConversationState::new(
+            &mut Context::new(),
             "fake_conv_id",
             tool_config.clone(),
-            None,
             None,
             tool_manager.clone(),
             None,
         )
         .await;
-        conversation_state.set_next_user_message("start".to_string()).await;
+        conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
-            let s = conversation_state.as_sendable_conversation_state(true).await;
+            let s = conversation
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             assert_conversation_state_invariants(s, i);
 
-            conversation_state.push_assistant_message(
+            conversation.push_assistant_message(
                 AssistantMessage::new_tool_use(None, i.to_string(), vec![AssistantToolUse {
                     id: "tool_id".to_string(),
                     name: "tool name".to_string(),
@@ -1127,7 +1148,7 @@ mod tests {
                 }]),
                 &mut database,
             );
-            conversation_state.add_tool_results(vec![ToolUseResult {
+            conversation.add_tool_results(vec![ToolUseResult {
                 tool_use_id: "tool_id".to_string(),
                 content: vec![],
                 status: ToolResultStatus::Success,
@@ -1135,22 +1156,24 @@ mod tests {
         }
 
         // Build a long conversation history of user messages mixed in with tool results.
-        let mut conversation_state = ConversationState::new(
-            Context::new(),
+        let mut conversation = ConversationState::new(
+            &mut Context::new(),
             "fake_conv_id",
             tool_config.clone(),
-            None,
             None,
             tool_manager.clone(),
             None,
         )
         .await;
-        conversation_state.set_next_user_message("start".to_string()).await;
+        conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
-            let s = conversation_state.as_sendable_conversation_state(true).await;
+            let s = conversation
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             assert_conversation_state_invariants(s, i);
             if i % 3 == 0 {
-                conversation_state.push_assistant_message(
+                conversation.push_assistant_message(
                     AssistantMessage::new_tool_use(None, i.to_string(), vec![AssistantToolUse {
                         id: "tool_id".to_string(),
                         name: "tool name".to_string(),
@@ -1159,15 +1182,14 @@ mod tests {
                     }]),
                     &mut database,
                 );
-                conversation_state.add_tool_results(vec![ToolUseResult {
+                conversation.add_tool_results(vec![ToolUseResult {
                     tool_use_id: "tool_id".to_string(),
                     content: vec![],
                     status: ToolResultStatus::Success,
                 }]);
             } else {
-                conversation_state
-                    .push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
-                conversation_state.set_next_user_message(i.to_string()).await;
+                conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+                conversation.set_next_user_message(i.to_string()).await;
             }
         }
     }
@@ -1175,17 +1197,16 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_with_context_files() {
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
-        ctx.fs().write(AMAZONQ_FILENAME, "test context").await.unwrap();
+        let mut ctx = Context::new();
+        ctx.fs.write(AMAZONQ_FILENAME, "test context").await.unwrap();
 
         let mut tool_manager = ToolManager::default();
-        let mut conversation_state = ConversationState::new(
-            ctx,
+        let mut conversation = ConversationState::new(
+            &mut ctx,
             "fake_conv_id",
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
-            None,
             None,
             tool_manager,
             None,
@@ -1194,9 +1215,12 @@ mod tests {
 
         // First, build a large conversation history. We need to ensure that the order is always
         // User -> Assistant -> User -> Assistant ...and so on.
-        conversation_state.set_next_user_message("start".to_string()).await;
+        conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
-            let s = conversation_state.as_sendable_conversation_state(true).await;
+            let s = conversation
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
 
             // Ensure that the first two messages are the fake context messages.
             let hist = s.history.as_ref().unwrap();
@@ -1215,21 +1239,18 @@ mod tests {
 
             assert_conversation_state_invariants(s, i);
 
-            conversation_state
-                .push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
-            conversation_state.set_next_user_message(i.to_string()).await;
+            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.set_next_user_message(i.to_string()).await;
         }
     }
 
     #[tokio::test]
     async fn test_conversation_state_additional_context() {
-        // tracing_subscriber::fmt::try_init().ok();
-
         let mut database = Database::new().await.unwrap();
-        let mut output = SharedWriter::null();
+        let mut output = NullWriter;
 
         let mut tool_manager = ToolManager::default();
-        let ctx = Context::builder().with_test_home().await.unwrap().build_fake();
+        let mut ctx = Context::new();
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
         let config = serde_json::json!({
@@ -1247,26 +1268,28 @@ mod tests {
             }
         });
         let config_path = profile_context_path(&ctx, "default").unwrap();
-        ctx.fs().create_dir_all(config_path.parent().unwrap()).await.unwrap();
-        ctx.fs()
+        ctx.fs.create_dir_all(config_path.parent().unwrap()).await.unwrap();
+        ctx.fs
             .write(&config_path, serde_json::to_string(&config).unwrap())
             .await
             .unwrap();
-        let mut conversation_state = ConversationState::new(
-            ctx,
+        let mut conversation = ConversationState::new(
+            &mut ctx,
             "fake_conv_id",
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
             None,
-            Some(SharedWriter::stdout()),
             tool_manager,
             None,
         )
         .await;
 
         // Simulate conversation flow
-        conversation_state.set_next_user_message("start".to_string()).await;
+        conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=5 {
-            let s = conversation_state.as_sendable_conversation_state(true).await;
+            let s = conversation
+                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .await
+                .unwrap();
             let hist = s.history.as_ref().unwrap();
             #[allow(clippy::match_wildcard_for_single_variants)]
             match &hist[0] {
@@ -1285,9 +1308,8 @@ mod tests {
                 s.user_input_message.content
             );
 
-            conversation_state
-                .push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
-            conversation_state.set_next_user_message(i.to_string()).await;
+            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.set_next_user_message(i.to_string()).await;
         }
     }
 }
