@@ -39,25 +39,30 @@ pub enum ContextSubcommand {
     Show {
         /// Print out each matched file's content, hook configurations, and last
         /// session.conversation summary
+        #[arg(short, long)]
         expand: bool,
     },
     /// Add context rules (filenames or glob patterns)
     Add {
         /// Add to global rules (available in all profiles)
+        #[arg(short, long)]
         global: bool,
         /// Include even if matched files exceed size limits
+        #[arg(short, long)]
         force: bool,
         paths: Vec<String>,
     },
     /// Remove specified rules from current profile
     Remove {
         /// Remove specified rules globally
+        #[arg(short, long)]
         global: bool,
         paths: Vec<String>,
     },
     /// Remove all rules from current profile
     Clear {
         /// Remove global rules
+        #[arg(short, long)]
         global: bool,
     },
 }
