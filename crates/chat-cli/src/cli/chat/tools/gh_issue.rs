@@ -1,7 +1,4 @@
-use std::collections::{
-    HashMap,
-    VecDeque,
-};
+use std::collections::VecDeque;
 use std::io::Write;
 
 use crossterm::style::Color;
@@ -18,10 +15,7 @@ use serde::Deserialize;
 
 use super::super::context::ContextManager;
 use super::super::util::issue::IssueCreator;
-use super::{
-    InvokeOutput,
-    ToolPermission,
-};
+use super::InvokeOutput;
 use crate::cli::chat::token_counter::TokenCounter;
 use crate::platform::Context;
 
@@ -41,7 +35,7 @@ pub struct GhIssueContext {
     pub context_manager: Option<ContextManager>,
     pub transcript: VecDeque<String>,
     pub failed_request_ids: Vec<String>,
-    pub tool_permissions: HashMap<String, ToolPermission>,
+    pub tool_permissions: Vec<String>,
 }
 
 /// Max amount of characters to include in the transcript.
@@ -180,8 +174,8 @@ impl GhIssue {
     fn get_chat_settings(context: &GhIssueContext) -> String {
         let mut result_str = "[chat-settings]\n".to_string();
         result_str.push_str("\n\n[chat-trusted_tools]");
-        for (tool, permission) in context.tool_permissions.iter() {
-            result_str.push_str(&format!("\n{tool}={}", permission.trusted));
+        for tool in context.tool_permissions.iter() {
+            result_str.push_str(&format!("\n{tool}=trusted"));
         }
 
         result_str

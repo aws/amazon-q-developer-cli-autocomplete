@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::borrow::Borrow;
 use std::collections::{
     HashMap,
     HashSet,
@@ -14,6 +15,7 @@ use std::path::{
     PathBuf,
 };
 
+use crossterm::style::Stylize as _;
 use crossterm::{
     queue,
     style,
@@ -26,9 +28,13 @@ use serde::{
 use tokio::fs::ReadDir;
 use tracing::error;
 
+use super::chat::tools::ToolOrigin;
 use super::chat::tools::custom_tool::CustomToolConfig;
 use crate::platform::Context;
-use crate::util::directories;
+use crate::util::{
+    MCP_SERVER_TOOL_DELIMITER,
+    directories,
+};
 
 // This is to mirror claude's config set up
 #[derive(Clone, Serialize, Deserialize, Debug, Default, Eq, PartialEq)]
@@ -146,9 +152,28 @@ impl Agent {
 pub struct AgentCollection {
     pub agents: HashMap<String, Agent>,
     pub active_idx: String,
+    pub trust_all_tools: bool,
 }
 
 impl AgentCollection {
+    /// This function assumes the relevant transformation to the tool names have been done:
+    /// - model tool name -> host tool name
+    /// - custom tool namespacing
+    pub fn trust_tools(&mut self, tool_names: Vec<String>) {
+        if let Some(agent) = self.get_active_mut() {
+            agent.allowed_tools.extend(tool_names);
+        }
+    }
+
+    /// This function assumes the relevant transformation to the tool names have been done:
+    /// - model tool name -> host tool name
+    /// - custom tool namespacing
+    pub fn untrust_tools(&mut self, tool_names: &Vec<String>) {
+        if let Some(agent) = self.get_active_mut() {
+            agent.allowed_tools.retain(|t| !tool_names.contains(t));
+        }
+    }
+
     pub fn get_active(&self) -> Option<&Agent> {
         self.agents.get(&self.active_idx)
     }
@@ -346,7 +371,52 @@ impl AgentCollection {
                 .map(|a| (a.name.clone(), a))
                 .collect::<HashMap<_, _>>(),
             active_idx: persona_name.unwrap_or("default").to_string(),
+            ..Default::default()
         }
+    }
+
+    /// Returns a label to describe the permission status for a given tool.
+    pub fn display_label(&self, tool_name: &str, origin: &ToolOrigin) -> String {
+        let tool_trusted = self.get_active().is_some_and(|a| {
+            a.allowed_tools.iter().any(|name| {
+                // Here the tool names can take the following forms:
+                // - @{server_name}{delimiter}{tool_name}
+                // - native_tool_name
+                name == tool_name
+                    || name.strip_prefix("@").is_some_and(|remainder| {
+                        remainder
+                            .split_once(MCP_SERVER_TOOL_DELIMITER)
+                            .is_some_and(|(left, right)| right == tool_name)
+                            || remainder == <ToolOrigin as Borrow<str>>::borrow(origin)
+                    })
+            })
+        });
+
+        if tool_trusted || self.trust_all_tools {
+            format!("* {}", "trusted".dark_green().bold())
+        } else {
+            self.default_permission_label(tool_name)
+        }
+    }
+
+    /// Provide default permission labels for the built-in set of tools.
+    // This "static" way avoids needing to construct a tool instance.
+    fn default_permission_label(&self, tool_name: &str) -> String {
+        let label = match tool_name {
+            "fs_read" => "trusted".dark_green().bold(),
+            "fs_write" => "not trusted".dark_grey(),
+            #[cfg(not(windows))]
+            "execute_bash" => "trust read-only commands".dark_grey(),
+            #[cfg(windows)]
+            "execute_cmd" => "trust read-only commands".dark_grey(),
+            "use_aws" => "trust read-only commands".dark_grey(),
+            "report_issue" => "trusted".dark_green().bold(),
+            "thinking" => "trusted (prerelease)".dark_green().bold(),
+            _ if self.trust_all_tools => "trusted".dark_grey().bold(),
+            _ => "not trusted".dark_grey(),
+        };
+
+        format!("{} {label}", "*".reset())
     }
 }
 

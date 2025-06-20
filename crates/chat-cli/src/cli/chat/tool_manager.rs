@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::collections::{
     HashMap,
     HashSet,
@@ -728,10 +729,22 @@ enum OutOfSpecName {
     EmptyDescription(String),
 }
 
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub struct ToolInfo {
-    server_name: String,
-    host_tool_name: HostToolName,
+    pub server_name: String,
+    pub host_tool_name: HostToolName,
+}
+
+impl Borrow<HostToolName> for ToolInfo {
+    fn borrow(&self) -> &HostToolName {
+        &self.host_tool_name
+    }
+}
+
+impl std::hash::Hash for ToolInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.host_tool_name.hash(state);
+    }
 }
 
 /// Tool name as recognized by the model. This is [HostToolName] post sanitization.

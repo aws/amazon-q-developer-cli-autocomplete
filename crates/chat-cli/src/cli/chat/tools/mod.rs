@@ -6,14 +6,13 @@ pub mod gh_issue;
 pub mod thinking;
 pub mod use_aws;
 
-use std::collections::HashMap;
+use std::borrow::Borrow;
 use std::io::Write;
 use std::path::{
     Path,
     PathBuf,
 };
 
-use crossterm::style::Stylize;
 use custom_tool::CustomTool;
 use execute::ExecuteCommand;
 use eyre::Result;
@@ -119,92 +118,6 @@ impl Tool {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct ToolPermission {
-    pub trusted: bool,
-}
-
-#[derive(Debug, Clone)]
-/// Holds overrides for tool permissions.
-/// Tools that do not have an associated ToolPermission should use
-/// their default logic to determine to permission.
-pub struct ToolPermissions {
-    // We need this field for any stragglers
-    pub trust_all: bool,
-    pub permissions: HashMap<String, ToolPermission>,
-}
-
-impl ToolPermissions {
-    pub fn new(capacity: usize) -> Self {
-        Self {
-            trust_all: false,
-            permissions: HashMap::with_capacity(capacity),
-        }
-    }
-
-    pub fn is_trusted(&self, tool_name: &str) -> bool {
-        self.trust_all || self.permissions.get(tool_name).is_some_and(|perm| perm.trusted)
-    }
-
-    /// Returns a label to describe the permission status for a given tool.
-    pub fn display_label(&self, tool_name: &str) -> String {
-        if self.has(tool_name) || self.trust_all {
-            if self.is_trusted(tool_name) {
-                format!("  {}", "trusted".dark_green().bold())
-            } else {
-                format!("  {}", "not trusted".dark_grey())
-            }
-        } else {
-            self.default_permission_label(tool_name)
-        }
-    }
-
-    pub fn trust_tool(&mut self, tool_name: &str) {
-        self.permissions
-            .insert(tool_name.to_string(), ToolPermission { trusted: true });
-    }
-
-    pub fn untrust_tool(&mut self, tool_name: &str) {
-        self.trust_all = false;
-        self.permissions
-            .insert(tool_name.to_string(), ToolPermission { trusted: false });
-    }
-
-    pub fn reset(&mut self) {
-        self.trust_all = false;
-        self.permissions.clear();
-    }
-
-    pub fn reset_tool(&mut self, tool_name: &str) {
-        self.trust_all = false;
-        self.permissions.remove(tool_name);
-    }
-
-    pub fn has(&self, tool_name: &str) -> bool {
-        self.permissions.contains_key(tool_name)
-    }
-
-    /// Provide default permission labels for the built-in set of tools.
-    // This "static" way avoids needing to construct a tool instance.
-    fn default_permission_label(&self, tool_name: &str) -> String {
-        let label = match tool_name {
-            "fs_read" => "trusted".dark_green().bold(),
-            "fs_write" => "not trusted".dark_grey(),
-            #[cfg(not(windows))]
-            "execute_bash" => "trust read-only commands".dark_grey(),
-            #[cfg(windows)]
-            "execute_cmd" => "trust read-only commands".dark_grey(),
-            "use_aws" => "trust read-only commands".dark_grey(),
-            "report_issue" => "trusted".dark_green().bold(),
-            "thinking" => "trusted (prerelease)".dark_green().bold(),
-            _ if self.trust_all => "trusted".dark_grey().bold(),
-            _ => "not trusted".dark_grey(),
-        };
-
-        format!("{} {label}", "*".reset())
-    }
-}
-
 /// A tool specification to be sent to the model as part of a conversation. Maps to
 /// [BedrockToolSpecification].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +134,15 @@ pub struct ToolSpec {
 pub enum ToolOrigin {
     Native,
     McpServer(String),
+}
+
+impl Borrow<str> for ToolOrigin {
+    fn borrow(&self) -> &str {
+        match self {
+            Self::McpServer(name) => name.as_str(),
+            Self::Native => "native",
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for ToolOrigin {

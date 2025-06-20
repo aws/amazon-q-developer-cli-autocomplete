@@ -19,7 +19,6 @@ pub mod util;
 use std::borrow::Cow;
 use std::collections::{
     HashMap,
-    HashSet,
     VecDeque,
 };
 use std::io::Write;
@@ -87,7 +86,6 @@ use tools::{
     OutputKind,
     QueuedTool,
     Tool,
-    ToolPermissions,
     ToolSpec,
 };
 use tracing::{
@@ -111,7 +109,6 @@ use super::agent::PermissionEvalResult;
 use crate::api_client::clients::SendMessageOutput;
 use crate::api_client::model::{
     ChatResponseStream,
-    Tool as FigTool,
     ToolResultStatus,
 };
 use crate::api_client::{
@@ -139,6 +136,7 @@ use crate::telemetry::{
     TelemetryThread,
     get_error_reason,
 };
+use crate::util::MCP_SERVER_TOOL_DELIMITER;
 
 const LIMIT_REACHED_TEXT: &str = color_print::cstr! { "You've used all your free requests for this month. You have two options:
 1. Upgrade to a paid subscription for increased limits. See our Pricing page for what's included> <blue!>https://aws.amazon.com/q/developer/pricing/</blue!>
@@ -171,7 +169,7 @@ pub struct ChatArgs {
 
 impl ChatArgs {
     pub async fn execute(
-        self,
+        mut self,
         ctx: &mut Context,
         database: &mut Database,
         telemetry: &TelemetryThread,
@@ -184,7 +182,9 @@ impl ChatArgs {
         };
 
         let agents = {
-            let mut agents = AgentCollection::load(&ctx, self.profile.as_deref(), &mut output).await;
+            let mut agents = AgentCollection::load(ctx, self.profile.as_deref(), &mut output).await;
+            agents.trust_all_tools = self.trust_all_tools;
+
             if let Some(name) = self.profile.as_ref() {
                 match agents.switch(name) {
                     Ok(agent) if !agent.mcp_servers.mcp_servers.is_empty() => {
@@ -206,6 +206,13 @@ impl ChatArgs {
                     _ => {},
                 }
             }
+
+            if let Some(trust_tools) = self.trust_tools.take() {
+                if let Some(a) = agents.get_active_mut() {
+                    a.allowed_tools.extend(trust_tools);
+                }
+            }
+
             agents
         };
 
@@ -240,30 +247,6 @@ impl ChatArgs {
             .build(telemetry, tool_manager_output, !self.non_interactive)
             .await?;
         let tool_config = tool_manager.load_tools(database, &mut output).await?;
-        let mut tool_permissions = ToolPermissions::new(tool_config.len());
-
-        let trust_tools = self.trust_tools.map(|mut tools| {
-            if tools.len() == 1 && tools[0].is_empty() {
-                tools.pop();
-            }
-            tools
-        });
-
-        if self.trust_all_tools {
-            tool_permissions.trust_all = true;
-            for tool in tool_config.values() {
-                tool_permissions.trust_tool(&tool.name);
-            }
-        } else if let Some(trusted) = trust_tools.map(|vec| vec.into_iter().collect::<HashSet<_>>()) {
-            // --trust-all-tools takes precedence over --trust-tools=...
-            for tool in tool_config.values() {
-                if trusted.contains(&tool.name) {
-                    tool_permissions.trust_tool(&tool.name);
-                } else {
-                    tool_permissions.untrust_tool(&tool.name);
-                }
-            }
-        }
 
         ChatSession::new(
             database,
@@ -278,7 +261,6 @@ impl ChatArgs {
             tool_manager,
             model_id,
             tool_config,
-            tool_permissions,
         )
         .await?
         .spawn(ctx, database, telemetry)
@@ -434,8 +416,6 @@ pub struct ChatSession {
     conversation: ConversationState,
     tool_uses: Vec<QueuedTool>,
     pending_tool_index: Option<usize>,
-    /// State to track tools that need confirmation.
-    tool_permissions: ToolPermissions,
     /// Telemetry events to be sent as part of the conversation.
     tool_use_telemetry_events: HashMap<String, ToolUseEventBuilder>,
     /// State used to keep track of tool use relation
@@ -462,7 +442,6 @@ impl ChatSession {
         tool_manager: ToolManager,
         model_id: Option<String>,
         tool_config: HashMap<String, ToolSpec>,
-        tool_permissions: ToolPermissions,
     ) -> Result<Self> {
         let valid_model_id = model_id
             .or_else(|| {
@@ -529,7 +508,6 @@ impl ChatSession {
             client,
             terminal_width_provider,
             spinner: None,
-            tool_permissions,
             conversation,
             tool_uses: vec![],
             pending_tool_index: None,
@@ -1276,7 +1254,20 @@ impl ChatSession {
                 let tool_use = &mut self.tool_uses[index];
                 if ["y", "Y"].contains(&input) || is_trust {
                     if is_trust {
-                        self.tool_permissions.trust_tool(&tool_use.name);
+                        let formatted_tool_name = self
+                            .conversation
+                            .tool_manager
+                            .tn_map
+                            .get(&tool_use.name)
+                            .map(|info| {
+                                format!(
+                                    "@{}{MCP_SERVER_TOOL_DELIMITER}{}",
+                                    info.server_name, info.host_tool_name
+                                )
+                            })
+                            .clone()
+                            .unwrap_or(tool_use.name.clone());
+                        self.conversation.agents.trust_tools(vec![formatted_tool_name]);
                     }
                     tool_use.accepted = true;
 
@@ -1878,6 +1869,12 @@ impl ChatSession {
     // TODO: Is there a better way?
     fn contextualize_tool(&self, tool: &mut Tool) {
         if let Tool::GhIssue(gh_issue) = tool {
+            let allowed_tools = self
+                .conversation
+                .agents
+                .get_active()
+                .map(|a| a.allowed_tools.iter().cloned().collect::<Vec<_>>())
+                .unwrap_or_default();
             gh_issue.set_context(GhIssueContext {
                 // Ideally we avoid cloning, but this function is not called very often.
                 // Using references with lifetimes requires a large refactor, and Arc<Mutex<T>>
@@ -1885,7 +1882,7 @@ impl ChatSession {
                 context_manager: self.conversation.context_manager.clone(),
                 transcript: self.conversation.transcript.clone(),
                 failed_request_ids: self.failed_request_ids.clone(),
-                tool_permissions: self.tool_permissions.permissions.clone(),
+                tool_permissions: allowed_tools,
             });
         }
     }
@@ -1986,9 +1983,7 @@ impl ChatSession {
     }
 
     fn all_tools_trusted(&self) -> bool {
-        self.conversation.tools.values().flatten().all(|t| match t {
-            FigTool::ToolSpecification(t) => self.tool_permissions.is_trusted(&t.name),
-        })
+        self.conversation.agents.trust_all_tools
     }
 
     /// Display character limit warnings based on current conversation size
@@ -2259,7 +2254,6 @@ mod tests {
             tool_manager,
             None,
             tool_config,
-            ToolPermissions::new(0),
         )
         .await
         .unwrap()
@@ -2405,7 +2399,6 @@ mod tests {
             tool_manager,
             None,
             tool_config,
-            ToolPermissions::new(0),
         )
         .await
         .unwrap()
@@ -2504,7 +2497,6 @@ mod tests {
             tool_manager,
             None,
             tool_config,
-            ToolPermissions::new(0),
         )
         .await
         .unwrap()
@@ -2582,7 +2574,6 @@ mod tests {
             tool_manager,
             None,
             tool_config,
-            ToolPermissions::new(0),
         )
         .await
         .unwrap()
@@ -2638,7 +2629,6 @@ mod tests {
             tool_manager,
             None,
             tool_config,
-            ToolPermissions::new(0),
         )
         .await
         .unwrap()
