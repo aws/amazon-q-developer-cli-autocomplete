@@ -273,7 +273,15 @@ impl ContextManager {
     /// # Returns
     /// A vector containing pairs of a [`Hook`] definition and its execution output
     pub async fn run_hooks(&mut self, output: &mut impl Write) -> Result<Vec<(Hook, String)>, ChatError> {
-        let hooks = self.profile_config.hooks.values().collect::<Vec<_>>();
+        let hooks = self
+            .profile_config
+            .hooks
+            .iter_mut()
+            .map(|(name, hook)| {
+                hook.name = name.clone();
+                hook as &Hook
+            })
+            .collect::<Vec<_>>();
         self.hook_executor.run_hooks(hooks, output).await
     }
 }
