@@ -38,7 +38,7 @@ use crate::mcp_client::{
 use crate::platform::Context;
 
 // TODO: support http transport type
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Eq, PartialEq)]
 pub struct CustomToolConfig {
     pub command: String,
     #[serde(default)]

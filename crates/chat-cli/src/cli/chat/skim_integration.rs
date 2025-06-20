@@ -26,13 +26,6 @@ use tempfile::NamedTempFile;
 use super::context::ContextManager;
 use crate::platform::Context;
 
-pub fn select_profile_with_skim(ctx: &Context, context_manager: &ContextManager) -> Result<Option<String>> {
-    let profiles = context_manager.list_profiles_blocking(ctx)?;
-
-    launch_skim_selector(&profiles, "Select profile: ", false)
-        .map(|selected| selected.and_then(|s| s.into_iter().next()))
-}
-
 pub struct SkimCommandSelector {
     context_manager: Arc<ContextManager>,
     tool_names: Vec<String>,
@@ -175,23 +168,12 @@ pub fn select_files_with_skim() -> Result<Option<Vec<String>>> {
 
 /// Select context paths using skim
 pub fn select_context_paths_with_skim(context_manager: &ContextManager) -> Result<Option<(Vec<String>, bool)>> {
-    let mut global_paths = Vec::new();
-    let mut profile_paths = Vec::new();
-
-    // Get global paths
-    for path in &context_manager.global_config.paths {
-        global_paths.push(format!("(global) {}", path));
-    }
+    let mut all_paths = Vec::new();
 
     // Get profile-specific paths
     for path in &context_manager.profile_config.paths {
-        profile_paths.push(format!("(profile: {}) {}", context_manager.current_profile, path));
+        all_paths.push(format!("(profile: {}) {}", context_manager.current_profile, path));
     }
-
-    // Combine paths, but keep track of which are global
-    let mut all_paths = Vec::new();
-    all_paths.extend(global_paths);
-    all_paths.extend(profile_paths);
 
     if all_paths.is_empty() {
         return Ok(None); // No paths to select
@@ -233,7 +215,7 @@ pub fn select_context_paths_with_skim(context_manager: &ContextManager) -> Resul
 }
 
 /// Launch the command selector and handle the selected command
-pub fn select_command(ctx: &Context, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
+pub fn select_command(_ctx: &Context, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
     let commands = get_available_commands();
 
     match launch_skim_selector(&commands, "Select command: ", false)? {
@@ -291,13 +273,10 @@ pub fn select_command(ctx: &Context, context_manager: &ContextManager, tools: &[
                 },
                 Some(cmd @ CommandType::Profile(_)) if cmd.needs_profile_selection() => {
                     // For profile operations that need a profile name, show profile selector
-                    match select_profile_with_skim(ctx, context_manager)? {
-                        Some(profile) => {
-                            let full_cmd = format!("{} {}", selected_command, profile);
-                            Ok(Some(full_cmd))
-                        },
-                        None => Ok(Some(selected_command.clone())), // User cancelled profile selection
-                    }
+                    // As part of the persona implementation, we are disabling the ability to
+                    // switch profile after a session has started.
+                    // TODO: perhaps revive this after we have a decision on profile switching
+                    Ok(Some(selected_command.clone()))
                 },
                 Some(CommandType::Profile(_)) => {
                     // For other profile operations (like create), just return the command

@@ -2,9 +2,9 @@ use clap::Subcommand;
 use crossterm::execute;
 use crossterm::style::{
     self,
+    Attribute,
     Color,
 };
-use tracing::warn;
 
 use crate::cli::chat::{
     ChatError,
@@ -12,6 +12,7 @@ use crate::cli::chat::{
     ChatState,
 };
 use crate::platform::Context;
+use crate::util::directories::chat_global_persona_path;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
@@ -39,13 +40,9 @@ pub enum ProfileSubcommand {
 
 impl ProfileSubcommand {
     pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
-        let Some(context_manager) = &mut session.conversation.context_manager else {
-            return Ok(ChatState::PromptUser {
-                skip_printing_tools: true,
-            });
-        };
+        let agents = &session.conversation.agents;
 
-        macro_rules! print_err {
+        macro_rules! _print_err {
             ($err:expr) => {
                 execute!(
                     session.output,
@@ -58,27 +55,17 @@ impl ProfileSubcommand {
 
         match self {
             Self::List => {
-                let profiles = match context_manager.list_profiles(ctx).await {
-                    Ok(profiles) => profiles,
-                    Err(e) => {
-                        execute!(
-                            session.output,
-                            style::SetForegroundColor(Color::Red),
-                            style::Print(format!("\nError listing profiles: {}\n\n", e)),
-                            style::SetForegroundColor(Color::Reset)
-                        )?;
-                        vec![]
-                    },
-                };
+                let profiles = agents.agents.values().collect::<Vec<_>>();
+                let active_profile = agents.get_active();
 
                 execute!(session.output, style::Print("\n"))?;
                 for profile in profiles {
-                    if profile == context_manager.current_profile {
+                    if active_profile.is_some_and(|p| p == profile) {
                         execute!(
                             session.output,
                             style::SetForegroundColor(Color::Green),
                             style::Print("* "),
-                            style::Print(&profile),
+                            style::Print(&profile.name),
                             style::SetForegroundColor(Color::Reset),
                             style::Print("\n")
                         )?;
@@ -86,63 +73,32 @@ impl ProfileSubcommand {
                         execute!(
                             session.output,
                             style::Print("  "),
-                            style::Print(&profile),
+                            style::Print(&profile.name),
                             style::Print("\n")
                         )?;
                     }
                 }
                 execute!(session.output, style::Print("\n"))?;
             },
-            Self::Create { name } => match context_manager.create_profile(ctx, &name).await {
-                Ok(_) => {
-                    execute!(
-                        session.output,
-                        style::SetForegroundColor(Color::Green),
-                        style::Print(format!("\nCreated profile: {}\n\n", name)),
-                        style::SetForegroundColor(Color::Reset)
-                    )?;
-                    context_manager
-                        .switch_profile(ctx, &name)
-                        .await
-                        .map_err(|e| warn!(?e, "failed to switch to newly created profile"))
-                        .ok();
-                },
-                Err(e) => print_err!(e),
-            },
-            Self::Delete { name } => match context_manager.delete_profile(ctx, &name).await {
-                Ok(_) => {
-                    execute!(
-                        session.output,
-                        style::SetForegroundColor(Color::Green),
-                        style::Print(format!("\nDeleted profile: {}\n\n", name)),
-                        style::SetForegroundColor(Color::Reset)
-                    )?;
-                },
-                Err(e) => print_err!(e),
-            },
-            Self::Set { name } => match context_manager.switch_profile(ctx, &name).await {
-                Ok(_) => {
-                    execute!(
-                        session.output,
-                        style::SetForegroundColor(Color::Green),
-                        style::Print(format!("\nSwitched to profile: {}\n\n", name)),
-                        style::SetForegroundColor(Color::Reset)
-                    )?;
-                },
-                Err(e) => print_err!(e),
-            },
-            Self::Rename { old_name, new_name } => {
-                match context_manager.rename_profile(ctx, &old_name, &new_name).await {
-                    Ok(_) => {
-                        execute!(
-                            session.output,
-                            style::SetForegroundColor(Color::Green),
-                            style::Print(format!("\nRenamed profile: {} -> {}\n\n", old_name, new_name)),
-                            style::SetForegroundColor(Color::Reset)
-                        )?;
-                    },
-                    Err(e) => print_err!(e),
-                }
+            Self::Rename { .. } | Self::Set { .. } | Self::Delete { .. } | Self::Create { .. } => {
+                // As part of the persona implementation, we are disabling the ability to
+                // switch / create profile after a session has started.
+                // TODO: perhaps revive this after we have a decision on profile create /
+                // switch
+                let global_path = if let Ok(path) = chat_global_persona_path(ctx) {
+                    path.to_str().unwrap_or("default global persona path").to_string()
+                } else {
+                    "default global persona path".to_string()
+                };
+                execute!(
+                    session.output,
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print(format!(
+                        "Perona / Profile persistance has been disabled. To perform any CRUD on persona / profile, use the default persona under {} as example",
+                        global_path
+                    )),
+                    style::SetAttribute(Attribute::Reset)
+                )?;
             },
         }
 

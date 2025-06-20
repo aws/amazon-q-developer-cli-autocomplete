@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::{
     HashMap,
     HashSet,
@@ -29,7 +31,7 @@ use crate::platform::Context;
 use crate::util::directories;
 
 // This is to mirror claude's config set up
-#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default, Eq, PartialEq)]
 #[serde(rename_all = "camelCase", transparent)]
 pub struct McpServerConfig {
     pub mcp_servers: HashMap<String, CustomToolConfig>,
@@ -67,7 +69,7 @@ impl McpServerConfig {
 }
 
 /// Externally this is known as "Persona"
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
     /// Agent or persona names are derived from the file name. Thus they are skipped for

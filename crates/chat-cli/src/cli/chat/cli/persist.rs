@@ -6,7 +6,6 @@ use crossterm::style::{
     Color,
 };
 
-use crate::cli::ConversationState;
 use crate::cli::chat::{
     ChatError,
     ChatSession,
@@ -71,16 +70,17 @@ impl PersistSubcommand {
                     style::SetAttribute(Attribute::Reset)
                 )?;
             },
-            Self::Load { path } => {
-                let contents = tri!(ctx.fs.read_to_string(&path).await, "import from", &path);
-                let mut new_state: ConversationState = tri!(serde_json::from_str(&contents), "import from", &path);
-                new_state.reload_serialized_state(ctx).await;
-                session.conversation = new_state;
-
+            Self::Load { path: _ } => {
+                // For profile operations that need a profile name, show profile selector
+                // As part of the persona implementation, we are disabling the ability to
+                // switch profile after a session has started.
+                // TODO: perhaps revive this after we have a decision on profile switching
                 execute!(
                     session.output,
-                    style::SetForegroundColor(Color::Green),
-                    style::Print(format!("\n✔ Imported conversation state from {}\n\n", &path)),
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print(
+                        "Conversation loading has been disabled. To load a conversation. Quit and restart q chat."
+                    ),
                     style::SetAttribute(Attribute::Reset)
                 )?;
             },

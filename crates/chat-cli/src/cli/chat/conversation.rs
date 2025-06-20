@@ -11,7 +11,6 @@ use crossterm::{
     execute,
     style,
 };
-use futures::FutureExt;
 use serde::{
     Deserialize,
     Serialize,
@@ -118,7 +117,6 @@ pub struct ConversationState {
 
 impl ConversationState {
     pub async fn new(
-        ctx: &mut Context,
         conversation_id: &str,
         agents: AgentCollection,
         tool_config: HashMap<String, ToolSpec>,
@@ -126,14 +124,7 @@ impl ConversationState {
         current_model_id: Option<String>,
     ) -> Self {
         let context_manager = if let Some(agent) = agents.get_active() {
-            ContextManager::from_agent(ctx, agent, None)
-                .map(|cm| {
-                    if let Err(e) = &cm {
-                        warn!("Failed to initialize context manager: {}", e);
-                    }
-                    cm.ok()
-                })
-                .await
+            ContextManager::from_agent(agent, None).ok()
         } else {
             None
         };
@@ -163,36 +154,6 @@ impl ConversationState {
             latest_summary: None,
             agents,
             model: current_model_id,
-        }
-    }
-
-    /// Reloads necessary fields after being deserialized. This should be called after
-    /// deserialization.
-    pub async fn reload_serialized_state(&mut self, ctx: &Context) {
-        // Try to reload ContextManager, but do not return an error if we fail.
-        // TODO: Currently the failure modes around ContextManager is unclear, and we don't return
-        // errors in most cases. Thus, we try to preserve the same behavior here and simply have
-        // self.context_manager equal to None if any errors are encountered. This needs to be
-        // refactored.
-        let mut failed = false;
-        if let Some(context_manager) = self.context_manager.as_mut() {
-            match context_manager.reload_config(ctx).await {
-                Ok(_) => (),
-                Err(err) => {
-                    error!(?err, "failed to reload context config");
-                    match ContextManager::new(ctx, None).await {
-                        Ok(v) => *context_manager = v,
-                        Err(err) => {
-                            failed = true;
-                            error!(?err, "failed to construct context manager");
-                        },
-                    }
-                },
-            }
-        }
-
-        if failed {
-            self.context_manager.take();
         }
     }
 

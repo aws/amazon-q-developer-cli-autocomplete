@@ -266,7 +266,6 @@ impl ChatArgs {
         }
 
         ChatSession::new(
-            ctx,
             database,
             &conversation_id,
             agents,
@@ -451,7 +450,6 @@ pub struct ChatSession {
 impl ChatSession {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
-        ctx: &mut Context,
         database: &mut Database,
         conversation_id: &str,
         mut agents: AgentCollection,
@@ -497,7 +495,6 @@ impl ChatSession {
             true => {
                 let mut cs = previous_conversation.unwrap();
                 existing_conversation = true;
-                cs.reload_serialized_state(ctx).await;
                 input = Some(input.unwrap_or("In a few words, summarize our conversation so far.".to_owned()));
                 cs.tool_manager = tool_manager;
                 if let Some(profile) = cs.current_profile() {
@@ -520,15 +517,7 @@ impl ChatSession {
                 cs
             },
             false => {
-                ConversationState::new(
-                    ctx,
-                    conversation_id,
-                    agents,
-                    tool_config,
-                    tool_manager,
-                    Some(valid_model_id),
-                )
-                .await
+                ConversationState::new(conversation_id, agents, tool_config, tool_manager, Some(valid_model_id)).await
             },
         };
 
@@ -2254,7 +2243,6 @@ mod tests {
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
-            &mut ctx,
             &mut database,
             "fake_conv_id",
             agents,
@@ -2388,7 +2376,6 @@ mod tests {
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
-            &mut ctx,
             &mut database,
             "fake_conv_id",
             agents,
@@ -2497,7 +2484,6 @@ mod tests {
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
-            &mut ctx,
             &mut database,
             "fake_conv_id",
             agents,
@@ -2578,7 +2564,6 @@ mod tests {
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
-            &mut ctx,
             &mut database,
             "fake_conv_id",
             agents,
@@ -2641,7 +2626,6 @@ mod tests {
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
-            &mut ctx,
             &mut database,
             "fake_conv_id",
             agents,

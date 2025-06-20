@@ -105,7 +105,7 @@ impl SlashCommand {
                 })
             },
             Self::Prompts(args) => args.execute(session).await,
-            Self::Hooks(args) => args.execute(ctx, session).await,
+            Self::Hooks(args) => args.execute(session).await,
             Self::Usage(args) => args.execute(ctx, session).await,
             Self::Mcp(args) => args.execute(session).await,
             Self::Model(args) => args.execute(session).await,

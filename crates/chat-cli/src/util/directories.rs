@@ -129,19 +129,9 @@ pub fn logs_dir() -> Result<PathBuf> {
     }
 }
 
-/// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_global_context_path(ctx: &Context) -> Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("global_context.json"))
-}
-
 /// The directory to the directory containing global personas
 pub fn chat_global_persona_path(ctx: &Context) -> Result<PathBuf> {
     Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("personas"))
-}
-
-/// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_profiles_dir(ctx: &Context) -> Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("profiles"))
 }
 
 /// The directory to the directory containing config for the `/context` feature in `q chat`.
