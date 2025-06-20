@@ -354,7 +354,7 @@ impl Database {
         self.set_entry(Table::Auth, key, value)?;
         Ok(())
     }
-    
+
     pub async fn delete_secret(&self, key: &str) -> Result<(), DatabaseError> {
         trace!(key, "deleting secret");
         self.delete_entry(Table::Auth, key)

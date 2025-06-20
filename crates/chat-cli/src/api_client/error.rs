@@ -9,8 +9,8 @@ use amzn_consolas_client::operation::generate_recommendations::GenerateRecommend
 use amzn_consolas_client::operation::list_customizations::ListCustomizationsError;
 use amzn_qdeveloper_streaming_client::operation::send_message::SendMessageError as QDeveloperSendMessageError;
 use amzn_qdeveloper_streaming_client::types::error::ChatResponseStreamError as QDeveloperChatResponseStreamError;
-use aws_sdk_ssooidc::error::ProvideErrorMetadata;
 use aws_credential_types::provider::error::CredentialsError;
+use aws_sdk_ssooidc::error::ProvideErrorMetadata;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 pub use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_runtime_api::http::Response;
@@ -115,7 +115,7 @@ impl ApiClientError {
             ApiClientError::AuthError(_) => None,
             ApiClientError::ModelOverloadedError { status_code, .. } => *status_code,
             ApiClientError::MonthlyLimitReached { status_code } => *status_code,
-            ApiClientError::Credentials(_e) => None
+            ApiClientError::Credentials(_e) => None,
         }
     }
 }

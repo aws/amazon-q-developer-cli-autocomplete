@@ -8,9 +8,7 @@ pub(crate) mod interceptor;
 pub mod model;
 pub mod profile;
 
-pub use clients::{
-    Client
-};
+pub use clients::Client;
 pub use endpoints::Endpoint;
 pub use error::ApiClientError;
 pub use profile::list_available_profiles;

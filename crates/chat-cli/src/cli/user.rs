@@ -125,7 +125,7 @@ impl LoginArgs {
                         let _ = database.set_idc_region(region.clone());
 
                         (Some(start_url), Some(region))
-                    }
+                    },
                 };
 
                 // Remote machine won't be able to handle browser opening and redirects,
@@ -262,14 +262,14 @@ enum AuthMethod {
     /// Builder ID (free)
     BuilderId,
     /// IdC (enterprise)
-    IdentityCenter
+    IdentityCenter,
 }
 
 impl Display for AuthMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AuthMethod::BuilderId => write!(f, "Use for Free with Builder ID"),
-            AuthMethod::IdentityCenter => write!(f, "Use with Pro license")
+            AuthMethod::IdentityCenter => write!(f, "Use with Pro license"),
         }
     }
 }

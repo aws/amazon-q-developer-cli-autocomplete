@@ -59,7 +59,6 @@ use message::{
     ToolUseResult,
     ToolUseResultBlock,
 };
-use crate::api_client::clients::StreamingClient;
 use parse::{
     ParseState,
     interpret_markdown,
@@ -107,7 +106,10 @@ use util::{
 use winnow::Partial;
 use winnow::stream::Offset;
 
-use crate::api_client::clients::SendMessageOutput;
+use crate::api_client::clients::{
+    SendMessageOutput,
+    StreamingClient,
+};
 use crate::api_client::model::{
     ChatResponseStream,
     Tool as FigTool,
@@ -1141,8 +1143,12 @@ impl ChatSession {
     async fn prompt_user(
         &mut self,
         ctx: &Context,
+        database: &Database,
         skip_printing_tools: bool,
     ) -> Result<ChatState, ChatError> {
+        #[cfg(windows)]
+        let _ = database;
+
         execute!(self.stderr, cursor::Show)?;
 
         // Check token usage and display warnings if needed
@@ -1186,6 +1192,10 @@ impl ChatSession {
         // q session unless we do this in prompt_user... unless you can find a better way)
         #[cfg(unix)]
         if let Some(ref context_manager) = self.conversation.context_manager {
+            use std::sync::Arc;
+
+            use crate::cli::chat::consts::DUMMY_TOOL_NAME;
+
             let tool_names = self
                 .conversation
                 .tool_manager
@@ -1197,6 +1207,7 @@ impl ChatSession {
             self.input_source
                 .put_skim_command_selector(database, Arc::new(context_manager.clone()), tool_names);
         }
+
         execute!(
             self.stderr,
             style::SetForegroundColor(Color::Reset),

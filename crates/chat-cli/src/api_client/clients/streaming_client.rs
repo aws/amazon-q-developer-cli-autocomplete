@@ -106,12 +106,9 @@ impl StreamingClient {
 
         Ok(Self { inner, profile })
     }
-    
+
     // Add SigV4 client creation method
-    pub async fn new_qdeveloper_client(
-        database: &Database,
-        endpoint: &Endpoint,
-    ) -> Result<Self, ApiClientError> {
+    pub async fn new_qdeveloper_client(database: &Database, endpoint: &Endpoint) -> Result<Self, ApiClientError> {
         let conf_builder: amzn_qdeveloper_streaming_client::config::Builder =
             (&sigv4_sdk_config(database, endpoint).await?).into();
         let conf = conf_builder
@@ -292,11 +289,7 @@ impl SendMessageOutput {
                 .recv()
                 .await?
                 .map(|s| s.into())),
-            SendMessageOutput::QDeveloper(output) => Ok(output
-                .send_message_response
-                .recv()
-                .await?
-                .map(|s| s.into())),
+            SendMessageOutput::QDeveloper(output) => Ok(output.send_message_response.recv().await?.map(|s| s.into())),
             SendMessageOutput::Mock(vec) => Ok(vec.pop()),
         }
     }

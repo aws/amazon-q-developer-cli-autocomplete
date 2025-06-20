@@ -44,7 +44,7 @@ impl CredentialsChain {
 
         CredentialsChain { provider_chain }
     }
-    
+
     async fn credentials(&self) -> provider::Result {
         self.provider_chain
             .provide_credentials()
