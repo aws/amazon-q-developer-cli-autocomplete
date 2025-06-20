@@ -31,6 +31,7 @@ How it works
 pub struct CompactArgs {
     /// The prompt to use when generating the summary
     prompt: Option<String>,
+    #[arg(long)]
     show_summary: bool,
 }
 

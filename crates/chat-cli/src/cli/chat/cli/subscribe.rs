@@ -43,18 +43,18 @@ impl SubscribeArgs {
             .map_err(|e| ChatError::Custom(e.to_string().into()))?
         {
             execute!(
-                session.output,
+                session.stderr,
                 style::SetForegroundColor(Color::Yellow),
                 style::Print("\nYour Q Developer Pro subscription is managed through IAM Identity Center.\n\n"),
                 style::SetForegroundColor(Color::Reset),
             )?;
         } else if self.manage {
-            queue!(session.output, style::Print("\n"),)?;
-            match get_subscription_status_with_spinner(&mut session.output, database).await {
+            queue!(session.stderr, style::Print("\n"),)?;
+            match get_subscription_status_with_spinner(&mut session.stderr, database).await {
                 Ok(status) => {
                     if status != ActualSubscriptionStatus::Active {
                         queue!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Yellow),
                             style::Print("You don't seem to have a Q Developer Pro subscription. "),
                             style::SetForegroundColor(Color::DarkGrey),
@@ -69,7 +69,7 @@ impl SubscribeArgs {
                 },
                 Err(err) => {
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!("Failed to get subscription status: {}\n\n", err)),
                         style::SetForegroundColor(Color::Reset),
@@ -87,7 +87,7 @@ impl SubscribeArgs {
             );
             if is_remote() || crate::util::open::open_url_async(&url).await.is_err() {
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::Print(format!("Open this URL to manage your subscription: {}\n\n", url.blue())),
                     style::ResetColor,
                     style::SetForegroundColor(Color::Reset),
@@ -104,14 +104,14 @@ impl SubscribeArgs {
 }
 
 async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> Result<(), ChatError> {
-    queue!(session.output, style::Print("\n"),)?;
+    queue!(session.stderr, style::Print("\n"),)?;
 
     // Get current subscription status
-    match get_subscription_status_with_spinner(&mut session.output, database).await {
+    match get_subscription_status_with_spinner(&mut session.stderr, database).await {
         Ok(status) => {
             if status == ActualSubscriptionStatus::Active {
                 queue!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Yellow),
                     style::Print("Your Builder ID already has a Q Developer Pro subscription.\n\n"),
                     style::SetForegroundColor(Color::Reset),
@@ -121,7 +121,7 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
         },
         Err(e) => {
             execute!(
-                session.output,
+                session.stderr,
                 style::SetForegroundColor(Color::Red),
                 style::Print(format!("{}\n\n", e)),
                 style::SetForegroundColor(Color::Reset),
@@ -132,7 +132,7 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
 
     // Upgrade information
     queue!(
-        session.output,
+        session.stderr,
         style::Print(SUBSCRIBE_TITLE_TEXT),
         style::SetForegroundColor(Color::Grey),
         style::Print(format!("\n\n{}\n\n", SUBSCRIBE_TEXT)),
@@ -151,14 +151,14 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
 
     let user_input = session.read_user_input(&prompt, true);
     queue!(
-        session.output,
+        session.stderr,
         style::SetForegroundColor(Color::Reset),
         style::Print("\n"),
     )?;
 
     if !user_input.is_some_and(|i| ["y", "Y"].contains(&i.as_str())) {
         execute!(
-            session.output,
+            session.stderr,
             style::SetForegroundColor(Color::Red),
             style::Print("Upgrade cancelled.\n\n"),
             style::SetForegroundColor(Color::Reset),
@@ -167,7 +167,7 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
     }
 
     // Create a subscription token and open the webpage
-    let url = with_spinner(&mut session.output, "Preparing to upgrade...", || async {
+    let url = with_spinner(&mut session.stderr, "Preparing to upgrade...", || async {
         let r = Client::new(database, None).await?.create_subscription_token().await?;
         Ok::<String, ChatError>(r.encoded_verification_url().to_string())
     })
@@ -175,7 +175,7 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
 
     if is_remote() || crate::util::open::open_url_async(&url).await.is_err() {
         queue!(
-            session.output,
+            session.stderr,
             style::SetForegroundColor(Color::DarkGrey),
             style::Print(format!(
                 "{} Having issues opening the AWS console? Try copy and pasting the URL > {}\n\n",
@@ -187,7 +187,7 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
     }
 
     execute!(
-        session.output,
+        session.stderr,
         style::Print("Once upgraded, type a new prompt to continue your work, or type /quit to exit the chat.\n\n")
     )?;
 

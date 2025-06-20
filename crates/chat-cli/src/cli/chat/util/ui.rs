@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use crossterm::style::{
     Color,
     Stylize,
@@ -14,10 +16,8 @@ use crossterm::{
 use eyre::Result;
 use strip_ansi_escapes::strip_str;
 
-use super::shared_writer::SharedWriter;
-
 pub fn draw_box(
-    mut output: SharedWriter,
+    output: &mut impl Write,
     title: &str,
     content: &str,
     box_width: usize,
@@ -116,25 +116,20 @@ pub fn draw_box(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use bstr::ByteSlice;
     use crossterm::style::Color;
 
     use super::*;
     use crate::cli::chat::GREETING_BREAK_POINT;
-    use crate::cli::chat::util::shared_writer::TestWriterWithSink;
 
     #[tokio::test]
     async fn test_draw_tip_box() {
-        let buf = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let test_writer = TestWriterWithSink { sink: buf.clone() };
-        let output = SharedWriter::new(test_writer.clone());
+        let mut output = vec![];
 
         // Test with a short tip
         let short_tip = "This is a short tip";
         draw_box(
-            output.clone(),
+            &mut output,
             "Did you know?",
             short_tip,
             GREETING_BREAK_POINT,
@@ -145,7 +140,7 @@ mod tests {
         // Test with a longer tip that should wrap
         let long_tip = "This is a much longer tip that should wrap to multiple lines because it exceeds the inner width of the tip box which is calculated based on the GREETING_BREAK_POINT constant";
         draw_box(
-            output.clone(),
+            &mut output,
             "Did you know?",
             long_tip,
             GREETING_BREAK_POINT,
@@ -161,7 +156,7 @@ mod tests {
             s
         };
         draw_box(
-            output.clone(),
+            &mut output,
             "Did you know?",
             long_tip_with_one_long_word.as_str(),
             GREETING_BREAK_POINT,
@@ -171,7 +166,7 @@ mod tests {
         // Test with a long tip with two long words that should wrap
         let long_tip_with_two_long_words = "a".repeat(200);
         draw_box(
-            output.clone(),
+            &mut output,
             "Did you know?",
             long_tip_with_two_long_words.as_str(),
             GREETING_BREAK_POINT,
@@ -180,8 +175,7 @@ mod tests {
         .expect("Failed to draw tip box");
 
         // Get the output and verify it contains expected formatting elements
-        let content = test_writer.get_content();
-        let output_str = content.to_str_lossy();
+        let output_str = output.to_str_lossy();
 
         // Check for box drawing characters
         assert!(output_str.contains("╭"), "Output should contain top-left corner");

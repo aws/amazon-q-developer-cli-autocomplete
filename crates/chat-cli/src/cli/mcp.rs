@@ -411,11 +411,10 @@ async fn load_cfg(ctx: &Context, p: &PathBuf) -> Result<McpServerConfig> {
 mod tests {
     use super::*;
     use crate::cli::RootSubcommand;
-    use crate::cli::chat::util::shared_writer::NullWriter;
     use crate::util::test::assert_parse;
 
-    #[test]
-    fn test_scope_and_profile_defaults_to_workspace() {
+    #[tokio::test]
+    async fn test_scope_and_profile_defaults_to_workspace() {
         let ctx = Context::new();
         let path = resolve_scope_profile(&ctx, None).unwrap();
         assert_eq!(
@@ -425,8 +424,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_resolve_paths() {
+    #[tokio::test]
+    async fn test_resolve_paths() {
         let ctx = Context::new();
         // workspace
         let p = resolve_scope_profile(&ctx, Some(Scope::Workspace)).unwrap();
@@ -441,10 +440,9 @@ mod tests {
     #[tokio::test]
     async fn ensure_file_created_and_loaded() {
         let ctx = Context::new();
-        let mut out = NullWriter;
         let path = workspace_mcp_config_path(&ctx).unwrap();
 
-        let cfg = super::ensure_config_file(&ctx, &path, &mut out).await.unwrap();
+        let cfg = super::ensure_config_file(&ctx, &path, &mut vec![]).await.unwrap();
         assert!(path.exists(), "config file should be created");
         assert!(cfg.mcp_servers.is_empty());
     }
@@ -452,7 +450,6 @@ mod tests {
     #[tokio::test]
     async fn add_then_remove_cycle() {
         let ctx = Context::new();
-        let mut out = NullWriter;
 
         // 1. add
         AddArgs {
@@ -469,7 +466,7 @@ mod tests {
             disabled: false,
             force: false,
         }
-        .execute(&ctx, &mut out)
+        .execute(&ctx, &mut vec![])
         .await
         .unwrap();
 
@@ -483,7 +480,7 @@ mod tests {
             name: "local".into(),
             scope: None,
         }
-        .execute(&ctx, &mut out)
+        .execute(&ctx, &mut vec![])
         .await
         .unwrap();
 

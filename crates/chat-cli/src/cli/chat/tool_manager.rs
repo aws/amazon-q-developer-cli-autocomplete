@@ -156,7 +156,7 @@ pub struct McpServerConfig {
 }
 
 impl McpServerConfig {
-    pub async fn load_config(output: &mut impl Write) -> eyre::Result<Self> {
+    pub async fn load_config(stderr: &mut impl Write) -> eyre::Result<Self> {
         let mut cwd = std::env::current_dir()?;
         cwd.push(".amazonq/mcp.json");
         let expanded_path = shellexpand::tilde("~/.aws/amazonq/mcp.json");
@@ -165,12 +165,12 @@ impl McpServerConfig {
         let local_buf = tokio::fs::read(cwd).await.ok();
         let conf = match (global_buf, local_buf) {
             (Some(global_buf), Some(local_buf)) => {
-                let mut global_conf = Self::from_slice(&global_buf, output, "global")?;
-                let local_conf = Self::from_slice(&local_buf, output, "local")?;
+                let mut global_conf = Self::from_slice(&global_buf, stderr, "global")?;
+                let local_conf = Self::from_slice(&local_buf, stderr, "local")?;
                 for (server_name, config) in local_conf.mcp_servers {
                     if global_conf.mcp_servers.insert(server_name.clone(), config).is_some() {
                         queue!(
-                            output,
+                            stderr,
                             style::SetForegroundColor(style::Color::Yellow),
                             style::Print("WARNING: "),
                             style::ResetColor,
@@ -184,11 +184,12 @@ impl McpServerConfig {
                 }
                 global_conf
             },
-            (None, Some(local_buf)) => Self::from_slice(&local_buf, output, "local")?,
-            (Some(global_buf), None) => Self::from_slice(&global_buf, output, "global")?,
+            (None, Some(local_buf)) => Self::from_slice(&local_buf, stderr, "local")?,
+            (Some(global_buf), None) => Self::from_slice(&global_buf, stderr, "global")?,
             _ => Default::default(),
         };
-        output.flush()?;
+
+        stderr.flush()?;
         Ok(conf)
     }
 
@@ -203,12 +204,12 @@ impl McpServerConfig {
         Ok(())
     }
 
-    fn from_slice(slice: &[u8], output: &mut impl Write, location: &str) -> eyre::Result<McpServerConfig> {
+    fn from_slice(slice: &[u8], stderr: &mut impl Write, location: &str) -> eyre::Result<McpServerConfig> {
         match serde_json::from_slice::<Self>(slice) {
             Ok(config) => Ok(config),
             Err(e) => {
                 queue!(
-                    output,
+                    stderr,
                     style::SetForegroundColor(style::Color::Yellow),
                     style::Print("WARNING: "),
                     style::ResetColor,
@@ -814,7 +815,7 @@ impl ToolManager {
     pub async fn load_tools(
         &mut self,
         database: &Database,
-        output: &mut impl Write,
+        stderr: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
         let notify = self.notify.take();
@@ -901,7 +902,7 @@ impl ToolManager {
                 }
                 if !self.clients.is_empty() && !self.is_interactive {
                     let _ = queue!(
-                        output,
+                        stderr,
                         style::Print(
                             "Not all mcp servers loaded. Configure non-interactive timeout with q settings mcp.noInteractiveTimeout"
                         ),
@@ -935,7 +936,7 @@ impl ToolManager {
                 .any(|(_, records)| records.iter().any(|record| matches!(record, LoadingRecord::Err(_))))
         {
             queue!(
-                output,
+                stderr,
                 style::Print(
                     "One or more mcp server did not load correctly. See $TMPDIR/qlog/chat.log for more details."
                 ),

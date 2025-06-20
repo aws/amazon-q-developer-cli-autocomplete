@@ -76,15 +76,15 @@ impl Tool {
     }
 
     /// Invokes the tool asynchronously
-    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, ctx: &Context, stdout: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.invoke(ctx, output).await,
-            Tool::FsWrite(fs_write) => fs_write.invoke(ctx, output).await,
-            Tool::ExecuteCommand(execute_command) => execute_command.invoke(output).await,
-            Tool::UseAws(use_aws) => use_aws.invoke(ctx, output).await,
-            Tool::Custom(custom_tool) => custom_tool.invoke(ctx, output).await,
-            Tool::GhIssue(gh_issue) => gh_issue.invoke(ctx, output).await,
-            Tool::Thinking(think) => think.invoke(output).await,
+            Tool::FsRead(fs_read) => fs_read.invoke(ctx, stdout).await,
+            Tool::FsWrite(fs_write) => fs_write.invoke(ctx, stdout).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.invoke(stdout).await,
+            Tool::UseAws(use_aws) => use_aws.invoke(ctx, stdout).await,
+            Tool::Custom(custom_tool) => custom_tool.invoke(ctx, stdout).await,
+            Tool::GhIssue(gh_issue) => gh_issue.invoke(ctx, stdout).await,
+            Tool::Thinking(think) => think.invoke(stdout).await,
         }
     }
 

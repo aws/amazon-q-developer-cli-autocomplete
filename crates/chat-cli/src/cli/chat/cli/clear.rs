@@ -22,7 +22,7 @@ pub struct ClearArgs;
 impl ClearArgs {
     pub async fn execute(self, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         execute!(
-            session.output,
+            session.stderr,
             style::SetForegroundColor(Color::DarkGrey),
             style::Print(
                 "\nAre you sure? This will erase the conversation history and context from hooks for the current session. "
@@ -53,7 +53,7 @@ impl ClearArgs {
                 cm.hook_executor.profile_cache.clear();
             }
             execute!(
-                session.output,
+                session.stderr,
                 style::SetForegroundColor(Color::Green),
                 style::Print("\nConversation history cleared.\n\n"),
                 style::SetForegroundColor(Color::Reset)
