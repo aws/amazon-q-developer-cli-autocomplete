@@ -42,7 +42,7 @@ pub struct ModelArgs;
 
 impl ModelArgs {
     pub async fn execute(self, session: &mut ChatSession) -> Result<ChatState, ChatError> {
-        queue!(session.output, style::Print("\n"))?;
+        queue!(session.stderr, style::Print("\n"))?;
         let active_model_id = session.conversation.model.as_deref();
         let labels: Vec<String> = MODEL_OPTIONS
             .iter()
@@ -73,7 +73,7 @@ impl ModelArgs {
             Err(e) => return Err(ChatError::Custom(format!("Failed to choose model: {e}").into())),
         };
 
-        queue!(session.output, style::ResetColor)?;
+        queue!(session.stderr, style::ResetColor)?;
 
         if let Some(index) = selection {
             let selected = &MODEL_OPTIONS[index];
@@ -81,7 +81,7 @@ impl ModelArgs {
             session.conversation.model = Some(model_id_str);
 
             queue!(
-                session.output,
+                session.stderr,
                 style::Print("\n"),
                 style::Print(format!(" Using {}\n\n", selected.name)),
                 style::ResetColor,
@@ -90,7 +90,7 @@ impl ModelArgs {
             )?;
         }
 
-        execute!(session.output, style::ResetColor)?;
+        execute!(session.stderr, style::ResetColor)?;
 
         Ok(ChatState::PromptUser {
             skip_printing_tools: false,

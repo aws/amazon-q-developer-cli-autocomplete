@@ -48,7 +48,7 @@ impl ProfileSubcommand {
         macro_rules! print_err {
             ($err:expr) => {
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Red),
                     style::Print(format!("\nError: {}\n\n", $err)),
                     style::SetForegroundColor(Color::Reset)
@@ -62,7 +62,7 @@ impl ProfileSubcommand {
                     Ok(profiles) => profiles,
                     Err(e) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nError listing profiles: {}\n\n", e)),
                             style::SetForegroundColor(Color::Reset)
@@ -71,11 +71,11 @@ impl ProfileSubcommand {
                     },
                 };
 
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
                 for profile in profiles {
                     if profile == context_manager.current_profile {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print("* "),
                             style::Print(&profile),
@@ -84,19 +84,19 @@ impl ProfileSubcommand {
                         )?;
                     } else {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::Print("  "),
                             style::Print(&profile),
                             style::Print("\n")
                         )?;
                     }
                 }
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
             },
             Self::Create { name } => match context_manager.create_profile(ctx, &name).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nCreated profile: {}\n\n", name)),
                         style::SetForegroundColor(Color::Reset)
@@ -112,7 +112,7 @@ impl ProfileSubcommand {
             Self::Delete { name } => match context_manager.delete_profile(ctx, &name).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nDeleted profile: {}\n\n", name)),
                         style::SetForegroundColor(Color::Reset)
@@ -123,7 +123,7 @@ impl ProfileSubcommand {
             Self::Set { name } => match context_manager.switch_profile(ctx, &name).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nSwitched to profile: {}\n\n", name)),
                         style::SetForegroundColor(Color::Reset)
@@ -135,7 +135,7 @@ impl ProfileSubcommand {
                 match context_manager.rename_profile(ctx, &old_name, &new_name).await {
                     Ok(_) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print(format!("\nRenamed profile: {} -> {}\n\n", old_name, new_name)),
                             style::SetForegroundColor(Color::Reset)

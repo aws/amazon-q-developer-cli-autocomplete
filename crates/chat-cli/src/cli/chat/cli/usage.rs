@@ -28,12 +28,12 @@ impl UsageArgs {
     pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let state = session
             .conversation
-            .backend_conversation_state(ctx, true, &mut session.output)
+            .backend_conversation_state(ctx, true, &mut session.stderr)
             .await?;
 
         if !state.dropped_context_files.is_empty() {
             execute!(
-                session.output,
+                session.stderr,
                 style::SetForegroundColor(Color::DarkYellow),
                 style::Print("\nSome context files are dropped due to size limit, please run "),
                 style::SetForegroundColor(Color::DarkGreen),
@@ -81,7 +81,7 @@ impl UsageArgs {
 
         if is_overflow {
             queue!(
-                session.output,
+                session.stderr,
                 style::Print(format!(
                     "\nCurrent context window ({} of {}k tokens used)\n",
                     total_token_used,
@@ -98,7 +98,7 @@ impl UsageArgs {
             )?;
         } else {
             queue!(
-                session.output,
+                session.stderr,
                 style::Print(format!(
                     "\nCurrent context window ({} of {}k tokens used)\n",
                     total_token_used,
@@ -145,10 +145,10 @@ impl UsageArgs {
             )?;
         }
 
-        execute!(session.output, style::Print("\n\n"))?;
+        execute!(session.stderr, style::Print("\n\n"))?;
 
         queue!(
-            session.output,
+            session.stderr,
             style::SetForegroundColor(Color::DarkCyan),
             style::Print("█ Context files: "),
             style::SetForegroundColor(Color::Reset),
@@ -184,7 +184,7 @@ impl UsageArgs {
         )?;
 
         queue!(
-            session.output,
+            session.stderr,
             style::SetAttribute(Attribute::Bold),
             style::Print("\n💡 Pro Tips:\n"),
             style::SetAttribute(Attribute::Reset),

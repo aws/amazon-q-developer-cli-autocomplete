@@ -42,7 +42,7 @@ impl McpArgs {
                 .join("\n--- tools refreshed ---\n");
 
             queue!(
-                session.output,
+                session.stderr,
                 style::Print(server_name),
                 style::Print("\n"),
                 style::Print(format!("{}\n", "▔".repeat(terminal_width))),
@@ -53,7 +53,7 @@ impl McpArgs {
 
         if !still_loading.is_empty() {
             queue!(
-                session.output,
+                session.stderr,
                 style::Print("Still loading:\n"),
                 style::Print(format!("{}\n", "▔".repeat(terminal_width))),
                 style::Print(still_loading),
@@ -61,7 +61,7 @@ impl McpArgs {
             )?;
         }
 
-        session.output.flush()?;
+        session.stderr.flush()?;
 
         Ok(ChatState::PromptUser {
             skip_printing_tools: true,

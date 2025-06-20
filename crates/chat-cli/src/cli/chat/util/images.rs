@@ -188,17 +188,11 @@ pub fn get_image_block_from_file_path(maybe_file_path: &str) -> Option<ImageBloc
 
 #[cfg(test)]
 mod tests {
-
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use bstr::ByteSlice;
 
     use super::*;
-    use crate::cli::chat::util::shared_writer::{
-        SharedWriter,
-        TestWriterWithSink,
-    };
 
     #[test]
     fn test_is_supported_image_type() {
@@ -236,9 +230,7 @@ mod tests {
         let image_path = temp_dir.path().join("test_image.jpg");
         std::fs::write(&image_path, b"fake_image_data").unwrap();
 
-        let mut output = SharedWriter::stdout();
-
-        let images = handle_images_from_paths(&mut output, &[image_path.to_string_lossy().to_string()]);
+        let images = handle_images_from_paths(&mut vec![], &[image_path.to_string_lossy().to_string()]);
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].1.filename, "test_image.jpg");
@@ -268,13 +260,9 @@ mod tests {
         let large_image_path = temp_dir.path().join("large_image.jpg");
         let large_image_size = MAX_IMAGE_SIZE + 1;
         std::fs::write(&large_image_path, vec![0; large_image_size]).unwrap();
-        let buf = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let test_writer = TestWriterWithSink { sink: buf.clone() };
-        let mut output = SharedWriter::new(test_writer.clone());
-
+        let mut output = vec![];
         let images = handle_images_from_paths(&mut output, &[large_image_path.to_string_lossy().to_string()]);
-        let content = test_writer.get_content();
-        let output_str = content.to_str_lossy();
+        let output_str = output.to_str_lossy();
         print!("{}", output_str);
         assert!(output_str.contains("The following images are dropped due to exceeding size limit (10MB):"));
         assert!(output_str.contains("- large_image.jpg (10.00 MB)"));
@@ -292,9 +280,7 @@ mod tests {
             std::fs::write(&image_path, b"fake_image_data").unwrap();
         }
 
-        let mut output = SharedWriter::stdout();
-
-        let images = handle_images_from_paths(&mut output, &paths);
+        let images = handle_images_from_paths(&mut vec![], &paths);
 
         assert_eq!(images.len(), MAX_NUMBER_OF_IMAGES_PER_REQUEST);
     }

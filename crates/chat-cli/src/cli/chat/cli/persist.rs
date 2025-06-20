@@ -35,7 +35,7 @@ impl PersistSubcommand {
                     Ok(v) => v,
                     Err(err) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nFailed to {} {}: {}\n\n", $name, $path, &err)),
                             style::SetAttribute(Attribute::Reset)
@@ -54,7 +54,7 @@ impl PersistSubcommand {
                 let contents = tri!(serde_json::to_string_pretty(&session.conversation), "export to", &path);
                 if ctx.fs.exists(&path) && !force {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!(
                             "\nFile at {} already exists. To overwrite, use -f or --force\n\n",
@@ -69,7 +69,7 @@ impl PersistSubcommand {
                 tri!(ctx.fs.write(&path, contents).await, "export to", &path);
 
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print(format!("\n✔ Exported conversation state to {}\n\n", &path)),
                     style::SetAttribute(Attribute::Reset)
@@ -82,7 +82,7 @@ impl PersistSubcommand {
                 session.conversation = new_state;
 
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print(format!("\n✔ Imported conversation state from {}\n\n", &path)),
                     style::SetAttribute(Attribute::Reset)
