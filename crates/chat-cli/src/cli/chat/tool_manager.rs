@@ -33,6 +33,7 @@ use crossterm::{
     style,
     terminal,
 };
+use eyre::Report;
 use futures::{
     StreamExt,
     future,
@@ -45,6 +46,7 @@ use tokio::sync::{
     Notify,
     RwLock,
 };
+use tokio::task::JoinHandle;
 use tracing::{
     error,
     warn,
@@ -225,7 +227,7 @@ impl ToolManagerBuilder {
         // Spawn a task for displaying the mcp loading statuses.
         // This is only necessary when we are in interactive mode AND there are servers to load.
         // Otherwise we do not need to be spawning this.
-        let (_loading_display_task, loading_status_sender) = if interactive
+        let (loading_display_task, loading_status_sender) = if interactive
             && (total > 0 || !disabled_servers.is_empty())
         {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<LoadingMsg>(50);
@@ -692,6 +694,7 @@ impl ToolManagerBuilder {
             pending_clients: pending,
             notify: Some(notify),
             loading_status_sender,
+            loading_display_task,
             new_tool_specs,
             has_new_stuff,
             is_interactive: interactive,
@@ -790,6 +793,10 @@ pub struct ToolManager {
     /// Channel sender for communicating with the loading display thread.
     /// Used to send status updates about tool initialization progress.
     loading_status_sender: Option<tokio::sync::mpsc::Sender<LoadingMsg>>,
+
+    /// This is here so we can await it to avoid output buffer from the display task interleaving
+    /// with other buffer displayed by chat.
+    loading_display_task: Option<JoinHandle<Result<(), Report>>>,
 
     /// Mapping from sanitized tool names to original tool names.
     /// This is used to handle tool name transformations that may occur during initialization
@@ -939,11 +946,18 @@ impl ToolManager {
         } else {
             Box::pin(future::ready(()))
         };
+        let loading_display_task = self.loading_display_task.take();
         tokio::select! {
             _ = timeout_fut => {
                 if let Some(tx) = tx {
                     let still_loading = self.pending_clients.read().await.iter().cloned().collect::<Vec<_>>();
                     let _ = tx.send(LoadingMsg::Terminate { still_loading }).await;
+                    if let Some(task) = loading_display_task {
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_millis(80),
+                            task
+                        ).await;
+                    }
                 }
                 if !self.clients.is_empty() && !self.is_interactive {
                     let _ = queue!(
@@ -988,6 +1002,7 @@ impl ToolManager {
                 style::Print("\n------\n")
             )?;
         }
+        output.flush()?;
         self.update().await;
         Ok(self.schema.clone())
     }
