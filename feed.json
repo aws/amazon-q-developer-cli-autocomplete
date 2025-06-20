@@ -12,6 +12,38 @@
     },
     {
       "type": "release",
+      "date": "2025-06-17",
+      "version": "1.12.1",
+      "title": "Version 1.12.1",
+      "changes": [
+        {
+          "type": "changed",
+          "description": "The default `q chat` model to Sonnet 4 for users in the IAD region - [#219](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/219)"
+        },
+        {
+          "type": "added",
+          "description": "Support for passing arguments to MCP server configuration in the CLI - [#262](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/262)"
+        },
+        {
+          "type": "added",
+          "description": "Support for disabling MCP servers with `disabled: true` - [#257](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/257)"
+        },
+        {
+          "type": "added",
+          "description": "Instructions on using `/prompts` in `q chat` - [#208](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/208)"
+        },
+        {
+          "type": "fixed",
+          "description": "Validation errors with `/compact` in `q chat` - [#224](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/224)"
+        },
+        {
+          "type": "fixed",
+          "description": "Issues resolving relative paths with `fs_write` in `q chat` - [#256](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/256)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-06-11",
       "version": "1.12.0",
       "title": "Version 1.12.0",
@@ -294,7 +326,7 @@
         },
         {
           "type": "added",
-          "description": "An option `--no-interactive` to invoke `q chat` in a non-interactive mode - [#878](https://github.com/aws/amazon-q-developer-cli/pull/878)"
+          "description": "An option `--non-interactive` to invoke `q chat` headlessly - [#878](https://github.com/aws/amazon-q-developer-cli/pull/878)"
         },
         {
           "type": "added",

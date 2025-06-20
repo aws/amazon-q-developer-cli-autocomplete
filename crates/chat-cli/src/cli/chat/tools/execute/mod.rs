@@ -100,8 +100,8 @@ impl ExecuteCommand {
         false
     }
 
-    pub async fn invoke(&self, updates: impl Write) -> Result<InvokeOutput> {
-        let output = run_command(&self.command, MAX_TOOL_RESPONSE_SIZE / 3, Some(updates)).await?;
+    pub async fn invoke(&self, output: &mut impl Write) -> Result<InvokeOutput> {
+        let output = run_command(&self.command, MAX_TOOL_RESPONSE_SIZE / 3, Some(output)).await?;
         let result = serde_json::json!({
             "exit_status": output.exit_status.unwrap_or(0).to_string(),
             "stdout": output.stdout,
@@ -113,16 +113,16 @@ impl ExecuteCommand {
         })
     }
 
-    pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
-        queue!(updates, style::Print("I will run the following shell command: "),)?;
+    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
+        queue!(output, style::Print("I will run the following shell command: "),)?;
 
         // TODO: Could use graphemes for a better heuristic
         if self.command.len() > 20 {
-            queue!(updates, style::Print("\n"),)?;
+            queue!(output, style::Print("\n"),)?;
         }
 
         queue!(
-            updates,
+            output,
             style::SetForegroundColor(Color::Green),
             style::Print(&self.command),
             style::Print("\n"),
@@ -132,7 +132,7 @@ impl ExecuteCommand {
         // Add the summary if available
         if let Some(summary) = &self.summary {
             queue!(
-                updates,
+                output,
                 style::Print(CONTINUATION_LINE),
                 style::Print("\n"),
                 style::Print(PURPOSE_ARROW),
@@ -144,7 +144,7 @@ impl ExecuteCommand {
             )?;
         }
 
-        queue!(updates, style::Print("\n"))?;
+        queue!(output, style::Print("\n"))?;
 
         Ok(())
     }

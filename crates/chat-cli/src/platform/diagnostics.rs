@@ -170,13 +170,13 @@ impl CurrentEnvironment {
         let username = format!("/{}", whoami::username());
 
         let cwd = ctx
-            .env()
+            .env
             .current_dir()
             .ok()
             .map(|path| path.to_string_lossy().replace(&username, "/USER"));
 
         let cli_path = ctx
-            .env()
+            .env
             .current_dir()
             .ok()
             .map(|path| path.to_string_lossy().replace(&username, "/USER"));

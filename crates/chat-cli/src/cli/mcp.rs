@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::io::Write as _;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{
+    ArgAction,
     Args,
     ValueEnum,
 };
@@ -26,7 +27,6 @@ use crate::cli::chat::tools::custom_tool::{
     CustomToolConfig,
     default_timeout,
 };
-use crate::cli::chat::util::shared_writer::SharedWriter;
 use crate::platform::Context;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
@@ -60,16 +60,15 @@ pub enum McpSubcommand {
 }
 
 impl McpSubcommand {
-    pub async fn execute(self) -> Result<ExitCode> {
+    pub async fn execute(self, output: &mut impl Write) -> Result<ExitCode> {
         let ctx = Context::new();
-        let mut output = SharedWriter::stdout();
 
         match self {
-            Self::Add(args) => args.execute(&ctx, &mut output).await?,
-            Self::Remove(args) => args.execute(&ctx, &mut output).await?,
-            Self::List(args) => args.execute(&ctx, &mut output).await?,
-            Self::Import(args) => args.execute(&ctx, &mut output).await?,
-            Self::Status(args) => args.execute(&ctx, &mut output).await?,
+            Self::Add(args) => args.execute(&ctx, output).await?,
+            Self::Remove(args) => args.execute(&ctx, output).await?,
+            Self::List(args) => args.execute(&ctx, output).await?,
+            Self::Import(args) => args.execute(&ctx, output).await?,
+            Self::Status(args) => args.execute(&ctx, output).await?,
         }
 
         output.flush()?;
@@ -85,6 +84,9 @@ pub struct AddArgs {
     /// The command used to launch the server
     #[arg(long)]
     pub command: String,
+    /// Arguments to pass to the command
+    #[arg(long, action = ArgAction::Append, allow_hyphen_values = true, value_delimiter = ',')]
+    pub args: Vec<String>,
     /// Where to add the server to.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
@@ -94,13 +96,16 @@ pub struct AddArgs {
     /// Server launch timeout, in milliseconds
     #[arg(long)]
     pub timeout: Option<u64>,
+    /// Whether the server should be disabled (not loaded)
+    #[arg(long, default_value_t = false)]
+    pub disabled: bool,
     /// Overwrite an existing server with the same name
     #[arg(long, default_value_t = false)]
     pub force: bool,
 }
 
 impl AddArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
 
@@ -118,8 +123,10 @@ impl AddArgs {
         let merged_env = self.env.into_iter().flatten().collect::<HashMap<_, _>>();
         let tool: CustomToolConfig = serde_json::from_value(serde_json::json!({
             "command": self.command,
+            "args": self.args,
             "env": merged_env,
             "timeout": self.timeout.unwrap_or(default_timeout()),
+            "disabled": self.disabled,
         }))?;
 
         writeln!(
@@ -148,11 +155,11 @@ pub struct RemoveArgs {
 }
 
 impl RemoveArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
 
-        if !ctx.fs().exists(&config_path) {
+        if !ctx.fs.exists(&config_path) {
             writeln!(output, "\nNo MCP server configurations found.\n")?;
             return Ok(());
         }
@@ -190,7 +197,7 @@ pub struct ListArgs {
 }
 
 impl ListArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let configs = get_mcp_server_configs(ctx, self.scope).await?;
         if configs.is_empty() {
             writeln!(output, "No MCP server configurations found.\n")?;
@@ -203,7 +210,8 @@ impl ListArgs {
             match cfg_opt {
                 Some(cfg) if !cfg.mcp_servers.is_empty() => {
                     for (name, tool_cfg) in &cfg.mcp_servers {
-                        writeln!(output, "    • {name:<12} {}", tool_cfg.command)?;
+                        let status = if tool_cfg.disabled { " (disabled)" } else { "" };
+                        writeln!(output, "    • {name:<12} {}{}", tool_cfg.command, status)?;
                     }
                 },
                 _ => {
@@ -229,7 +237,7 @@ pub struct ImportArgs {
 }
 
 impl ImportArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let scope: Scope = self.scope.unwrap_or(Scope::Workspace);
         let config_path = resolve_scope_profile(ctx, self.scope)?;
         let mut dst_cfg = ensure_config_file(ctx, &config_path, output).await?;
@@ -273,7 +281,7 @@ pub struct StatusArgs {
 }
 
 impl StatusArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut SharedWriter) -> Result<()> {
+    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
         let configs = get_mcp_server_configs(ctx, None).await?;
         let mut found = false;
 
@@ -287,6 +295,7 @@ impl StatusArgs {
                     style::Print(format!("File    : {}\n", path.display())),
                     style::Print(format!("Command : {}\n", cfg.command)),
                     style::Print(format!("Timeout : {} ms\n", cfg.timeout)),
+                    style::Print(format!("Disabled: {}\n", cfg.disabled)),
                     style::Print(format!(
                         "Env Vars: {}\n",
                         cfg.env
@@ -319,7 +328,7 @@ async fn get_mcp_server_configs(
     let mut results = Vec::new();
     for sc in targets {
         let path = resolve_scope_profile(ctx, Some(sc))?;
-        let cfg_opt = if ctx.fs().exists(&path) {
+        let cfg_opt = if ctx.fs.exists(&path) {
             match McpServerConfig::load_from_file(ctx, &path).await {
                 Ok(cfg) => Some(cfg),
                 Err(e) => {
@@ -353,18 +362,18 @@ fn expand_path(ctx: &Context, p: &str) -> Result<PathBuf> {
     let p = shellexpand::tilde(p);
     let mut path = PathBuf::from(p.as_ref() as &str);
     if path.is_relative() {
-        path = ctx.env().current_dir()?.join(path);
+        path = ctx.env.current_dir()?.join(path);
     }
     Ok(path)
 }
 
-async fn ensure_config_file(ctx: &Context, path: &PathBuf, out: &mut SharedWriter) -> Result<McpServerConfig> {
-    if !ctx.fs().exists(path) {
+async fn ensure_config_file(ctx: &Context, path: &PathBuf, output: &mut impl Write) -> Result<McpServerConfig> {
+    if !ctx.fs.exists(path) {
         if let Some(parent) = path.parent() {
-            ctx.fs().create_dir_all(parent).await?;
+            ctx.fs.create_dir_all(parent).await?;
         }
         McpServerConfig::default().save_to_file(ctx, path).await?;
-        writeln!(out, "\n📁 Created MCP config in '{}'", path.display())?;
+        writeln!(output, "\n📁 Created MCP config in '{}'", path.display())?;
     }
 
     load_cfg(ctx, path).await
@@ -391,7 +400,7 @@ fn parse_env_vars(arg: &str) -> Result<HashMap<String, String>> {
 }
 
 async fn load_cfg(ctx: &Context, p: &PathBuf) -> Result<McpServerConfig> {
-    Ok(if ctx.fs().exists(p) {
+    Ok(if ctx.fs.exists(p) {
         McpServerConfig::load_from_file(ctx, p).await?
     } else {
         McpServerConfig::default()
@@ -404,8 +413,8 @@ mod tests {
     use crate::cli::RootSubcommand;
     use crate::util::test::assert_parse;
 
-    #[test]
-    fn test_scope_and_profile_defaults_to_workspace() {
+    #[tokio::test]
+    async fn test_scope_and_profile_defaults_to_workspace() {
         let ctx = Context::new();
         let path = resolve_scope_profile(&ctx, None).unwrap();
         assert_eq!(
@@ -415,8 +424,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_resolve_paths() {
+    #[tokio::test]
+    async fn test_resolve_paths() {
         let ctx = Context::new();
         // workspace
         let p = resolve_scope_profile(&ctx, Some(Scope::Workspace)).unwrap();
@@ -431,10 +440,9 @@ mod tests {
     #[tokio::test]
     async fn ensure_file_created_and_loaded() {
         let ctx = Context::new();
-        let mut out = SharedWriter::null();
         let path = workspace_mcp_config_path(&ctx).unwrap();
 
-        let cfg = super::ensure_config_file(&ctx, &path, &mut out).await.unwrap();
+        let cfg = super::ensure_config_file(&ctx, &path, &mut vec![]).await.unwrap();
         assert!(path.exists(), "config file should be created");
         assert!(cfg.mcp_servers.is_empty());
     }
@@ -442,24 +450,29 @@ mod tests {
     #[tokio::test]
     async fn add_then_remove_cycle() {
         let ctx = Context::new();
-        let mut out = SharedWriter::null();
 
         // 1. add
         AddArgs {
             name: "local".into(),
             command: "echo hi".into(),
+            args: vec![
+                "awslabs.eks-mcp-server".to_string(),
+                "--allow-write".to_string(),
+                "--allow-sensitive-data-access".to_string(),
+            ],
             env: vec![],
             timeout: None,
             scope: None,
+            disabled: false,
             force: false,
         }
-        .execute(&ctx, &mut out)
+        .execute(&ctx, &mut vec![])
         .await
         .unwrap();
 
         let cfg_path = workspace_mcp_config_path(&ctx).unwrap();
         let cfg: McpServerConfig =
-            serde_json::from_str(&ctx.fs().read_to_string(cfg_path.clone()).await.unwrap()).unwrap();
+            serde_json::from_str(&ctx.fs.read_to_string(cfg_path.clone()).await.unwrap()).unwrap();
         assert!(cfg.mcp_servers.len() == 1);
 
         // 2. remove
@@ -467,11 +480,11 @@ mod tests {
             name: "local".into(),
             scope: None,
         }
-        .execute(&ctx, &mut out)
+        .execute(&ctx, &mut vec![])
         .await
         .unwrap();
 
-        let cfg: McpServerConfig = serde_json::from_str(&ctx.fs().read_to_string(cfg_path).await.unwrap()).unwrap();
+        let cfg: McpServerConfig = serde_json::from_str(&ctx.fs.read_to_string(cfg_path).await.unwrap()).unwrap();
         assert!(cfg.mcp_servers.is_empty());
     }
 
@@ -485,12 +498,19 @@ mod tests {
                 "test_server",
                 "--command",
                 "test_command",
+                "--args",
+                "awslabs.eks-mcp-server,--allow-write,--allow-sensitive-data-access",
                 "--env",
                 "key1=value1,key2=value2"
             ],
             RootSubcommand::Mcp(McpSubcommand::Add(AddArgs {
                 name: "test_server".to_string(),
                 command: "test_command".to_string(),
+                args: vec![
+                    "awslabs.eks-mcp-server".to_string(),
+                    "--allow-write".to_string(),
+                    "--allow-sensitive-data-access".to_string(),
+                ],
                 scope: None,
                 env: vec![
                     [
@@ -501,6 +521,7 @@ mod tests {
                     .collect()
                 ],
                 timeout: None,
+                disabled: false,
                 force: false,
             }))
         );
