@@ -362,6 +362,8 @@ const TRUST_ALL_TEXT: &str = color_print::cstr! {"<green!>All tools are now trus
 const TOOL_BULLET: &str = " ● ";
 const CONTINUATION_LINE: &str = " ⋮ ";
 const PURPOSE_ARROW: &str = " ↳ ";
+const SUCCESS_TICK: &str = " ✓ ";
+const ERROR_EXCLAMATION: &str = " ❗ ";
 
 /// Enum used to denote the origin of a tool use event
 enum ToolUseStatus {
@@ -1409,15 +1411,27 @@ impl ChatSession {
             let tool_time = format!("{}.{}", tool_time.as_secs(), tool_time.subsec_millis());
             match invoke_result {
                 Ok(result) => {
-                    match result.output {
+                    let mut content_blocks: Vec<ToolUseResultBlock> = Vec::new();
+                    match &result.output {
                         OutputKind::Text(ref text) => {
                             debug!("Output is Text: {}", text);
+                            content_blocks.push(ToolUseResultBlock::Text(text.clone()));
                         },
                         OutputKind::Json(ref json) => {
                             debug!("Output is JSON: {}", json);
+                            content_blocks.push(ToolUseResultBlock::Json(json.clone()));
                         },
                         OutputKind::Images(ref image) => {
                             image_blocks.extend(image.clone());
+                        },
+                        OutputKind::ImagesAndText { images, text } => {
+                            debug!(
+                                "Output is ImagesAndText ({} blocks, text len = {})",
+                                images.len(),
+                                text.len()
+                            );
+                            image_blocks.extend(images.clone());
+                            content_blocks.push(ToolUseResultBlock::Text(text.clone()));
                         },
                     }
 
@@ -1440,7 +1454,7 @@ impl ChatSession {
                     }
                     tool_results.push(ToolUseResult {
                         tool_use_id: tool.id.clone(),
-                        content: vec![result.into()],
+                        content: content_blocks,
                         status: ToolResultStatus::Success,
                     });
                 },
