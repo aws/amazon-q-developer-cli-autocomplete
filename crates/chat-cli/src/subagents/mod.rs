@@ -4,9 +4,7 @@ use std::process::{Command, ExitCode};
 
 use crate::cli::OutputFormat;
 use crate::cli::chat::util::shared_writer::SharedWriter;
-use crate::logging::Error;
 use crate::util::choose;
-use amzn_codewhisperer_streaming_client::error;
 use clap::{Args, Subcommand};
 use crossterm::style::{Attribute, Color};
 use crossterm::{execute, style};
@@ -14,7 +12,6 @@ use eyre::Result;
 use libproc::libproc::proc_pid;
 use libproc::processes;
 use serde::Serialize;
-use std::io::{self, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::signal::ctrl_c;
@@ -40,6 +37,16 @@ pub struct ListArgs {
     /// Output format just says can be --f, -f, etc
     #[arg(long, short, value_enum, default_value_t)]
     pub format: OutputFormat,
+    /// Run once and exit (breaks out of loop)
+    #[arg(long)]
+    pub single: bool,
+}
+
+enum Purpose {
+    NumAgents,
+    List,
+    Prompt,
+    Summary,
 }
 
 #[derive(Debug, Args, PartialEq, Eq)]
@@ -60,6 +67,8 @@ pub struct SendArgs {
     pub pid: u32,
     #[arg(long, short, value_enum, default_value_t)]
     pub format: OutputFormat,
+    #[arg(long, help = "Optional purpose for this message")]
+    pub purpose: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -74,11 +83,12 @@ pub struct AgentInfo {
 
 // TODO: Fix error handling logic instead of just adding eprintln everywhere
 // Lists all chat_cli instances metadata running in system
-pub async fn list_agents() -> Result<ExitCode> {
+pub async fn list_agents(args: ListArgs) -> Result<ExitCode> {
     // Set up for live updates
     let refresh_interval = tokio::time::Duration::from_secs(1);
     let mut interval = tokio::time::interval(refresh_interval);
     let mut output = SharedWriter::stdout();
+    let display_once = args.single;
 
     println!("Live agent status (press Ctrl+C to exit)...");
 
@@ -112,8 +122,10 @@ pub async fn list_agents() -> Result<ExitCode> {
         for curr_process in all_procs {
             let curr_pid = curr_process.try_into().unwrap();
             let curr_process_name = proc_pid::name(curr_pid).unwrap_or("Unknown process".to_string());
+            eprintln!("{}", curr_process_name);
             let is_qcli_process = curr_process_name.contains("chat_cli")
                 || curr_process_name.contains("qchat")
+                || curr_process_name.contains("q_cli")
                 || curr_process_name.contains("q chat")
                 || curr_process_name == "q";
             if is_qcli_process {
@@ -124,7 +136,7 @@ pub async fn list_agents() -> Result<ExitCode> {
                 match UnixStream::connect(&socket_path).await {
                     Ok(mut stream) => {
                         // Send request
-                        stream.write_all(b"GET_STATE").await?;
+                        stream.write_all(b"LIST ").await?;
                         let mut buffer = [0u8; 1024];
                         // Read response metadata
                         let n = stream.read(&mut buffer).await?;
@@ -224,6 +236,9 @@ pub async fn list_agents() -> Result<ExitCode> {
             Ok(_) = ctrl_c_stream => {
                 break;
             }
+        }
+        if display_once {
+            break;
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -382,7 +397,7 @@ fn is_in_git_repo() -> bool {
     String::from_utf8_lossy(&output.stdout).trim() == "true"
 }
 
-// Delete git work trees + close tmux sessions
+// Helper: deletes git work trees + close tmux sessions
 fn handle_model_choice(model_number: usize, args: CompareArgs, main_pid: u32) -> Result<String> {
     let base_dir = if let Some(path) = args.path.clone() {
         std::path::PathBuf::from(path)
@@ -414,6 +429,7 @@ fn handle_model_choice(model_number: usize, args: CompareArgs, main_pid: u32) ->
     Ok("Success".to_string())
 }
 
+/* Send messages to subagents with pid specified */
 pub async fn send_agent_message(args: SendArgs) -> Result<ExitCode> {
     // ensure socket path exists
     let agent_args = args.clone();
@@ -424,12 +440,28 @@ pub async fn send_agent_message(args: SendArgs) -> Result<ExitCode> {
         return Ok(ExitCode::FAILURE);
     }
 
-    // route message to socket
+    // route message to socket: message prefix based on purpose
     match UnixStream::connect(&socket_path).await {
         Ok(mut stream) => {
-            stream.write_all(b"MESSAGE_SEND_BEGIN").await?;
-            stream.write_all(agent_prompt.as_bytes()).await?;
-            eprintln!("Message written to socket");
+            let prefix = if let Some(purpose) = agent_args.purpose {
+                match purpose.as_str() {
+                    "num_agents" => "NUM_AGENTS ",
+                    "list" => "LIST ",
+                    "prompt" => "PROMPT ",
+                    "summary" => "SUMMARY ",
+                    _ => "MESSAGE_SEND_BEGIN ", // Default if purpose doesn't match
+                }
+            } else {
+                "MESSAGE_SEND_BEGIN " // Default if no purpose specified
+            };
+
+            // Write the prefix followed by the message
+            stream.write_all(prefix.as_bytes()).await?;
+            if let Some((_, rest)) = agent_prompt.split_once(' ') {
+                stream.write_all(rest.as_bytes()).await?;
+            } else {
+                stream.write_all(agent_prompt.as_bytes()).await?;
+            }
         },
         Err(_) => (),
     }
@@ -439,10 +471,16 @@ pub async fn send_agent_message(args: SendArgs) -> Result<ExitCode> {
 impl AgentArgs {
     pub async fn execute(self) -> Result<ExitCode> {
         match self.subcommand {
-            Some(AgentSubcommand::List(_)) => list_agents().await,
+            Some(AgentSubcommand::List(args)) => list_agents(args).await,
             Some(AgentSubcommand::Compare(args)) => compare_agents(args).await,
             Some(AgentSubcommand::Send(args)) => send_agent_message(args).await,
-            None => list_agents().await, // Default behavior if no subcommand
+            None => {
+                list_agents(ListArgs {
+                    format: OutputFormat::default(),
+                    single: false,
+                })
+                .await
+            },
         }
     }
 }

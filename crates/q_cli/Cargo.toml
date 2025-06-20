@@ -49,6 +49,7 @@ fig_request.workspace = true
 fig_settings.workspace = true
 fig_telemetry.workspace = true
 fig_telemetry_core.workspace = true
+chat_cli = { path = "../chat-cli" }
 fig_util.workspace = true
 flume.workspace = true
 futures.workspace = true

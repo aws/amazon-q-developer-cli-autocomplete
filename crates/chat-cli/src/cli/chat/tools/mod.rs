@@ -3,15 +3,13 @@ pub mod execute;
 pub mod fs_read;
 pub mod fs_write;
 pub mod gh_issue;
+pub mod launch_agent;
 pub mod thinking;
 pub mod use_aws;
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::{
-    Path,
-    PathBuf,
-};
+use std::path::{Path, PathBuf};
 
 use crossterm::style::Stylize;
 use custom_tool::CustomTool;
@@ -20,16 +18,15 @@ use eyre::Result;
 use fs_read::FsRead;
 use fs_write::FsWrite;
 use gh_issue::GhIssue;
-use serde::{
-    Deserialize,
-    Serialize,
-};
+use serde::{Deserialize, Serialize};
 use thinking::Thinking;
 use use_aws::UseAws;
 
 use super::consts::MAX_TOOL_RESPONSE_SIZE;
 use super::util::images::RichImageBlocks;
 use crate::platform::Context;
+use launch_agent::SubAgent;
+use launch_agent::SubAgentWrapper;
 
 /// Represents an executable tool use.
 #[allow(clippy::large_enum_variant)]
@@ -42,6 +39,7 @@ pub enum Tool {
     Custom(CustomTool),
     GhIssue(GhIssue),
     Thinking(Thinking),
+    SubAgentWrapper(Vec<SubAgent>),
 }
 
 impl Tool {
@@ -58,6 +56,7 @@ impl Tool {
             Tool::Custom(custom_tool) => &custom_tool.name,
             Tool::GhIssue(_) => "gh_issue",
             Tool::Thinking(_) => "thinking (prerelease)",
+            Tool::SubAgentWrapper(_) => "launch_agent",
         }
         .to_owned()
     }
@@ -72,6 +71,7 @@ impl Tool {
             Tool::Custom(_) => true,
             Tool::GhIssue(_) => false,
             Tool::Thinking(_) => false,
+            Tool::SubAgentWrapper(_) => true,
         }
     }
 
@@ -85,6 +85,12 @@ impl Tool {
             Tool::Custom(custom_tool) => custom_tool.invoke(context, updates).await,
             Tool::GhIssue(gh_issue) => gh_issue.invoke(updates).await,
             Tool::Thinking(think) => think.invoke(updates).await,
+            Tool::SubAgentWrapper(sub_agents) => {
+                let wrapper = SubAgentWrapper {
+                    subagents: sub_agents.clone(),
+                };
+                wrapper.invoke(updates).await
+            },
         }
     }
 
@@ -98,6 +104,12 @@ impl Tool {
             Tool::Custom(custom_tool) => custom_tool.queue_description(updates),
             Tool::GhIssue(gh_issue) => gh_issue.queue_description(updates),
             Tool::Thinking(thinking) => thinking.queue_description(updates),
+            Tool::SubAgentWrapper(sub_agents) => {
+                let wrapper = SubAgentWrapper {
+                    subagents: sub_agents.clone(),
+                };
+                wrapper.queue_description(updates)
+            },
         }
     }
 
@@ -111,6 +123,13 @@ impl Tool {
             Tool::Custom(custom_tool) => custom_tool.validate(ctx).await,
             Tool::GhIssue(gh_issue) => gh_issue.validate(ctx).await,
             Tool::Thinking(think) => think.validate(ctx).await,
+            Tool::SubAgentWrapper(sub_agents) => {
+                // Validate all agents in the vector
+                for agent in sub_agents.iter() {
+                    agent.validate(ctx).await?;
+                }
+                Ok(())
+            },
         }
     }
 }

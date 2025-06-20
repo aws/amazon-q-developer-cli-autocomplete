@@ -21,74 +21,35 @@ mod uninstall;
 mod update;
 mod user;
 
-use std::io::{
-    Write as _,
-    stdout,
-};
+use std::io::{Write as _, stdout};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use anstream::{
-    eprintln,
-    println,
-};
-use clap::{
-    ArgAction,
-    CommandFactory,
-    Parser,
-    Subcommand,
-    ValueEnum,
-};
+use self::integrations::IntegrationsSubcommands;
+use self::user::RootUserSubcommand;
+use crate::util::desktop::{LaunchArgs, launch_fig_desktop};
+use crate::util::{CliContext, assert_logged_in};
+use anstream::{eprintln, println};
+use chat_cli::subagents;
+use clap::{ArgAction, CommandFactory, Parser, Subcommand, ValueEnum};
 use crossterm::style::Stylize;
-use eyre::{
-    Result,
-    WrapErr,
-    bail,
-};
+use eyre::{Result, WrapErr, bail};
 use feed::Feed;
-use fig_auth::builder_id::{
-    BuilderIdToken,
-    DeviceRegistration,
-};
+use fig_auth::builder_id::{BuilderIdToken, DeviceRegistration};
 use fig_auth::consts::OIDC_BUILDER_ID_REGION;
 use fig_auth::is_logged_in;
 use fig_auth::pkce::Region;
 use fig_auth::secret_store::SecretStore;
 use fig_ipc::local::open_ui_element;
-use fig_log::{
-    LogArgs,
-    initialize_logging,
-};
+use fig_log::{LogArgs, initialize_logging};
 use fig_proto::local::UiElement;
 use fig_settings::sqlite::database;
 use fig_util::directories::home_local_bin;
-use fig_util::{
-    CLI_BINARY_NAME,
-    PRODUCT_NAME,
-    directories,
-    manifest,
-    system_info,
-};
+use fig_util::{CLI_BINARY_NAME, PRODUCT_NAME, directories, manifest, system_info};
 use internal::InternalSubcommand;
 use serde::Serialize;
 use tokio::signal::ctrl_c;
-use tracing::{
-    Level,
-    debug,
-    error,
-    warn,
-};
-
-use self::integrations::IntegrationsSubcommands;
-use self::user::RootUserSubcommand;
-use crate::util::desktop::{
-    LaunchArgs,
-    launch_fig_desktop,
-};
-use crate::util::{
-    CliContext,
-    assert_logged_in,
-};
+use tracing::{Level, debug, error, warn};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
@@ -218,6 +179,8 @@ pub enum CliRootCommands {
     /// Inline shell completions
     #[command(subcommand)]
     Inline(inline::InlineSubcommand),
+    /// Multi agent orchestration
+    Agent(subagents::AgentArgs),
 }
 
 impl CliRootCommands {
@@ -252,6 +215,7 @@ impl CliRootCommands {
             CliRootCommands::Chat { .. } => "chat",
             CliRootCommands::Mcp { .. } => "mcp",
             CliRootCommands::Inline(_) => "inline",
+            CliRootCommands::Agent(_) => "agent",
         }
     }
 }
@@ -375,6 +339,7 @@ impl Cli {
                     Self::execute_chat("mcp", Some(args), true).await
                 },
                 CliRootCommands::Inline(subcommand) => subcommand.execute(&cli_context).await,
+                CliRootCommands::Agent(subcommand) => subcommand.execute().await,
             },
             // Root command
             None => Self::execute_chat("chat", None, true).await,

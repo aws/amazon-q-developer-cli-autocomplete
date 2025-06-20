@@ -49,7 +49,7 @@ use token_counter::{TokenCount, TokenCounter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::signal::ctrl_c;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::Mutex;
 use tool_manager::{GetPromptError, LoadingRecord, McpServerConfig, PromptBundle, ToolManager, ToolManagerBuilder};
 use tools::gh_issue::GhIssueContext;
 use tools::{OutputKind, QueuedTool, Tool, ToolOrigin, ToolPermissions, ToolSpec};
@@ -670,6 +670,12 @@ enum ChatState {
         /// Whether or not to show the /compact help text.
         help: bool,
     },
+    WaitingOnAgents {
+        /// Tool uses to continue with after agents complete
+        tool_uses: Option<Vec<QueuedTool>>,
+        /// Pending tool index
+        pending_tool_index: Option<usize>,
+    },
     /// Exit the chat.
     Exit,
 }
@@ -761,6 +767,56 @@ impl ChatContext {
         }
     }
 
+    /// Clears summaries arc mutex and makes space for numAgents entries
+    async fn handle_num_agents_command(
+        buffer: &[u8],
+        summaries: &Arc<Mutex<Vec<String>>>,
+        expected_summaries: &Arc<Mutex<usize>>,
+    ) {
+        let full_content = std::str::from_utf8(buffer).unwrap_or("").trim();
+        let num_str = full_content.strip_prefix("NUM_AGENTS ").unwrap_or("").trim();
+
+        if let Ok(num_agents) = num_str.parse::<usize>() {
+            let mut summaries_guard = summaries.lock().await;
+            summaries_guard.clear();
+            summaries_guard.reserve(num_agents);
+            *expected_summaries.lock().await = num_agents;
+        }
+    }
+
+    ///  Adds summary to shared ds and writes to MPSC once all summaries received
+    async fn handle_summary_command(
+        buffer: &[u8],
+        summaries: &Arc<Mutex<Vec<String>>>,
+        expected_summaries: &Arc<Mutex<usize>>,
+        message_sender: &tokio::sync::mpsc::Sender<String>, // adjust type as needed
+    ) {
+        let full_content = std::str::from_utf8(buffer).unwrap_or("").trim();
+        let summary_content = full_content.strip_prefix("SUMMARY ").unwrap_or("").trim();
+
+        let mut summaries_guard = summaries.lock().await;
+        let expected_count = *expected_summaries.lock().await;
+
+        if summaries_guard.len() < expected_count {
+            summaries_guard.push(summary_content.to_string());
+            eprintln!(
+                "\n\nReceived update from agent {} of {}",
+                summaries_guard.len(),
+                expected_count
+            );
+            if summaries_guard.len() == expected_count {
+                let concatenated_summary = summaries_guard.join("\n");
+                drop(summaries_guard);
+                if let Err(e) = message_sender.send(concatenated_summary).await {
+                    eprintln!("Failed to send concatenated summary: {}", e);
+                }
+            }
+        } else {
+            let response = "{\"status\":\"error\",\"message\":\"Already received all expected summaries\"}";
+            eprintln!("Failed to write response: {}", response);
+        }
+    }
+
     /// Sets up a Unix domain socket server for subagent communication
     async fn setup_agent_socket() -> (
         Arc<tokio::sync::Mutex<String>>,
@@ -773,12 +829,16 @@ impl ChatContext {
         let tokens_used = Arc::new(tokio::sync::Mutex::new(0));
         let context_window_percent = Arc::new(tokio::sync::Mutex::new(0.0));
         let status = Arc::new(tokio::sync::Mutex::new(String::from("waiting for user input")));
+        let summaries = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
+        let expected_summaries = Arc::new(tokio::sync::Mutex::new(0usize));
 
         // Create clones for the async task
         let profile_clone = profile.clone();
         let tokens_used_clone: Arc<tokio::sync::Mutex<usize>> = tokens_used.clone();
         let context_window_percent_clone = context_window_percent.clone();
         let status_clone = status.clone();
+        let summaries_clone = summaries.clone();
+        let expected_summaries_clone = expected_summaries.clone();
 
         // Create UDS for list agent
         let socket_dir = "/tmp/qchat";
@@ -792,7 +852,6 @@ impl ChatContext {
 
         // Create MPSC for piping between agents
         let (message_sender, message_receiver) = tokio::sync::mpsc::channel::<String>(32);
-        eprintln!("Reached mpsc setup");
 
         // Spawn async listening task
         tokio::spawn(async move {
@@ -812,8 +871,7 @@ impl ChatContext {
                                 },
                                 Ok(n) => {
                                     let command = std::str::from_utf8(&buffer[..n]).unwrap_or("").trim();
-                                    if command == "GET_STATE" {
-                                        // Build response
+                                    if command.starts_with("LIST") {
                                         let profile_value = profile_clone.lock().await.clone();
                                         let tokens_value = *tokens_used_clone.lock().await;
                                         let percent_value = *context_window_percent_clone.lock().await;
@@ -827,14 +885,33 @@ impl ChatContext {
                                         if let Err(e) = stream.write_all(response.as_bytes()).await {
                                             eprintln!("Failed to write response: {}", e);
                                         }
-                                    } else if command.starts_with("MESSAGE_SEND_BEGIN") {
-                                        let prompt = std::str::from_utf8(&buffer[..n]).unwrap_or("").trim();
+                                    // TODO: add an atomic boolean: indicates whether theres something in the mpsc or not.
+                                    } else if command.starts_with("PROMPT ") {
+                                        let full_content = std::str::from_utf8(&buffer[..n]).unwrap_or("").trim();
+                                        let message_content =
+                                            full_content.strip_prefix("PROMPT ").unwrap_or(full_content).trim();
+                                        // pass prompt to main chat loop through mpsc
+                                        if let Err(e) = message_sender.send(message_content.to_string()).await {
+                                            eprintln!("Failed to send message: {}", e);
+                                        }
+                                    } else if command.starts_with("NUM_AGENTS ") {
+                                        Self::handle_num_agents_command(
+                                            &buffer[..n],
+                                            &summaries_clone,
+                                            &expected_summaries_clone,
+                                        )
+                                        .await;
+                                    } else if command.starts_with("SUMMARY ") {
+                                        Self::handle_summary_command(
+                                            &buffer[..n],
+                                            &summaries_clone,
+                                            &expected_summaries_clone,
+                                            &message_sender,
+                                        )
+                                        .await;
                                     } else {
                                         // Unknown command
-                                        let response = "{\"status\":\"error\",\"message\":\"Unknown command\"}";
-                                        if let Err(e) = stream.write_all(response.as_bytes()).await {
-                                            eprintln!("Failed to write response: {}", e);
-                                        }
+                                        eprintln!("Failed to write response due to unknown prefix");
                                     }
                                 },
                                 Err(e) => {
@@ -860,6 +937,68 @@ impl ChatContext {
             status,
             Some(message_receiver),
         )
+    }
+
+    async fn handle_waiting_on_agents(
+        &mut self,
+        tool_uses: Option<Vec<QueuedTool>>,
+        pending_tool_index: Option<usize>,
+    ) -> Result<ChatState, ChatError> {
+        // execute!(
+        //     self.output,
+        //     style::SetForegroundColor(Color::Yellow),
+        //     style::Print("\n\nWaiting for agent summaries...\n"),
+        //     style::SetForegroundColor(Color::Reset)
+        // )?;
+        if self.interactive {
+            execute!(self.output, cursor::Hide)?;
+            execute!(self.output, style::Print("\n"), style::SetAttribute(Attribute::Reset))?;
+            self.spinner = Some(Spinner::new(
+                Spinners::Dots,
+                "Waiting for agent to complete...".to_string(),
+            ));
+        }
+
+        // Check if we have a message receiver
+        if let Some(receiver) = &mut self.message_receiver {
+            match receiver.recv().await {
+                Some(message) => {
+                    execute!(
+                        self.output,
+                        style::SetForegroundColor(Color::Green),
+                        style::Print("Agent summaries received:\n\n"),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print(format!("{}\n\n", message))
+                    )?;
+
+                    // Set the message as the next user message
+                    // self.conversation_state.append_user_transcript(&message);
+                    self.conversation_state.reset_next_user_message();
+                    self.conversation_state.set_next_user_message(message).await;
+
+                    // Send the message to the model
+                    return Ok(ChatState::HandleResponseStream(
+                        self.client
+                            .send_message(self.conversation_state.as_sendable_conversation_state(false).await)
+                            .await?,
+                    ));
+                },
+                None => {
+                    // Channel closed
+                    eprintln!("Agent communication channel closed");
+                },
+            }
+        } else {
+            // No message receiver available
+            eprintln!("Agent communication channel closed");
+        }
+
+        // Return to prompt user state
+        Ok(ChatState::PromptUser {
+            tool_uses,
+            pending_tool_index,
+            skip_printing_tools: false,
+        })
     }
 
     async fn try_chat(&mut self, database: &mut Database, telemetry: &TelemetryThread) -> Result<()> {
@@ -985,6 +1124,16 @@ impl ChatContext {
             std::mem::drop(percent_guard);
 
             let result = match chat_state {
+                ChatState::WaitingOnAgents {
+                    tool_uses,
+                    pending_tool_index,
+                } => {
+                    let tool_uses_clone = tool_uses.clone();
+                    tokio::select! {
+                        res = self.handle_waiting_on_agents(tool_uses, pending_tool_index) => res,
+                        Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: tool_uses_clone })
+                    }
+                },
                 ChatState::PromptUser {
                     tool_uses,
                     pending_tool_index,
@@ -3374,12 +3523,19 @@ impl ChatContext {
         let mut tool_results = vec![];
         let mut image_blocks: Vec<RichImageBlock> = Vec::new();
 
+        // change chat state to waitingOnAgents
+        let mut sub_agent_context = false;
+
         for tool in tool_uses {
             let mut tool_telemetry = self.tool_use_telemetry_events.entry(tool.id.clone());
             tool_telemetry = tool_telemetry.and_modify(|ev| ev.is_accepted = true);
 
             let tool_start = std::time::Instant::now();
             let invoke_result = tool.tool.invoke(&self.ctx, &mut self.output).await;
+
+            if tool.name == "launch_agent" {
+                sub_agent_context = true;
+            }
 
             if self.interactive && self.spinner.is_some() {
                 queue!(
@@ -3493,6 +3649,14 @@ impl ChatContext {
         }
 
         self.send_tool_use_telemetry(telemetry).await;
+
+        if sub_agent_context {
+            return Ok(ChatState::WaitingOnAgents {
+                tool_uses: None,
+                pending_tool_index: None,
+            });
+        }
+
         return Ok(ChatState::HandleResponseStream(
             self.client
                 .send_message(self.conversation_state.as_sendable_conversation_state(false).await)
@@ -3904,20 +4068,18 @@ impl ChatContext {
     fn read_user_input(&mut self, prompt: &str, exit_on_single_ctrl_c: bool) -> Option<String> {
         let mut ctrl_c = false;
         loop {
-            // check if mpsc written to for subagent communication -- mutually exclusive assumption for now
-            if let Some(receiver) = &mut self.message_receiver {
-                if let Ok(subagent_prompt) = receiver.try_recv() {
-                    eprintln!("Reached read_user_input");
-                    execute!(
-                        self.output,
-                        style::SetForegroundColor(Color::Yellow),
-                        style::Print(format!("[Message piped from another agent]: {}\n", subagent_prompt)),
-                        style::SetForegroundColor(Color::Reset)
-                    )
-                    .unwrap_or_default();
-                    return Some(subagent_prompt);
-                }
-            }
+            // TODO: Fix busy waiting through seperate async logic
+            // if Q_SUBAGENT Env Var set, we are in subagent context
+            // if let Some(receiver) = &mut self.message_receiver {
+            //     if std::env::var("Q_SUBAGENT").is_ok() {
+            //         loop {
+            //             if let Ok(subagent_prompt) = receiver.try_recv() {
+            //                 return Some(subagent_prompt);
+            //             }
+            //             std::thread::sleep(Duration::from_millis(50));
+            //         }
+            //     }
+            // }
 
             // check if user input provided
             match (self.input_source.read_line(Some(prompt)), ctrl_c) {

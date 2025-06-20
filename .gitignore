@@ -49,3 +49,5 @@ book/
 .env*
 
 run-build.sh
+setup-q-dev.sh
+debug.log
