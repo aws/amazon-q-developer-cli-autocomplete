@@ -9,8 +9,7 @@ pub mod model;
 pub mod profile;
 
 pub use clients::{
-    Client,
-    StreamingClient,
+    Client
 };
 pub use endpoints::Endpoint;
 pub use error::ApiClientError;

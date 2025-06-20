@@ -24,7 +24,6 @@ use std::collections::{
 };
 use std::io::Write;
 use std::process::ExitCode;
-use std::sync::Arc;
 use std::time::Duration;
 
 use amzn_codewhisperer_client::types::SubscriptionStatus;
@@ -32,7 +31,6 @@ use clap::{
     Args,
     Parser,
 };
-use consts::DUMMY_TOOL_NAME;
 use context::ContextManager;
 pub use conversation::ConversationState;
 use conversation::TokenWarningLevel;
@@ -1143,7 +1141,6 @@ impl ChatSession {
     async fn prompt_user(
         &mut self,
         ctx: &Context,
-        database: &Database,
         skip_printing_tools: bool,
     ) -> Result<ChatState, ChatError> {
         execute!(self.stderr, cursor::Show)?;
