@@ -1,17 +1,9 @@
 use clap::Subcommand;
 use crossterm::execute;
-use crossterm::style::{
-    self,
-    Attribute,
-    Color,
-};
+use crossterm::style::{self, Attribute, Color};
 
 use crate::cli::ConversationState;
-use crate::cli::chat::{
-    ChatError,
-    ChatSession,
-    ChatState,
-};
+use crate::cli::chat::{ChatError, ChatSession, ChatState};
 use crate::platform::Context;
 
 #[deny(missing_docs)]
@@ -76,7 +68,23 @@ impl PersistSubcommand {
                 )?;
             },
             Self::Load { path } => {
-                let contents = tri!(ctx.fs.read_to_string(&path).await, "import from", &path);
+                // Try the original path first
+                let original_result = ctx.fs.read_to_string(&path).await;
+
+                // If the original path fails and doesn't end with .json, try with .json appended
+                let contents = if original_result.is_err() && !path.ends_with(".json") {
+                    let json_path = format!("{}.json", path);
+                    match ctx.fs.read_to_string(&json_path).await {
+                        Ok(content) => content,
+                        Err(_) => {
+                            // If both paths fail, return the original error for better user experience
+                            tri!(original_result, "import from", &path)
+                        },
+                    }
+                } else {
+                    tri!(original_result, "import from", &path)
+                };
+
                 let mut new_state: ConversationState = tri!(serde_json::from_str(&contents), "import from", &path);
                 new_state.reload_serialized_state(ctx).await;
                 session.conversation = new_state;
