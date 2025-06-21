@@ -72,7 +72,7 @@ impl ContextSubcommand {
 
         match self {
             Self::Show { expand } => {
-                let mut profile_context_files = HashSet::new();
+                let profile_context_files = HashSet::<(String, String)>::new();
                 execute!(
                     session.stderr,
                     style::SetAttribute(Attribute::Bold),
@@ -157,8 +157,8 @@ impl ContextSubcommand {
                         execute!(session.stderr, style::Print(format!("{}\n\n", "▔".repeat(3))),)?;
                     }
 
-                    let dropped_files =
-                        drop_matched_context_files(&mut profile_context_files, CONTEXT_FILES_MAX_SIZE).ok();
+                    let mut files_as_vec = profile_context_files.iter().cloned().collect::<Vec<_>>();
+                    let dropped_files = drop_matched_context_files(&mut files_as_vec, CONTEXT_FILES_MAX_SIZE).ok();
 
                     execute!(
                         session.stderr,

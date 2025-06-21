@@ -186,7 +186,7 @@ impl ChatArgs {
         };
 
         let agents = {
-            let mut agents = AgentCollection::load(ctx, self.profile.as_deref(), &mut output).await;
+            let mut agents = AgentCollection::load(ctx, self.profile.as_deref(), &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
             if let Some(name) = self.profile.as_ref() {
@@ -196,7 +196,7 @@ impl ChatArgs {
                             && !database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false)
                         {
                             execute!(
-                                output,
+                                stderr,
                                 style::Print(
                                     "To learn more about MCP safety, see https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-security.html\n\n"
                                 )
@@ -205,7 +205,7 @@ impl ChatArgs {
                         database.settings.set(Setting::McpLoadedBefore, true).await?;
                     },
                     Err(e) => {
-                        let _ = execute!(output, style::Print(format!("Error switching profile: {}", e)));
+                        let _ = execute!(stderr, style::Print(format!("Error switching profile: {}", e)));
                     },
                     _ => {},
                 }
@@ -247,9 +247,9 @@ impl ChatArgs {
             .prompt_list_receiver(prompt_request_receiver)
             .conversation_id(&conversation_id)
             .agent(agents.get_active().cloned().unwrap_or_default())
-            .build(telemetry, tool_manager_output, !self.non_interactive)
+            .build(telemetry, Box::new(std::io::stderr()), !self.non_interactive)
             .await?;
-        let tool_config = tool_manager.load_tools(database, &mut output).await?;
+        let tool_config = tool_manager.load_tools(database, &mut stderr).await?;
 
         ChatSession::new(
             database,
@@ -257,7 +257,6 @@ impl ChatArgs {
             stderr,
             &conversation_id,
             agents,
-            output,
             self.input,
             InputSource::new(database, prompt_request_sender, prompt_response_receiver)?,
             self.resume,
@@ -266,7 +265,6 @@ impl ChatArgs {
             tool_manager,
             model_id,
             tool_config,
-            tool_permissions,
             !self.non_interactive,
         )
         .await?
@@ -436,10 +434,9 @@ impl ChatSession {
     pub async fn new(
         database: &mut Database,
         stdout: std::io::Stdout,
-        stderr: std::io::Stderr,
+        mut stderr: std::io::Stderr,
         conversation_id: &str,
         mut agents: AgentCollection,
-        mut output: SharedWriter,
         mut input: Option<String>,
         input_source: InputSource,
         resume_conversation: bool,
@@ -448,6 +445,7 @@ impl ChatSession {
         tool_manager: ToolManager,
         model_id: Option<String>,
         tool_config: HashMap<String, ToolSpec>,
+        interactive: bool,
     ) -> Result<Self> {
         let valid_model_id = model_id
             .or_else(|| {
@@ -485,7 +483,7 @@ impl ChatSession {
                 if let Some(profile) = cs.current_profile() {
                     if agents.switch(profile).is_err() {
                         execute!(
-                            output,
+                            stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print("Error"),
                             style::ResetColor,

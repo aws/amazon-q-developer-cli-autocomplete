@@ -386,7 +386,7 @@ impl AgentCollection {
                     || name.strip_prefix("@").is_some_and(|remainder| {
                         remainder
                             .split_once(MCP_SERVER_TOOL_DELIMITER)
-                            .is_some_and(|(left, right)| right == tool_name)
+                            .is_some_and(|(_left, right)| right == tool_name)
                             || remainder == <ToolOrigin as Borrow<str>>::borrow(origin)
                     })
             })

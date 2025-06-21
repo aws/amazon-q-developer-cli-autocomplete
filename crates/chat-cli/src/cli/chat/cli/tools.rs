@@ -330,7 +330,7 @@ impl ToolsSubcommand {
             },
             Self::TrustAll => {
                 session.conversation.agents.trust_all_tools = true;
-                queue!(session.output, style::Print(TRUST_ALL_TEXT))?;
+                queue!(session.stderr, style::Print(TRUST_ALL_TEXT))?;
             },
             Self::Reset => {
                 session.conversation.agents.trust_all_tools = false;
