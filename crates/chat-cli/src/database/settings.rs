@@ -21,6 +21,7 @@ pub enum Setting {
     OldClientId,
     ShareCodeWhispererContent,
     EnabledThinking,
+    EnabledKnowledge,
     SkimCommandKey,
     ChatGreetingEnabled,
     ApiTimeout,
@@ -41,6 +42,7 @@ impl AsRef<str> for Setting {
             Self::OldClientId => "telemetryClientId",
             Self::ShareCodeWhispererContent => "codeWhisperer.shareCodeWhispererContentWithAWS",
             Self::EnabledThinking => "chat.enableThinking",
+            Self::EnabledKnowledge => "chat.enableKnowledge",
             Self::SkimCommandKey => "chat.skimCommandKey",
             Self::ChatGreetingEnabled => "chat.greeting.enabled",
             Self::ApiTimeout => "api.timeout",
@@ -71,6 +73,7 @@ impl TryFrom<&str> for Setting {
             "telemetryClientId" => Ok(Self::OldClientId),
             "codeWhisperer.shareCodeWhispererContentWithAWS" => Ok(Self::ShareCodeWhispererContent),
             "chat.enableThinking" => Ok(Self::EnabledThinking),
+            "chat.enableKnowledge" => Ok(Self::EnabledKnowledge),
             "chat.skimCommandKey" => Ok(Self::SkimCommandKey),
             "chat.greeting.enabled" => Ok(Self::ChatGreetingEnabled),
             "api.timeout" => Ok(Self::ApiTimeout),
@@ -151,7 +154,7 @@ impl Settings {
         self.get(key).and_then(|value| value.as_i64())
     }
 
-    async fn save_to_file(&self) -> Result<(), DatabaseError> {
+    pub async fn save_to_file(&self) -> Result<(), DatabaseError> {
         if cfg!(test) {
             return Ok(());
         }
