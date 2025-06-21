@@ -45,7 +45,7 @@ impl ProfileSubcommand {
         macro_rules! _print_err {
             ($err:expr) => {
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Red),
                     style::Print(format!("\nError: {}\n\n", $err)),
                     style::SetForegroundColor(Color::Reset)
@@ -58,11 +58,11 @@ impl ProfileSubcommand {
                 let profiles = agents.agents.values().collect::<Vec<_>>();
                 let active_profile = agents.get_active();
 
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
                 for profile in profiles {
                     if active_profile.is_some_and(|p| p == profile) {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print("* "),
                             style::Print(&profile.name),
@@ -71,14 +71,14 @@ impl ProfileSubcommand {
                         )?;
                     } else {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::Print("  "),
                             style::Print(&profile.name),
                             style::Print("\n")
                         )?;
                     }
                 }
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
             },
             Self::Rename { .. } | Self::Set { .. } | Self::Delete { .. } | Self::Create { .. } => {
                 // As part of the persona implementation, we are disabling the ability to
@@ -91,7 +91,7 @@ impl ProfileSubcommand {
                     "default global persona path".to_string()
                 };
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Yellow),
                     style::Print(format!(
                         "Perona / Profile persistance has been disabled. To perform any CRUD on persona / profile, use the default persona under {} as example",

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use clap::Subcommand;
 use crossterm::style::{
     Attribute,
@@ -8,6 +10,9 @@ use crossterm::{
     style,
 };
 
+use crate::cli::chat::consts::CONTEXT_FILES_MAX_SIZE;
+use crate::cli::chat::token_counter::TokenCounter;
+use crate::cli::chat::util::drop_matched_context_files;
 use crate::cli::chat::{
     ChatError,
     ChatSession,
@@ -54,7 +59,7 @@ impl ContextSubcommand {
     pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             execute!(
-                session.output,
+                session.stderr,
                 style::SetForegroundColor(Color::Red),
                 style::Print("\nContext management is not available.\n\n"),
                 style::SetForegroundColor(Color::Reset)
@@ -67,8 +72,9 @@ impl ContextSubcommand {
 
         match self {
             Self::Show { expand } => {
+                let mut profile_context_files = HashSet::new();
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetAttribute(Attribute::Bold),
                     style::SetForegroundColor(Color::Magenta),
                     style::Print(format!("\n👤 profile ({}):\n", context_manager.current_profile)),
@@ -77,17 +83,17 @@ impl ContextSubcommand {
 
                 if context_manager.profile_config.paths.is_empty() {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::DarkGrey),
                         style::Print("    <none>\n\n"),
                         style::SetForegroundColor(Color::Reset)
                     )?;
                 } else {
                     for path in &context_manager.profile_config.paths {
-                        execute!(session.output, style::Print(format!("    {} ", path)))?;
+                        execute!(session.stderr, style::Print(format!("    {} ", path)))?;
                         if let Ok(context_files) = context_manager.get_context_files_by_path(ctx, path).await {
                             execute!(
-                                session.output,
+                                session.stderr,
                                 style::SetForegroundColor(Color::Green),
                                 style::Print(format!(
                                     "({} match{})",
@@ -97,9 +103,104 @@ impl ContextSubcommand {
                                 style::SetForegroundColor(Color::Reset)
                             )?;
                         }
-                        execute!(session.output, style::Print("\n"))?;
+                        execute!(session.stderr, style::Print("\n"))?;
                     }
-                    execute!(session.output, style::Print("\n"))?;
+                    execute!(session.stderr, style::Print("\n"))?;
+                }
+
+                if profile_context_files.is_empty() {
+                    execute!(
+                        session.stderr,
+                        style::SetForegroundColor(Color::DarkGrey),
+                        style::Print("No files in the current directory matched the rules above.\n\n"),
+                        style::SetForegroundColor(Color::Reset)
+                    )?;
+                } else {
+                    let total = profile_context_files.len();
+                    let total_tokens = profile_context_files
+                        .iter()
+                        .map(|(_, content)| TokenCounter::count_tokens(content))
+                        .sum::<usize>();
+                    execute!(
+                        session.stderr,
+                        style::SetForegroundColor(Color::Green),
+                        style::SetAttribute(Attribute::Bold),
+                        style::Print(format!(
+                            "{} matched file{} in use:\n",
+                            total,
+                            if total == 1 { "" } else { "s" }
+                        )),
+                        style::SetForegroundColor(Color::Reset),
+                        style::SetAttribute(Attribute::Reset)
+                    )?;
+
+                    for (filename, content) in &profile_context_files {
+                        let est_tokens = TokenCounter::count_tokens(content);
+                        execute!(
+                            session.stderr,
+                            style::Print(format!("👤 {} ", filename)),
+                            style::SetForegroundColor(Color::DarkGrey),
+                            style::Print(format!("(~{} tkns)\n", est_tokens)),
+                            style::SetForegroundColor(Color::Reset),
+                        )?;
+                        if expand {
+                            execute!(
+                                session.stderr,
+                                style::SetForegroundColor(Color::DarkGrey),
+                                style::Print(format!("{}\n\n", content)),
+                                style::SetForegroundColor(Color::Reset)
+                            )?;
+                        }
+                    }
+
+                    if expand {
+                        execute!(session.stderr, style::Print(format!("{}\n\n", "▔".repeat(3))),)?;
+                    }
+
+                    let dropped_files =
+                        drop_matched_context_files(&mut profile_context_files, CONTEXT_FILES_MAX_SIZE).ok();
+
+                    execute!(
+                        session.stderr,
+                        style::Print(format!("\nTotal: ~{} tokens\n\n", total_tokens))
+                    )?;
+
+                    if let Some(dropped_files) = dropped_files {
+                        if !dropped_files.is_empty() {
+                            execute!(
+                                session.stderr,
+                                style::SetForegroundColor(Color::DarkYellow),
+                                style::Print(format!(
+                                    "Total token count exceeds limit: {}. The following files will be automatically dropped when interacting with Q. Consider removing them. \n\n",
+                                    CONTEXT_FILES_MAX_SIZE
+                                )),
+                                style::SetForegroundColor(Color::Reset)
+                            )?;
+                            let total_files = dropped_files.len();
+
+                            let truncated_dropped_files = &dropped_files[..10];
+
+                            for (filename, content) in truncated_dropped_files {
+                                let est_tokens = TokenCounter::count_tokens(content);
+                                execute!(
+                                    session.stderr,
+                                    style::Print(format!("{} ", filename)),
+                                    style::SetForegroundColor(Color::DarkGrey),
+                                    style::Print(format!("(~{} tkns)\n", est_tokens)),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            }
+
+                            if total_files > 10 {
+                                execute!(
+                                    session.stderr,
+                                    style::Print(format!("({} more files)\n", total_files - 10))
+                                )?;
+                            }
+                        }
+                    }
+
+                    execute!(session.stderr, style::Print("\n"))?;
                 }
 
                 // Show last cached session.conversation summary if available, otherwise regenerate it
@@ -107,7 +208,7 @@ impl ContextSubcommand {
                     if let Some(summary) = session.conversation.latest_summary() {
                         let border = "═".repeat(session.terminal_width().min(80));
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::Print("\n"),
                             style::SetForegroundColor(Color::Cyan),
                             style::Print(&border),
@@ -127,7 +228,7 @@ impl ContextSubcommand {
             Self::Add { force, paths } => match context_manager.add_paths(ctx, paths.clone(), force).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nAdded {} path(s) to context.\n\n", paths.len())),
                         style::SetForegroundColor(Color::Reset)
@@ -135,7 +236,7 @@ impl ContextSubcommand {
                 },
                 Err(e) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!("\nError: {}\n\n", e)),
                         style::SetForegroundColor(Color::Reset)
@@ -145,7 +246,7 @@ impl ContextSubcommand {
             Self::Remove { paths } => match context_manager.remove_paths(paths.clone()) {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nRemoved {} path(s) from context.\n\n", paths.len(),)),
                         style::SetForegroundColor(Color::Reset)
@@ -153,7 +254,7 @@ impl ContextSubcommand {
                 },
                 Err(e) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!("\nError: {}\n\n", e)),
                         style::SetForegroundColor(Color::Reset)
@@ -163,7 +264,7 @@ impl ContextSubcommand {
             Self::Clear => {
                 context_manager.clear();
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print(format!("\nCleared context\n\n")),
                     style::SetForegroundColor(Color::Reset)

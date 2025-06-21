@@ -415,7 +415,7 @@ impl HooksArgs {
         };
 
         queue!(
-            session.output,
+            session.stderr,
             style::SetAttribute(Attribute::Bold),
             style::SetForegroundColor(Color::Magenta),
             style::Print(format!("\n👤 profile ({}):\n", &context_manager.current_profile)),
@@ -423,20 +423,20 @@ impl HooksArgs {
         )?;
 
         print_hook_section(
-            &mut session.output,
+            &mut session.stderr,
             &context_manager.profile_config.hooks,
             HookTrigger::ConversationStart,
         )
         .map_err(map_chat_error)?;
         print_hook_section(
-            &mut session.output,
+            &mut session.stderr,
             &context_manager.profile_config.hooks,
             HookTrigger::PerPrompt,
         )
         .map_err(map_chat_error)?;
 
         execute!(
-            session.output,
+            session.stderr,
             style::Print(format!(
                 "\nUse {} to manage hooks.\n\n",
                 "/context hooks help".to_string().dark_green()
@@ -506,7 +506,7 @@ impl HooksSubcommand {
                 match context_manager.add_hook(name.clone(), Hook::new_inline_hook(trigger, command)) {
                     Ok(_) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print(format!("\nAdded hook '{name}'.\n\n")),
                             style::SetForegroundColor(Color::Reset)
@@ -514,7 +514,7 @@ impl HooksSubcommand {
                     },
                     Err(e) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nCannot add hook '{name}': {}\n\n", e)),
                             style::SetForegroundColor(Color::Reset)
@@ -527,7 +527,7 @@ impl HooksSubcommand {
                 match result {
                     Ok(_) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print(format!("\nRemoved hook '{name}'.\n\n")),
                             style::SetForegroundColor(Color::Reset)
@@ -535,7 +535,7 @@ impl HooksSubcommand {
                     },
                     Err(e) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nCannot remove hook '{name}': {}\n\n", e)),
                             style::SetForegroundColor(Color::Reset)
@@ -548,7 +548,7 @@ impl HooksSubcommand {
                 match result {
                     Ok(_) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print(format!("\nEnabled hook '{name}'.\n\n")),
                             style::SetForegroundColor(Color::Reset)
@@ -556,7 +556,7 @@ impl HooksSubcommand {
                     },
                     Err(e) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nCannot enable hook '{name}': {}\n\n", e)),
                             style::SetForegroundColor(Color::Reset)
@@ -569,7 +569,7 @@ impl HooksSubcommand {
                 match result {
                     Ok(_) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print(format!("\nDisabled hook '{name}'.\n\n")),
                             style::SetForegroundColor(Color::Reset)
@@ -577,7 +577,7 @@ impl HooksSubcommand {
                     },
                     Err(e) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nCannot disable hook '{name}': {}\n\n", e)),
                             style::SetForegroundColor(Color::Reset)
@@ -588,7 +588,7 @@ impl HooksSubcommand {
             Self::EnableAll => {
                 context_manager.set_all_hooks_disabled(false);
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print("\nEnabled all hooks.\n\n"),
                     style::SetForegroundColor(Color::Reset)
@@ -597,7 +597,7 @@ impl HooksSubcommand {
             Self::DisableAll => {
                 context_manager.set_all_hooks_disabled(true);
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print("\nDisabled all hooks.\n\n"),
                     style::SetForegroundColor(Color::Reset)
@@ -605,7 +605,7 @@ impl HooksSubcommand {
             },
             Self::Show => {
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetAttribute(Attribute::Bold),
                     style::SetForegroundColor(Color::Magenta),
                     style::Print(format!("\n👤 profile ({}):\n", context_manager.current_profile)),
@@ -613,24 +613,24 @@ impl HooksSubcommand {
                 )?;
 
                 queue!(
-                    session.output,
+                    session.stderr,
                     style::SetAttribute(Attribute::Bold),
                     style::SetForegroundColor(Color::DarkYellow),
                     style::Print("    🔧 Hooks:\n")
                 )?;
                 print_hook_section(
-                    &mut session.output,
+                    &mut session.stderr,
                     &context_manager.profile_config.hooks,
                     HookTrigger::ConversationStart,
                 )
                 .map_err(map_chat_error)?;
                 print_hook_section(
-                    &mut session.output,
+                    &mut session.stderr,
                     &context_manager.profile_config.hooks,
                     HookTrigger::PerPrompt,
                 )
                 .map_err(map_chat_error)?;
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
             },
         }
 
@@ -690,7 +690,6 @@ mod tests {
     use tokio::time::sleep;
 
     use super::*;
-    use crate::cli::chat::util::shared_writer::NullWriter;
     use crate::cli::chat::util::test::create_test_context_manager;
 
     #[tokio::test]
@@ -780,7 +779,7 @@ mod tests {
         manager.add_hook("hook2".to_string(), hook2).unwrap();
 
         // Run the hooks
-        let results = manager.run_hooks(&mut NullWriter).await.unwrap();
+        let results = manager.run_hooks(&mut vec![]).await.unwrap();
         assert_eq!(results.len(), 2); // Should include both hooks
 
         Ok(())
@@ -811,7 +810,7 @@ mod tests {
         hook2.is_global = false;
 
         // First execution should run the command
-        let mut output = Vec::new();
+        let mut output = vec![];
         let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
@@ -841,7 +840,7 @@ mod tests {
         hook2.cache_ttl_seconds = 60;
 
         // First execution should run the command
-        let mut output = Vec::new();
+        let mut output = vec![];
         let results = executor.run_hooks(vec![&hook1, &hook2], &mut output).await.unwrap();
 
         assert_eq!(results.len(), 2);
@@ -893,7 +892,7 @@ mod tests {
         let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, "sleep 2".to_string());
         hook.timeout_ms = 100; // Set very short timeout
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
+        let results = executor.run_hooks(vec![&hook], &mut vec![]).await.unwrap();
 
         assert_eq!(results.len(), 0); // Should fail due to timeout
     }
@@ -904,7 +903,7 @@ mod tests {
         let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, "echo 'test'".to_string());
         hook.disabled = true;
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
+        let results = executor.run_hooks(vec![&hook], &mut vec![]).await.unwrap();
 
         assert_eq!(results.len(), 0); // Disabled hook should not run
     }
@@ -916,14 +915,14 @@ mod tests {
         hook.cache_ttl_seconds = 1;
 
         // First execution
-        let results1 = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
+        let results1 = executor.run_hooks(vec![&hook], &mut vec![]).await.unwrap();
         assert_eq!(results1.len(), 1);
 
         // Wait for cache to expire
         sleep(Duration::from_millis(1001)).await;
 
         // Second execution should run command again
-        let results2 = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
+        let results2 = executor.run_hooks(vec![&hook], &mut vec![]).await.unwrap();
         assert_eq!(results2.len(), 1);
     }
 
@@ -972,7 +971,7 @@ mod tests {
         let mut hook = Hook::new_inline_hook(HookTrigger::PerPrompt, command.to_string());
         hook.max_output_size = 100;
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
+        let results = executor.run_hooks(vec![&hook], &mut vec![]).await.unwrap();
 
         assert!(results[0].1.len() <= hook.max_output_size + " ... truncated".len());
     }
@@ -990,7 +989,7 @@ mod tests {
 
         let hook = Hook::new_inline_hook(HookTrigger::PerPrompt, command.to_string());
 
-        let results = executor.run_hooks(vec![&hook], &mut NullWriter).await.unwrap();
+        let results = executor.run_hooks(vec![&hook], &mut vec![]).await.unwrap();
 
         assert_eq!(results.len(), 1, "Command execution should succeed");
 

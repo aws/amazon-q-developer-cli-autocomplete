@@ -71,10 +71,6 @@ use crate::cli::chat::cli::hooks::{
     Hook,
     HookTrigger,
 };
-use crate::cli::chat::util::shared_writer::{
-    NullWriter,
-    SharedWriter,
-};
 use crate::database::Database;
 use crate::mcp_client::Prompt;
 use crate::platform::Context;
@@ -406,7 +402,7 @@ impl ConversationState {
     pub async fn as_sendable_conversation_state(
         &mut self,
         ctx: &Context,
-        output: &mut impl Write,
+        stderr: &mut impl Write,
         run_hooks: bool,
     ) -> Result<FigConversationState, ChatError> {
         debug_assert!(self.next_message.is_some());
@@ -414,11 +410,10 @@ impl ConversationState {
         self.history.drain(self.valid_history_range.1..);
         self.history.drain(..self.valid_history_range.0);
 
-        let context = self.backend_conversation_state(ctx, run_hooks, output).await?;
+        let context = self.backend_conversation_state(ctx, run_hooks, stderr).await?;
         if !context.dropped_context_files.is_empty() {
-            let mut output = SharedWriter::stdout();
             execute!(
-                output,
+                stderr,
                 style::SetForegroundColor(Color::DarkYellow),
                 style::Print("\nSome context files are dropped due to size limit, please run "),
                 style::SetForegroundColor(Color::DarkGreen),
@@ -507,7 +502,7 @@ impl ConversationState {
     /// Currently only checks if we have enough messages in the history to create a summary out of.
     pub async fn can_create_summary_request(&mut self, ctx: &Context) -> Result<bool, ChatError> {
         Ok(self
-            .backend_conversation_state(ctx, false, &mut NullWriter)
+            .backend_conversation_state(ctx, false, &mut vec![])
             .await?
             .history
             .len()
@@ -564,7 +559,7 @@ impl ConversationState {
             },
         };
 
-        let conv_state = self.backend_conversation_state(ctx, false, &mut NullWriter).await?;
+        let conv_state = self.backend_conversation_state(ctx, false, &mut vec![]).await?;
 
         // Include everything but the last message in the history.
         let history_len = conv_state.history.len();
@@ -718,7 +713,7 @@ impl ConversationState {
     /// Calculate the total character count in the conversation
     pub async fn calculate_char_count(&mut self, ctx: &Context) -> Result<CharCount, ChatError> {
         Ok(self
-            .backend_conversation_state(ctx, false, &mut NullWriter)
+            .backend_conversation_state(ctx, false, &mut vec![])
             .await?
             .char_count())
     }
@@ -1053,7 +1048,6 @@ mod tests {
 
         let mut tool_manager = ToolManager::default();
         let mut conversation = ConversationState::new(
-            &mut ctx,
             "fake_conv_id",
             agents,
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
@@ -1067,7 +1061,7 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .as_sendable_conversation_state(&ctx, &mut vec![], true)
                 .await
                 .unwrap();
             assert_conversation_state_invariants(s, i);
@@ -1085,9 +1079,8 @@ mod tests {
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
-        let tool_config = tool_manager.load_tools(&database, &mut output).await.unwrap();
+        let tool_config = tool_manager.load_tools(&database, &mut vec![]).await.unwrap();
         let mut conversation = ConversationState::new(
-            &mut Context::new(),
             "fake_conv_id",
             agents.clone(),
             tool_config.clone(),
@@ -1098,7 +1091,7 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .as_sendable_conversation_state(&ctx, &mut vec![], true)
                 .await
                 .unwrap();
             assert_conversation_state_invariants(s, i);
@@ -1120,19 +1113,12 @@ mod tests {
         }
 
         // Build a long conversation history of user messages mixed in with tool results.
-        let mut conversation = ConversationState::new(
-            &mut Context::new(),
-            "fake_conv_id",
-            agents,
-            tool_config.clone(),
-            tool_manager.clone(),
-            None,
-        )
-        .await;
+        let mut conversation =
+            ConversationState::new("fake_conv_id", agents, tool_config.clone(), tool_manager.clone(), None).await;
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .as_sendable_conversation_state(&ctx, &mut vec![], true)
                 .await
                 .unwrap();
             assert_conversation_state_invariants(s, i);
@@ -1169,7 +1155,6 @@ mod tests {
 
         let mut tool_manager = ToolManager::default();
         let mut conversation = ConversationState::new(
-            &mut ctx,
             "fake_conv_id",
             agents,
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
@@ -1183,7 +1168,7 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=(MAX_CONVERSATION_STATE_HISTORY_LEN + 100) {
             let s = conversation
-                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .as_sendable_conversation_state(&ctx, &mut vec![], true)
                 .await
                 .unwrap();
 
@@ -1240,7 +1225,6 @@ mod tests {
             .await
             .unwrap();
         let mut conversation = ConversationState::new(
-            &mut ctx,
             "fake_conv_id",
             agents,
             tool_manager.load_tools(&database, &mut output).await.unwrap(),
@@ -1253,7 +1237,7 @@ mod tests {
         conversation.set_next_user_message("start".to_string()).await;
         for i in 0..=5 {
             let s = conversation
-                .as_sendable_conversation_state(&ctx, &mut output, true)
+                .as_sendable_conversation_state(&ctx, &mut vec![], true)
                 .await
                 .unwrap();
             let hist = s.history.as_ref().unwrap();

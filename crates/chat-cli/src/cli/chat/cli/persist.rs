@@ -17,7 +17,11 @@ use crate::platform::Context;
 #[derive(Debug, PartialEq, Subcommand)]
 pub enum PersistSubcommand {
     /// Save the current conversation
-    Save { path: String, force: bool },
+    Save {
+        path: String,
+        #[arg(short, long)]
+        force: bool,
+    },
     /// Load a previous conversation
     Load { path: String },
 }
@@ -30,7 +34,7 @@ impl PersistSubcommand {
                     Ok(v) => v,
                     Err(err) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nFailed to {} {}: {}\n\n", $name, $path, &err)),
                             style::SetAttribute(Attribute::Reset)
@@ -49,7 +53,7 @@ impl PersistSubcommand {
                 let contents = tri!(serde_json::to_string_pretty(&session.conversation), "export to", &path);
                 if ctx.fs.exists(&path) && !force {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!(
                             "\nFile at {} already exists. To overwrite, use -f or --force\n\n",
@@ -64,7 +68,7 @@ impl PersistSubcommand {
                 tri!(ctx.fs.write(&path, contents).await, "export to", &path);
 
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print(format!("\n✔ Exported conversation state to {}\n\n", &path)),
                     style::SetAttribute(Attribute::Reset)
@@ -76,7 +80,7 @@ impl PersistSubcommand {
                 // switch profile after a session has started.
                 // TODO: perhaps revive this after we have a decision on profile switching
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Yellow),
                     style::Print(
                         "Conversation loading has been disabled. To load a conversation. Quit and restart q chat."

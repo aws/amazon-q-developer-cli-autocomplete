@@ -874,7 +874,7 @@ impl ToolManager {
     pub async fn load_tools(
         &mut self,
         database: &Database,
-        output: &mut impl Write,
+        stderr: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
         let notify = self.notify.take();
@@ -974,7 +974,7 @@ impl ToolManager {
                 }
                 if !self.clients.is_empty() && !self.is_interactive {
                     let _ = queue!(
-                        output,
+                        stderr,
                         style::Print(
                             "Not all mcp servers loaded. Configure non-interactive timeout with q settings mcp.noInteractiveTimeout"
                         ),
@@ -1008,14 +1008,14 @@ impl ToolManager {
                 .any(|(_, records)| records.iter().any(|record| matches!(record, LoadingRecord::Err(_))))
         {
             queue!(
-                output,
+                stderr,
                 style::Print(
                     "One or more mcp server did not load correctly. See $TMPDIR/qlog/chat.log for more details."
                 ),
                 style::Print("\n------\n")
             )?;
         }
-        output.flush()?;
+        stderr.flush()?;
         self.update().await;
         Ok(self.schema.clone())
     }
