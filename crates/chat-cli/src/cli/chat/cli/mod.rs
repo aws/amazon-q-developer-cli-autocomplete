@@ -3,6 +3,7 @@ pub mod compact;
 pub mod context;
 pub mod editor;
 pub mod hooks;
+pub mod knowledge;
 pub mod mcp;
 pub mod model;
 pub mod persist;
@@ -18,6 +19,7 @@ use compact::CompactArgs;
 use context::ContextSubcommand;
 use editor::EditorArgs;
 use hooks::HooksArgs;
+use knowledge::KnowledgeSubcommand;
 use mcp::McpArgs;
 use model::ModelArgs;
 use persist::PersistSubcommand;
@@ -52,6 +54,9 @@ pub enum SlashCommand {
     /// Manage context files and hooks for the chat session
     #[command(subcommand)]
     Context(ContextSubcommand),
+    /// Manage knowledge base for persistent context storage
+    #[command(subcommand)]
+    Knowledge(KnowledgeSubcommand),
     /// Open $EDITOR (defaults to vi) to compose a prompt
     #[command(name = "editor")]
     PromptEditor(EditorArgs),
@@ -92,6 +97,7 @@ impl SlashCommand {
             Self::Clear(args) => args.execute(session).await,
             Self::Profile(subcommand) => subcommand.execute(ctx, session).await,
             Self::Context(args) => args.execute(ctx, session).await,
+            Self::Knowledge(subcommand) => subcommand.execute(ctx, database, session).await,
             Self::PromptEditor(args) => args.execute(session).await,
             Self::Compact(args) => args.execute(ctx, database, telemetry, session).await,
             Self::Tools(args) => args.execute(session).await,

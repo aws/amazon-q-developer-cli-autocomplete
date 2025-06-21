@@ -24,9 +24,10 @@ rayon.workspace = true
 tempfile.workspace = true
 once_cell.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 
-# Vector search library
-hnsw_rs = "0.3.1"
+# Vector search library - pin to avoid edition2024 requirement
+hnsw_rs = "=0.3.1"
 
 # BM25 implementation - works on all platforms including ARM
 bm25 = { version = "2.2.1", features = ["language_detection"] }
