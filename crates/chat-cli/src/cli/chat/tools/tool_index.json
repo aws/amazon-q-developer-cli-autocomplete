@@ -111,6 +111,10 @@
         "path": {
           "description": "Absolute path to file or directory, e.g. `/repo/file.py` or `/repo`.",
           "type": "string"
+        },
+        "summary": {
+          "description": "A brief explanation of what the file change does or why it's being made.",
+          "type": "string"
         }
       },
       "required": ["command", "path"]
