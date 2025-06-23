@@ -15,7 +15,7 @@ use super::{
 };
 use crate::database::Database;
 use crate::database::settings::Setting;
-use crate::platform::Context;
+use crate::os::Os;
 use crate::util::knowledge_store::KnowledgeStore;
 
 /// The Knowledge tool allows storing and retrieving information across chat sessions.
@@ -87,12 +87,12 @@ impl Knowledge {
         database.settings.get_bool(Setting::EnabledKnowledge).unwrap_or(false)
     }
 
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         match self {
             Knowledge::Add(add) => {
                 // Check if value is intended to be a path (doesn't contain newlines)
                 if !add.value.contains('\n') {
-                    let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &add.value);
+                    let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &add.value);
                     if !path.exists() {
                         eyre::bail!("Path '{}' does not exist", add.value);
                     }
@@ -105,7 +105,7 @@ impl Knowledge {
                 }
                 // If path is provided, validate it exists
                 if !remove.path.is_empty() {
-                    let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &remove.path);
+                    let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &remove.path);
                     if !path.exists() {
                         warn!(
                             "Path '{}' does not exist, will try to remove by path string match",
@@ -123,7 +123,7 @@ impl Knowledge {
 
                 // Validate the path exists
                 if !update.path.is_empty() {
-                    let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &update.path);
+                    let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &update.path);
                     if !path.exists() {
                         eyre::bail!("Path '{}' does not exist", update.path);
                     }
@@ -144,7 +144,7 @@ impl Knowledge {
         }
     }
 
-    pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, os: &Os, updates: &mut impl Write) -> Result<()> {
         match self {
             Knowledge::Add(add) => {
                 queue!(
@@ -156,7 +156,7 @@ impl Knowledge {
                 )?;
 
                 // Check if value is a path or text content
-                let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &add.value);
+                let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &add.value);
                 if path.exists() {
                     let path_type = if path.is_dir() { "directory" } else { "file" };
                     queue!(
@@ -246,7 +246,7 @@ impl Knowledge {
                     )?;
                 }
 
-                let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &update.path);
+                let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &update.path);
                 let path_type = if path.is_dir() { "directory" } else { "file" };
                 queue!(
                     updates,
@@ -303,7 +303,7 @@ impl Knowledge {
         Ok(())
     }
 
-    pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
         // Get the async knowledge store singleton
         let async_knowledge_store = KnowledgeStore::get_async_instance().await;
         let mut store = async_knowledge_store.lock().await;
@@ -311,7 +311,7 @@ impl Knowledge {
         let result = match self {
             Knowledge::Add(add) => {
                 // For path indexing, we'll show a progress message first
-                let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &add.value);
+                let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &add.value);
                 let value_to_use = if path.exists() {
                     path.to_string_lossy().to_string()
                 } else {
@@ -342,7 +342,7 @@ impl Knowledge {
                     }
                 } else if !remove.path.is_empty() {
                     // Remove by path
-                    let sanitized_path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &remove.path);
+                    let sanitized_path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &remove.path);
                     match store.remove_by_path(sanitized_path.to_string_lossy().as_ref()).await {
                         Ok(_) => format!("Removed context with path '{}' from knowledge base", remove.path),
                         Err(e) => format!("Failed to remove context by path: {}", e),
@@ -362,7 +362,7 @@ impl Knowledge {
                 }
 
                 // Sanitize the path
-                let path = crate::cli::chat::tools::sanitize_path_tool_arg(ctx, &update.path);
+                let path = crate::cli::chat::tools::sanitize_path_tool_arg(os, &update.path);
                 if !path.exists() {
                     return Ok(InvokeOutput {
                         output: OutputKind::Text(format!("Error: Path '{}' does not exist", update.path)),

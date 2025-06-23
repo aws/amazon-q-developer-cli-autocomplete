@@ -36,7 +36,7 @@ use crate::cli::chat::{
 };
 use crate::cli::issue;
 use crate::database::Database;
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::TelemetryThread;
 
 /// q (Amazon Q Chat)
@@ -87,7 +87,7 @@ pub enum SlashCommand {
 impl SlashCommand {
     pub async fn execute(
         self,
-        ctx: &mut Context,
+        os: &mut Os,
         database: &mut Database,
         telemetry: &TelemetryThread,
         session: &mut ChatSession,
@@ -95,11 +95,11 @@ impl SlashCommand {
         match self {
             Self::Quit => Ok(ChatState::Exit),
             Self::Clear(args) => args.execute(session).await,
-            Self::Profile(subcommand) => subcommand.execute(ctx, session).await,
-            Self::Context(args) => args.execute(ctx, session).await,
-            Self::Knowledge(subcommand) => subcommand.execute(ctx, database, session).await,
+            Self::Profile(subcommand) => subcommand.execute(os, session).await,
+            Self::Context(args) => args.execute(os, session).await,
+            Self::Knowledge(subcommand) => subcommand.execute(os, database, session).await,
             Self::PromptEditor(args) => args.execute(session).await,
-            Self::Compact(args) => args.execute(ctx, database, telemetry, session).await,
+            Self::Compact(args) => args.execute(os, database, telemetry, session).await,
             Self::Tools(args) => args.execute(session).await,
             Self::Issue(args) => {
                 if let Err(err) = args.execute().await {
@@ -111,14 +111,14 @@ impl SlashCommand {
                 })
             },
             Self::Prompts(args) => args.execute(session).await,
-            Self::Hooks(args) => args.execute(ctx, session).await,
-            Self::Usage(args) => args.execute(ctx, session).await,
+            Self::Hooks(args) => args.execute(os, session).await,
+            Self::Usage(args) => args.execute(os, session).await,
             Self::Mcp(args) => args.execute(session).await,
             Self::Model(args) => args.execute(session).await,
             Self::Subscribe(args) => args.execute(database, session).await,
-            Self::Persist(subcommand) => subcommand.execute(ctx, session).await,
+            Self::Persist(subcommand) => subcommand.execute(os, session).await,
             // Self::Root(subcommand) => {
-            //     if let Err(err) = subcommand.execute(ctx, database, telemetry).await {
+            //     if let Err(err) = subcommand.execute(os, database, telemetry).await {
             //         return Err(ChatError::Custom(err.to_string().into()));
             //     }
             //

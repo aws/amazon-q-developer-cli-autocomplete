@@ -19,16 +19,16 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Args)]
 pub struct UsageArgs;
 
 impl UsageArgs {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let state = session
             .conversation
-            .backend_conversation_state(ctx, true, &mut session.stderr)
+            .backend_conversation_state(os, true, &mut session.stderr)
             .await?;
 
         if !state.dropped_context_files.is_empty() {

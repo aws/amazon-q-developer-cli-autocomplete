@@ -93,7 +93,7 @@ use crate::mcp_client::{
     Messenger,
     PromptGet,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::TelemetryThread;
 use crate::util::directories::home_dir;
 
@@ -103,12 +103,12 @@ const NAMESPACE_DELIMITER: &str = "___";
 const VALID_TOOL_NAME: &str = "^[a-zA-Z][a-zA-Z0-9_]*$";
 const SPINNER_CHARS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-pub fn workspace_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(ctx.env.current_dir()?.join(".amazonq").join("mcp.json"))
+pub fn workspace_mcp_config_path(os: &Os) -> eyre::Result<PathBuf> {
+    Ok(os.env.current_dir()?.join(".amazonq").join("mcp.json"))
 }
 
-pub fn global_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("mcp.json"))
+pub fn global_mcp_config_path(os: &Os) -> eyre::Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("mcp.json"))
 }
 
 /// Messages used for communication between the tool initialization thread and the loading
@@ -194,14 +194,14 @@ impl McpServerConfig {
         Ok(conf)
     }
 
-    pub async fn load_from_file(ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let contents = ctx.fs.read_to_string(path.as_ref()).await?;
+    pub async fn load_from_file(os: &Os, path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let contents = os.fs.read_to_string(path.as_ref()).await?;
         Ok(serde_json::from_str(&contents)?)
     }
 
-    pub async fn save_to_file(&self, ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<()> {
+    pub async fn save_to_file(&self, os: &Os, path: impl AsRef<Path>) -> eyre::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        ctx.fs.write(path.as_ref(), json).await?;
+        os.fs.write(path.as_ref(), json).await?;
         Ok(())
     }
 

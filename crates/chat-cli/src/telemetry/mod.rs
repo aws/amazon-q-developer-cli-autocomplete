@@ -53,7 +53,7 @@ use crate::database::{
     Database,
     DatabaseError,
 };
-use crate::platform::Env;
+use crate::os::Env;
 use crate::telemetry::core::Event;
 pub use crate::telemetry::core::{
     EventType,

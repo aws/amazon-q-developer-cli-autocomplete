@@ -14,7 +14,9 @@ use std::sync::{
     Mutex,
 };
 
-#[derive(Debug, Clone, Default)]
+use crate::os::ACTIVE_USER_HOME;
+
+#[derive(Debug, Clone)]
 pub struct Env(inner::Inner);
 
 mod inner {
@@ -25,9 +27,8 @@ mod inner {
         Mutex,
     };
 
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone)]
     pub(super) enum Inner {
-        #[default]
         Real,
         Fake(Arc<Mutex<Fake>>),
     }
@@ -38,21 +39,18 @@ mod inner {
         pub cwd: PathBuf,
         pub current_exe: PathBuf,
     }
-
-    impl Default for Fake {
-        fn default() -> Self {
-            Self {
-                vars: HashMap::default(),
-                cwd: PathBuf::from("/"),
-                current_exe: PathBuf::from("/current_exe"),
-            }
-        }
-    }
 }
 
 impl Env {
     pub fn new() -> Self {
-        Self::default()
+        if cfg!(test) {
+            match cfg!(windows) {
+                true => Env::from_slice(&[("USERPROFILE", ACTIVE_USER_HOME), ("USERNAME", "testuser")]),
+                false => Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser")]),
+            }
+        } else {
+            Env(inner::Inner::Real)
+        }
     }
 
     /// Create a fake process environment from a slice of tuples.
@@ -61,7 +59,8 @@ impl Env {
         let map: HashMap<_, _> = vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
         Self(Inner::Fake(Arc::new(Mutex::new(inner::Fake {
             vars: map,
-            ..Default::default()
+            cwd: PathBuf::from("/"),
+            current_exe: PathBuf::from("/current_exe"),
         }))))
     }
 
@@ -152,6 +151,12 @@ impl Env {
     /// See: https://docs.appimage.org/packaging-guide/environment-variables.html
     pub fn in_appimage(&self) -> bool {
         self.get_os("APPIMAGE").is_some()
+    }
+}
+
+impl Default for Env {
+    fn default() -> Self {
+        Env::new()
     }
 }
 

@@ -10,7 +10,7 @@ use sysinfo::{
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::InstallMethod;
 use crate::util::consts::build::HASH;
 use crate::util::system_info::{
@@ -165,17 +165,17 @@ pub struct CurrentEnvironment {
 
 impl CurrentEnvironment {
     async fn new() -> CurrentEnvironment {
-        let ctx = Context::new();
+        let os = Os::new();
 
         let username = format!("/{}", whoami::username());
 
-        let cwd = ctx
+        let cwd = os
             .env
             .current_dir()
             .ok()
             .map(|path| path.to_string_lossy().replace(&username, "/USER"));
 
-        let cli_path = ctx
+        let cli_path = os
             .env
             .current_dir()
             .ok()

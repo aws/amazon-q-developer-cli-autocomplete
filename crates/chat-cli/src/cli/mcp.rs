@@ -27,7 +27,7 @@ use crate::cli::chat::tools::custom_tool::{
     CustomToolConfig,
     default_timeout,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
 pub enum Scope {
@@ -61,14 +61,14 @@ pub enum McpSubcommand {
 
 impl McpSubcommand {
     pub async fn execute(self, output: &mut impl Write) -> Result<ExitCode> {
-        let ctx = Context::new();
+        let os = Os::new();
 
         match self {
-            Self::Add(args) => args.execute(&ctx, output).await?,
-            Self::Remove(args) => args.execute(&ctx, output).await?,
-            Self::List(args) => args.execute(&ctx, output).await?,
-            Self::Import(args) => args.execute(&ctx, output).await?,
-            Self::Status(args) => args.execute(&ctx, output).await?,
+            Self::Add(args) => args.execute(&os, output).await?,
+            Self::Remove(args) => args.execute(&os, output).await?,
+            Self::List(args) => args.execute(&os, output).await?,
+            Self::Import(args) => args.execute(&os, output).await?,
+            Self::Status(args) => args.execute(&os, output).await?,
         }
 
         output.flush()?;
@@ -105,11 +105,11 @@ pub struct AddArgs {
 }
 
 impl AddArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+    pub async fn execute(self, os: &Os, output: &mut impl Write) -> Result<()> {
         let scope = self.scope.unwrap_or(Scope::Workspace);
-        let config_path = resolve_scope_profile(ctx, self.scope)?;
+        let config_path = resolve_scope_profile(os, self.scope)?;
 
-        let mut config: McpServerConfig = ensure_config_file(ctx, &config_path, output).await?;
+        let mut config: McpServerConfig = ensure_config_file(os, &config_path, output).await?;
 
         if config.mcp_servers.contains_key(&self.name) && !self.force {
             bail!(
@@ -135,7 +135,7 @@ impl AddArgs {
         )?;
 
         config.mcp_servers.insert(self.name.clone(), tool);
-        config.save_to_file(ctx, &config_path).await?;
+        config.save_to_file(os, &config_path).await?;
         writeln!(
             output,
             "✓ Added MCP server '{}' to {}\n",
@@ -155,19 +155,19 @@ pub struct RemoveArgs {
 }
 
 impl RemoveArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+    pub async fn execute(self, os: &Os, output: &mut impl Write) -> Result<()> {
         let scope = self.scope.unwrap_or(Scope::Workspace);
-        let config_path = resolve_scope_profile(ctx, self.scope)?;
+        let config_path = resolve_scope_profile(os, self.scope)?;
 
-        if !ctx.fs.exists(&config_path) {
+        if !os.fs.exists(&config_path) {
             writeln!(output, "\nNo MCP server configurations found.\n")?;
             return Ok(());
         }
 
-        let mut config = McpServerConfig::load_from_file(ctx, &config_path).await?;
+        let mut config = McpServerConfig::load_from_file(os, &config_path).await?;
         match config.mcp_servers.remove(&self.name) {
             Some(_) => {
-                config.save_to_file(ctx, &config_path).await?;
+                config.save_to_file(os, &config_path).await?;
                 writeln!(
                     output,
                     "\n✓ Removed MCP server '{}' from {}\n",
@@ -197,8 +197,8 @@ pub struct ListArgs {
 }
 
 impl ListArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
-        let configs = get_mcp_server_configs(ctx, self.scope).await?;
+    pub async fn execute(self, os: &Os, output: &mut impl Write) -> Result<()> {
+        let configs = get_mcp_server_configs(os, self.scope).await?;
         if configs.is_empty() {
             writeln!(output, "No MCP server configurations found.\n")?;
             return Ok(());
@@ -237,13 +237,13 @@ pub struct ImportArgs {
 }
 
 impl ImportArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+    pub async fn execute(self, os: &Os, output: &mut impl Write) -> Result<()> {
         let scope: Scope = self.scope.unwrap_or(Scope::Workspace);
-        let config_path = resolve_scope_profile(ctx, self.scope)?;
-        let mut dst_cfg = ensure_config_file(ctx, &config_path, output).await?;
+        let config_path = resolve_scope_profile(os, self.scope)?;
+        let mut dst_cfg = ensure_config_file(os, &config_path, output).await?;
 
-        let src_path = expand_path(ctx, &self.file)?;
-        let src_cfg: McpServerConfig = McpServerConfig::load_from_file(ctx, &src_path).await?;
+        let src_path = expand_path(os, &self.file)?;
+        let src_cfg: McpServerConfig = McpServerConfig::load_from_file(os, &src_path).await?;
 
         let mut added = 0;
         for (name, cfg) in src_cfg.mcp_servers {
@@ -264,7 +264,7 @@ impl ImportArgs {
             "\nTo learn more about MCP safety, see https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-security.html\n\n"
         )?;
 
-        dst_cfg.save_to_file(ctx, &config_path).await?;
+        dst_cfg.save_to_file(os, &config_path).await?;
         writeln!(
             output,
             "✓ Imported {added} MCP server(s) into {}\n",
@@ -281,8 +281,8 @@ pub struct StatusArgs {
 }
 
 impl StatusArgs {
-    pub async fn execute(self, ctx: &Context, output: &mut impl Write) -> Result<()> {
-        let configs = get_mcp_server_configs(ctx, None).await?;
+    pub async fn execute(self, os: &Os, output: &mut impl Write) -> Result<()> {
+        let configs = get_mcp_server_configs(os, None).await?;
         let mut found = false;
 
         for (sc, path, cfg_opt) in configs {
@@ -316,7 +316,7 @@ impl StatusArgs {
 }
 
 async fn get_mcp_server_configs(
-    ctx: &Context,
+    os: &Os,
     scope: Option<Scope>,
 ) -> Result<Vec<(Scope, PathBuf, Option<McpServerConfig>)>> {
     let mut targets = Vec::new();
@@ -327,9 +327,9 @@ async fn get_mcp_server_configs(
 
     let mut results = Vec::new();
     for sc in targets {
-        let path = resolve_scope_profile(ctx, Some(sc))?;
-        let cfg_opt = if ctx.fs.exists(&path) {
-            match McpServerConfig::load_from_file(ctx, &path).await {
+        let path = resolve_scope_profile(os, Some(sc))?;
+        let cfg_opt = if os.fs.exists(&path) {
+            match McpServerConfig::load_from_file(os, &path).await {
                 Ok(cfg) => Some(cfg),
                 Err(e) => {
                     warn!(?path, error = %e, "Invalid MCP config file—ignored, treated as null");
@@ -351,32 +351,32 @@ fn scope_display(scope: &Scope) -> String {
     }
 }
 
-fn resolve_scope_profile(ctx: &Context, scope: Option<Scope>) -> Result<PathBuf> {
+fn resolve_scope_profile(os: &Os, scope: Option<Scope>) -> Result<PathBuf> {
     Ok(match scope {
-        Some(Scope::Global) => global_mcp_config_path(ctx)?,
-        _ => workspace_mcp_config_path(ctx)?,
+        Some(Scope::Global) => global_mcp_config_path(os)?,
+        _ => workspace_mcp_config_path(os)?,
     })
 }
 
-fn expand_path(ctx: &Context, p: &str) -> Result<PathBuf> {
+fn expand_path(os: &Os, p: &str) -> Result<PathBuf> {
     let p = shellexpand::tilde(p);
     let mut path = PathBuf::from(p.as_ref() as &str);
     if path.is_relative() {
-        path = ctx.env.current_dir()?.join(path);
+        path = os.env.current_dir()?.join(path);
     }
     Ok(path)
 }
 
-async fn ensure_config_file(ctx: &Context, path: &PathBuf, output: &mut impl Write) -> Result<McpServerConfig> {
-    if !ctx.fs.exists(path) {
+async fn ensure_config_file(os: &Os, path: &PathBuf, output: &mut impl Write) -> Result<McpServerConfig> {
+    if !os.fs.exists(path) {
         if let Some(parent) = path.parent() {
-            ctx.fs.create_dir_all(parent).await?;
+            os.fs.create_dir_all(parent).await?;
         }
-        McpServerConfig::default().save_to_file(ctx, path).await?;
+        McpServerConfig::default().save_to_file(os, path).await?;
         writeln!(output, "\n📁 Created MCP config in '{}'", path.display())?;
     }
 
-    load_cfg(ctx, path).await
+    load_cfg(os, path).await
 }
 
 fn parse_env_vars(arg: &str) -> Result<HashMap<String, String>> {
@@ -399,9 +399,9 @@ fn parse_env_vars(arg: &str) -> Result<HashMap<String, String>> {
     Ok(vars)
 }
 
-async fn load_cfg(ctx: &Context, p: &PathBuf) -> Result<McpServerConfig> {
-    Ok(if ctx.fs.exists(p) {
-        McpServerConfig::load_from_file(ctx, p).await?
+async fn load_cfg(os: &Os, p: &PathBuf) -> Result<McpServerConfig> {
+    Ok(if os.fs.exists(p) {
+        McpServerConfig::load_from_file(os, p).await?
     } else {
         McpServerConfig::default()
     })
@@ -415,41 +415,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_scope_and_profile_defaults_to_workspace() {
-        let ctx = Context::new();
-        let path = resolve_scope_profile(&ctx, None).unwrap();
+        let os = Os::new();
+        let path = resolve_scope_profile(&os, None).unwrap();
         assert_eq!(
             path.to_str(),
-            workspace_mcp_config_path(&ctx).unwrap().to_str(),
+            workspace_mcp_config_path(&os).unwrap().to_str(),
             "No scope or profile should default to the workspace path"
         );
     }
 
     #[tokio::test]
     async fn test_resolve_paths() {
-        let ctx = Context::new();
+        let os = Os::new();
         // workspace
-        let p = resolve_scope_profile(&ctx, Some(Scope::Workspace)).unwrap();
-        assert_eq!(p, workspace_mcp_config_path(&ctx).unwrap());
+        let p = resolve_scope_profile(&os, Some(Scope::Workspace)).unwrap();
+        assert_eq!(p, workspace_mcp_config_path(&os).unwrap());
 
         // global
-        let p = resolve_scope_profile(&ctx, Some(Scope::Global)).unwrap();
-        assert_eq!(p, global_mcp_config_path(&ctx).unwrap());
+        let p = resolve_scope_profile(&os, Some(Scope::Global)).unwrap();
+        assert_eq!(p, global_mcp_config_path(&os).unwrap());
     }
 
     #[ignore = "TODO: fix in CI"]
     #[tokio::test]
     async fn ensure_file_created_and_loaded() {
-        let ctx = Context::new();
-        let path = workspace_mcp_config_path(&ctx).unwrap();
+        let os = Os::new();
+        let path = workspace_mcp_config_path(&os).unwrap();
 
-        let cfg = super::ensure_config_file(&ctx, &path, &mut vec![]).await.unwrap();
+        let cfg = super::ensure_config_file(&os, &path, &mut vec![]).await.unwrap();
         assert!(path.exists(), "config file should be created");
         assert!(cfg.mcp_servers.is_empty());
     }
 
     #[tokio::test]
     async fn add_then_remove_cycle() {
-        let ctx = Context::new();
+        let os = Os::new();
 
         // 1. add
         AddArgs {
@@ -466,13 +466,13 @@ mod tests {
             disabled: false,
             force: false,
         }
-        .execute(&ctx, &mut vec![])
+        .execute(&os, &mut vec![])
         .await
         .unwrap();
 
-        let cfg_path = workspace_mcp_config_path(&ctx).unwrap();
+        let cfg_path = workspace_mcp_config_path(&os).unwrap();
         let cfg: McpServerConfig =
-            serde_json::from_str(&ctx.fs.read_to_string(cfg_path.clone()).await.unwrap()).unwrap();
+            serde_json::from_str(&os.fs.read_to_string(cfg_path.clone()).await.unwrap()).unwrap();
         assert!(cfg.mcp_servers.len() == 1);
 
         // 2. remove
@@ -480,11 +480,11 @@ mod tests {
             name: "local".into(),
             scope: None,
         }
-        .execute(&ctx, &mut vec![])
+        .execute(&os, &mut vec![])
         .await
         .unwrap();
 
-        let cfg: McpServerConfig = serde_json::from_str(&ctx.fs.read_to_string(cfg_path).await.unwrap()).unwrap();
+        let cfg: McpServerConfig = serde_json::from_str(&os.fs.read_to_string(cfg_path).await.unwrap()).unwrap();
         assert!(cfg.mcp_servers.is_empty());
     }
 

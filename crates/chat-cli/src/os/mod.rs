@@ -3,15 +3,10 @@
 pub mod diagnostics;
 mod env;
 mod fs;
-mod os;
 mod sysinfo;
 
 pub use env::Env;
 pub use fs::Fs;
-pub use os::{
-    Os,
-    Platform,
-};
 pub use sysinfo::SysInfo;
 
 const WINDOWS_USER_HOME: &str = "C:\\Users\\testuser";
@@ -29,34 +24,18 @@ pub const ACTIVE_USER_HOME: &str = if cfg!(windows) {
 /// primitives should be done through a [Context] as this enables testing otherwise untestable
 /// code paths in unit tests.
 #[derive(Debug, Clone)]
-pub struct Context {
+pub struct Os {
     pub fs: Fs,
     pub env: Env,
     pub sysinfo: SysInfo,
-    pub platform: Platform,
 }
 
-impl Context {
+impl Os {
     pub fn new() -> Self {
-        if cfg!(test) {
-            let env = match cfg!(windows) {
-                true => Env::from_slice(&[("USERPROFILE", ACTIVE_USER_HOME), ("USERNAME", "testuser")]),
-                false => Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser")]),
-            };
-
-            Self {
-                fs: Fs::new(),
-                env,
-                sysinfo: SysInfo::new(),
-                platform: Platform::new(),
-            }
-        } else {
-            Self {
-                fs: Fs::new(),
-                env: Env::new(),
-                sysinfo: SysInfo::new(),
-                platform: Platform::new(),
-            }
+        Self {
+            fs: Fs::new(),
+            env: Env::new(),
+            sysinfo: SysInfo::new(),
         }
     }
 
@@ -69,7 +48,7 @@ impl Context {
     }
 }
 
-impl Default for Context {
+impl Default for Os {
     fn default() -> Self {
         Self::new()
     }
@@ -81,19 +60,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_builder_with_test_home() {
-        let ctx = Context::new().with_env_var("hello", "world");
+        let os = Os::new().with_env_var("hello", "world");
 
         #[cfg(windows)]
         {
-            assert!(ctx.fs.try_exists(ACTIVE_USER_HOME).await.unwrap());
-            assert_eq!(ctx.env.get("USERPROFILE").unwrap(), ACTIVE_USER_HOME);
+            assert!(os.fs.try_exists(ACTIVE_USER_HOME).await.unwrap());
+            assert_eq!(os.env.get("USERPROFILE").unwrap(), ACTIVE_USER_HOME);
         }
         #[cfg(not(windows))]
         {
-            assert!(ctx.fs.try_exists(ACTIVE_USER_HOME).await.unwrap());
-            assert_eq!(ctx.env.get("HOME").unwrap(), ACTIVE_USER_HOME);
+            assert!(os.fs.try_exists(ACTIVE_USER_HOME).await.unwrap());
+            assert_eq!(os.env.get("HOME").unwrap(), ACTIVE_USER_HOME);
         }
 
-        assert_eq!(ctx.env.get("hello").unwrap(), "world");
+        assert_eq!(os.env.get("hello").unwrap(), "world");
     }
 }

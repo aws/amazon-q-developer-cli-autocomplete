@@ -22,7 +22,7 @@ use super::{
     MAX_TOOL_RESPONSE_SIZE,
     OutputKind,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 const READONLY_OPS: [&str; 6] = ["get", "describe", "list", "ls", "search", "batch_get"];
 
@@ -49,7 +49,7 @@ impl UseAws {
         !READONLY_OPS.iter().any(|op| self.operation_name.starts_with(op))
     }
 
-    pub async fn invoke(&self, _ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, _os: &Os, _updates: impl Write) -> Result<InvokeOutput> {
         let mut command = tokio::process::Command::new("aws");
         command.envs(std::env::vars());
 
@@ -169,7 +169,7 @@ impl UseAws {
         Ok(())
     }
 
-    pub async fn validate(&mut self, _ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, _os: &Os) -> Result<()> {
         Ok(())
     }
 
@@ -259,7 +259,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "not in ci"]
     async fn test_aws_read_only() {
-        let ctx = Context::new();
+        let os = Os::new();
 
         let v = serde_json::json!({
             "service_name": "s3",
@@ -275,7 +275,7 @@ mod tests {
         assert!(
             serde_json::from_value::<UseAws>(v)
                 .unwrap()
-                .invoke(&ctx, &mut std::io::stdout())
+                .invoke(&os, &mut std::io::stdout())
                 .await
                 .is_err()
         );
@@ -284,7 +284,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "not in ci"]
     async fn test_aws_output() {
-        let ctx = Context::new();
+        let os = Os::new();
 
         let v = serde_json::json!({
             "service_name": "s3",
@@ -296,7 +296,7 @@ mod tests {
         });
         let out = serde_json::from_value::<UseAws>(v)
             .unwrap()
-            .invoke(&ctx, &mut std::io::stdout())
+            .invoke(&os, &mut std::io::stdout())
             .await
             .unwrap();
 

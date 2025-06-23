@@ -5,7 +5,7 @@ use anstream::{
 use crossterm::style::Stylize;
 use eyre::Result;
 
-use crate::platform::diagnostics::Diagnostics;
+use crate::os::diagnostics::Diagnostics;
 use crate::util::GITHUB_REPO_NAME;
 use crate::util::system_info::is_remote;
 
@@ -47,7 +47,7 @@ impl IssueCreator {
         };
 
         let environment = match &self.additional_environment {
-            Some(ctx) => format!("{diagnostic_info}\n{ctx}"),
+            Some(os) => format!("{diagnostic_info}\n{os}"),
             None => diagnostic_info,
         };
 

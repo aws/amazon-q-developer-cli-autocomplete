@@ -47,7 +47,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_OUTPUT_SIZE: usize = 1024 * 10;
@@ -404,9 +404,9 @@ pub struct HooksArgs {
 }
 
 impl HooksArgs {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         if let Some(subcommand) = self.subcommand {
-            return subcommand.execute(ctx, session).await;
+            return subcommand.execute(os, session).await;
         }
 
         let Some(context_manager) = &mut session.conversation.context_manager else {
@@ -530,7 +530,7 @@ pub enum HooksSubcommand {
 }
 
 impl HooksSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             return Ok(ChatState::PromptUser {
                 skip_printing_tools: true,
@@ -553,7 +553,7 @@ impl HooksSubcommand {
                 };
 
                 let result = context_manager
-                    .add_hook(ctx, name.clone(), Hook::new_inline_hook(trigger, command), global)
+                    .add_hook(os, name.clone(), Hook::new_inline_hook(trigger, command), global)
                     .await;
                 match result {
                     Ok(_) => {
@@ -575,7 +575,7 @@ impl HooksSubcommand {
                 }
             },
             Self::Remove { name, global } => {
-                let result = context_manager.remove_hook(ctx, &name, global).await;
+                let result = context_manager.remove_hook(os, &name, global).await;
                 match result {
                     Ok(_) => {
                         execute!(
@@ -596,7 +596,7 @@ impl HooksSubcommand {
                 }
             },
             Self::Enable { name, global } => {
-                let result = context_manager.set_hook_disabled(ctx, &name, global, false).await;
+                let result = context_manager.set_hook_disabled(os, &name, global, false).await;
                 match result {
                     Ok(_) => {
                         execute!(
@@ -617,7 +617,7 @@ impl HooksSubcommand {
                 }
             },
             Self::Disable { name, global } => {
-                let result = context_manager.set_hook_disabled(ctx, &name, global, true).await;
+                let result = context_manager.set_hook_disabled(os, &name, global, true).await;
                 match result {
                     Ok(_) => {
                         execute!(
@@ -639,7 +639,7 @@ impl HooksSubcommand {
             },
             Self::EnableAll { global } => {
                 context_manager
-                    .set_all_hooks_disabled(ctx, global, false)
+                    .set_all_hooks_disabled(os, global, false)
                     .await
                     .map_err(map_chat_error)?;
                 execute!(
@@ -651,7 +651,7 @@ impl HooksSubcommand {
             },
             Self::DisableAll { global } => {
                 context_manager
-                    .set_all_hooks_disabled(ctx, global, true)
+                    .set_all_hooks_disabled(os, global, true)
                     .await
                     .map_err(map_chat_error)?;
                 execute!(
@@ -782,26 +782,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_hook() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
         // Test adding hook to profile config
         manager
-            .add_hook(&ctx, "test_hook".to_string(), hook.clone(), false)
+            .add_hook(&os, "test_hook".to_string(), hook.clone(), false)
             .await?;
         assert!(manager.profile_config.hooks.contains_key("test_hook"));
 
         // Test adding hook to global config
         manager
-            .add_hook(&ctx, "global_hook".to_string(), hook.clone(), true)
+            .add_hook(&os, "global_hook".to_string(), hook.clone(), true)
             .await?;
         assert!(manager.global_config.hooks.contains_key("global_hook"));
 
         // Test adding duplicate hook name
         assert!(
             manager
-                .add_hook(&ctx, "test_hook".to_string(), hook, false)
+                .add_hook(&os, "test_hook".to_string(), hook, false)
                 .await
                 .is_err()
         );
@@ -811,42 +811,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_hook() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook(&ctx, "test_hook".to_string(), hook, false).await?;
+        manager.add_hook(&os, "test_hook".to_string(), hook, false).await?;
 
         // Test removing existing hook
-        manager.remove_hook(&ctx, "test_hook", false).await?;
+        manager.remove_hook(&os, "test_hook", false).await?;
         assert!(!manager.profile_config.hooks.contains_key("test_hook"));
 
         // Test removing non-existent hook
-        assert!(manager.remove_hook(&ctx, "test_hook", false).await.is_err());
+        assert!(manager.remove_hook(&os, "test_hook", false).await.is_err());
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_set_hook_disabled() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook(&ctx, "test_hook".to_string(), hook, false).await?;
+        manager.add_hook(&os, "test_hook".to_string(), hook, false).await?;
 
         // Test disabling hook
-        manager.set_hook_disabled(&ctx, "test_hook", false, true).await?;
+        manager.set_hook_disabled(&os, "test_hook", false, true).await?;
         assert!(manager.profile_config.hooks.get("test_hook").unwrap().disabled);
 
         // Test enabling hook
-        manager.set_hook_disabled(&ctx, "test_hook", false, false).await?;
+        manager.set_hook_disabled(&os, "test_hook", false, false).await?;
         assert!(!manager.profile_config.hooks.get("test_hook").unwrap().disabled);
 
         // Test with non-existent hook
         assert!(
             manager
-                .set_hook_disabled(&ctx, "nonexistent", false, true)
+                .set_hook_disabled(&os, "nonexistent", false, true)
                 .await
                 .is_err()
         );
@@ -856,20 +856,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_all_hooks_disabled() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook(&ctx, "hook1".to_string(), hook1, false).await?;
-        manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
+        manager.add_hook(&os, "hook1".to_string(), hook1, false).await?;
+        manager.add_hook(&os, "hook2".to_string(), hook2, false).await?;
 
         // Test disabling all hooks
-        manager.set_all_hooks_disabled(&ctx, false, true).await?;
+        manager.set_all_hooks_disabled(&os, false, true).await?;
         assert!(manager.profile_config.hooks.values().all(|h| h.disabled));
 
         // Test enabling all hooks
-        manager.set_all_hooks_disabled(&ctx, false, false).await?;
+        manager.set_all_hooks_disabled(&os, false, false).await?;
         assert!(manager.profile_config.hooks.values().all(|h| !h.disabled));
 
         Ok(())
@@ -877,13 +877,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hooks() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook(&ctx, "hook1".to_string(), hook1, false).await?;
-        manager.add_hook(&ctx, "hook2".to_string(), hook2, false).await?;
+        manager.add_hook(&os, "hook1".to_string(), hook1, false).await?;
+        manager.add_hook(&os, "hook2".to_string(), hook2, false).await?;
 
         // Run the hooks
         let results = manager.run_hooks(&mut vec![]).await.unwrap();
@@ -894,20 +894,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_hooks_across_profiles() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook(&ctx, "profile_hook".to_string(), hook1, false).await?;
-        manager.add_hook(&ctx, "global_hook".to_string(), hook2, true).await?;
+        manager.add_hook(&os, "profile_hook".to_string(), hook1, false).await?;
+        manager.add_hook(&os, "global_hook".to_string(), hook2, true).await?;
 
         let results = manager.run_hooks(&mut vec![]).await.unwrap();
         assert_eq!(results.len(), 2); // Should include both hooks
 
         // Create and switch to a new profile
-        manager.create_profile(&ctx, "test_profile").await?;
-        manager.switch_profile(&ctx, "test_profile").await?;
+        manager.create_profile(&os, "test_profile").await?;
+        manager.switch_profile(&os, "test_profile").await?;
 
         let results = manager.run_hooks(&mut vec![]).await.unwrap();
         assert_eq!(results.len(), 1); // Should include global hook

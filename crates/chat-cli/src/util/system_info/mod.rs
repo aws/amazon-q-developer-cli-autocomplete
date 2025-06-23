@@ -11,7 +11,7 @@ use serde::{
     Serialize,
 };
 
-use crate::platform::Env;
+use crate::os::Env;
 
 /// Fields for OS release information
 /// Fields from <https://www.man7.org/linux/man-pages/man5/os-release.5.html>

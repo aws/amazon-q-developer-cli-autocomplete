@@ -35,7 +35,7 @@ use crate::cli::chat::util::images::{
     is_supported_image_type,
     pre_process,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 const CHECKMARK: &str = "✔";
 const CROSS: &str = "✘";
@@ -50,30 +50,30 @@ pub enum FsRead {
 }
 
 impl FsRead {
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         match self {
-            FsRead::Line(fs_line) => fs_line.validate(ctx).await,
-            FsRead::Directory(fs_directory) => fs_directory.validate(ctx).await,
-            FsRead::Search(fs_search) => fs_search.validate(ctx).await,
-            FsRead::Image(fs_image) => fs_image.validate(ctx).await,
+            FsRead::Line(fs_line) => fs_line.validate(os).await,
+            FsRead::Directory(fs_directory) => fs_directory.validate(os).await,
+            FsRead::Search(fs_search) => fs_search.validate(os).await,
+            FsRead::Image(fs_image) => fs_image.validate(os).await,
         }
     }
 
-    pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, os: &Os, updates: &mut impl Write) -> Result<()> {
         match self {
-            FsRead::Line(fs_line) => fs_line.queue_description(ctx, updates).await,
+            FsRead::Line(fs_line) => fs_line.queue_description(os, updates).await,
             FsRead::Directory(fs_directory) => fs_directory.queue_description(updates),
             FsRead::Search(fs_search) => fs_search.queue_description(updates),
             FsRead::Image(fs_image) => fs_image.queue_description(updates),
         }
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            FsRead::Line(fs_line) => fs_line.invoke(ctx, updates).await,
-            FsRead::Directory(fs_directory) => fs_directory.invoke(ctx, updates).await,
-            FsRead::Search(fs_search) => fs_search.invoke(ctx, updates).await,
-            FsRead::Image(fs_image) => fs_image.invoke(ctx, updates).await,
+            FsRead::Line(fs_line) => fs_line.invoke(os, updates).await,
+            FsRead::Directory(fs_directory) => fs_directory.invoke(os, updates).await,
+            FsRead::Search(fs_search) => fs_search.invoke(os, updates).await,
+            FsRead::Image(fs_image) => fs_image.invoke(updates).await,
         }
     }
 }
@@ -85,15 +85,15 @@ pub struct FsImage {
 }
 
 impl FsImage {
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         for path in &self.image_paths {
-            let path = sanitize_path_tool_arg(ctx, path);
+            let path = sanitize_path_tool_arg(os, path);
             if let Some(path) = path.to_str() {
-                let processed_path = pre_process(ctx, path);
+                let processed_path = pre_process(path);
                 if !is_supported_image_type(&processed_path) {
                     bail!("'{}' is not a supported image type", &processed_path);
                 }
-                let is_file = ctx.fs.symlink_metadata(&processed_path).await?.is_file();
+                let is_file = os.fs.symlink_metadata(&processed_path).await?.is_file();
                 if !is_file {
                     bail!("'{}' is not a file", &processed_path);
                 }
@@ -104,8 +104,8 @@ impl FsImage {
         Ok(())
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
-        let pre_processed_paths: Vec<String> = self.image_paths.iter().map(|path| pre_process(ctx, path)).collect();
+    pub async fn invoke(&self, updates: &mut impl Write) -> Result<InvokeOutput> {
+        let pre_processed_paths: Vec<String> = self.image_paths.iter().map(|path| pre_process(path)).collect();
         let valid_images = handle_images_from_paths(updates, &pre_processed_paths);
         Ok(InvokeOutput {
             output: OutputKind::Images(valid_images),
@@ -136,21 +136,21 @@ impl FsLine {
     const DEFAULT_END_LINE: i32 = -1;
     const DEFAULT_START_LINE: i32 = 1;
 
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
-        let path = sanitize_path_tool_arg(ctx, &self.path);
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
+        let path = sanitize_path_tool_arg(os, &self.path);
         if !path.exists() {
             bail!("'{}' does not exist", self.path);
         }
-        let is_file = ctx.fs.symlink_metadata(&path).await?.is_file();
+        let is_file = os.fs.symlink_metadata(&path).await?.is_file();
         if !is_file {
             bail!("'{}' is not a file", self.path);
         }
         Ok(())
     }
 
-    pub async fn queue_description(&self, ctx: &Context, updates: &mut impl Write) -> Result<()> {
-        let path = sanitize_path_tool_arg(ctx, &self.path);
-        let file_bytes = ctx.fs.read(&path).await?;
+    pub async fn queue_description(&self, os: &Os, updates: &mut impl Write) -> Result<()> {
+        let path = sanitize_path_tool_arg(os, &self.path);
+        let file_bytes = os.fs.read(&path).await?;
         let file_content = String::from_utf8_lossy(&file_bytes);
         let line_count = file_content.lines().count();
         queue!(
@@ -188,10 +188,10 @@ impl FsLine {
         }
     }
 
-    pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
-        let path = sanitize_path_tool_arg(ctx, &self.path);
+    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
+        let path = sanitize_path_tool_arg(os, &self.path);
         debug!(?path, "Reading");
-        let file_bytes = ctx.fs.read(&path).await?;
+        let file_bytes = os.fs.read(&path).await?;
         let file_content = String::from_utf8_lossy(&file_bytes);
         let line_count = file_content.lines().count();
         let (start, end) = (
@@ -254,13 +254,13 @@ impl FsSearch {
     const DEFAULT_CONTEXT_LINES: usize = 2;
     const MATCHING_LINE_PREFIX: &str = "→ ";
 
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
-        let path = sanitize_path_tool_arg(ctx, &self.path);
-        let relative_path = format_path(ctx.env.current_dir()?, &path);
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
+        let path = sanitize_path_tool_arg(os, &self.path);
+        let relative_path = format_path(os.env.current_dir()?, &path);
         if !path.exists() {
             bail!("File not found: {}", relative_path);
         }
-        if !ctx.fs.symlink_metadata(path).await?.is_file() {
+        if !os.fs.symlink_metadata(path).await?.is_file() {
             bail!("Path is not a file: {}", relative_path);
         }
         if self.pattern.is_empty() {
@@ -285,11 +285,11 @@ impl FsSearch {
         Ok(())
     }
 
-    pub async fn invoke(&self, ctx: &Context, updates: &mut impl Write) -> Result<InvokeOutput> {
-        let file_path = sanitize_path_tool_arg(ctx, &self.path);
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
+        let file_path = sanitize_path_tool_arg(os, &self.path);
         let pattern = &self.pattern;
 
-        let file_bytes = ctx.fs.read(&file_path).await?;
+        let file_bytes = os.fs.read(&file_path).await?;
         let file_content = String::from_utf8_lossy(&file_bytes);
         let lines: Vec<&str> = LinesWithEndings::from(&file_content).collect();
 
@@ -372,13 +372,13 @@ pub struct FsDirectory {
 impl FsDirectory {
     const DEFAULT_DEPTH: usize = 0;
 
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
-        let path = sanitize_path_tool_arg(ctx, &self.path);
-        let relative_path = format_path(ctx.env.current_dir()?, &path);
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
+        let path = sanitize_path_tool_arg(os, &self.path);
+        let relative_path = format_path(os.env.current_dir()?, &path);
         if !path.exists() {
             bail!("Directory not found: {}", relative_path);
         }
-        if !ctx.fs.symlink_metadata(path).await?.is_dir() {
+        if !os.fs.symlink_metadata(path).await?.is_dir() {
             bail!("Path is not a directory: {}", relative_path);
         }
         Ok(())
@@ -400,8 +400,8 @@ impl FsDirectory {
         )?)
     }
 
-    pub async fn invoke(&self, ctx: &Context, _updates: &mut impl Write) -> Result<InvokeOutput> {
-        let path = sanitize_path_tool_arg(ctx, &self.path);
+    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
+        let path = sanitize_path_tool_arg(os, &self.path);
         let max_depth = self.depth();
         debug!(?path, max_depth, "Reading directory at path with depth");
         let mut result = Vec::new();
@@ -411,7 +411,7 @@ impl FsDirectory {
             if depth > max_depth {
                 break;
             }
-            let mut read_dir = ctx.fs.read_dir(path).await?;
+            let mut read_dir = os.fs.read_dir(path).await?;
 
             #[cfg(windows)]
             while let Some(ent) = read_dir.next_entry().await? {
@@ -589,7 +589,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_line_invoke() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let lines = TEST_FILE_CONTENTS.lines().collect::<Vec<_>>();
         let mut stdout = std::io::stdout();
 
@@ -603,7 +603,7 @@ mod tests {
                 });
                 let output = serde_json::from_value::<FsRead>(v)
                     .unwrap()
-                    .invoke(&ctx, &mut stdout)
+                    .invoke(&os, &mut stdout)
                     .await
                     .unwrap();
 
@@ -626,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_line_past_eof() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
         let v = serde_json::json!({
             "path": TEST_FILE_PATH,
@@ -637,7 +637,7 @@ mod tests {
         assert!(
             serde_json::from_value::<FsRead>(v)
                 .unwrap()
-                .invoke(&ctx, &mut stdout)
+                .invoke(&os, &mut stdout)
                 .await
                 .is_err()
         );
@@ -659,7 +659,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_directory_invoke() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // Testing without depth
@@ -669,7 +669,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -687,7 +687,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -705,7 +705,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_search_invoke() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         macro_rules! invoke_search {
@@ -713,7 +713,7 @@ mod tests {
                 let v = serde_json::json!($value);
                 let output = serde_json::from_value::<FsRead>(v)
                     .unwrap()
-                    .invoke(&ctx, &mut stdout)
+                    .invoke(&os, &mut stdout)
                     .await
                     .unwrap();
 
@@ -745,12 +745,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_non_utf8_binary_file() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let binary_data = vec![0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8];
         let binary_file_path = "/binary_test.dat";
-        ctx.fs.write(binary_file_path, &binary_data).await.unwrap();
+        os.fs.write(binary_file_path, &binary_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": binary_file_path,
@@ -758,7 +758,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -776,12 +776,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_latin1_encoded_file() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let latin1_data = vec![99, 97, 102, 233]; // "café" in Latin-1
         let latin1_file_path = "/latin1_test.txt";
-        ctx.fs.write(latin1_file_path, &latin1_data).await.unwrap();
+        os.fs.write(latin1_file_path, &latin1_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": latin1_file_path,
@@ -789,7 +789,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -807,7 +807,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_non_utf8_file() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let mut mixed_data = Vec::new();
@@ -816,7 +816,7 @@ mod tests {
         mixed_data.extend_from_slice(b"\nGoodbye world\n");
 
         let mixed_file_path = "/mixed_encoding_test.txt";
-        ctx.fs.write(mixed_file_path, &mixed_data).await.unwrap();
+        os.fs.write(mixed_file_path, &mixed_data).await.unwrap();
 
         let v = serde_json::json!({
             "mode": "Search",
@@ -825,7 +825,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -848,7 +848,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -866,7 +866,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_windows1252_encoded_file() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let mut windows1252_data = Vec::new();
@@ -876,7 +876,7 @@ mod tests {
         windows1252_data.push(0x94); // Right double quotation mark in Windows-1252
 
         let windows1252_file_path = "/windows1252_test.txt";
-        ctx.fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
+        os.fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": windows1252_file_path,
@@ -884,7 +884,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -902,7 +902,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_pattern_with_replacement_chars() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let mut data_with_invalid_utf8 = Vec::new();
@@ -911,7 +911,7 @@ mod tests {
         data_with_invalid_utf8.extend_from_slice(b"\nLine 2: hello world\n");
 
         let invalid_utf8_file_path = "/invalid_utf8_search_test.txt";
-        ctx.fs
+        os.fs
             .write(invalid_utf8_file_path, &data_with_invalid_utf8)
             .await
             .unwrap();
@@ -923,7 +923,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -939,12 +939,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_empty_file_with_invalid_utf8() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let invalid_only_data = vec![0xff, 0xfe, 0xfd];
         let invalid_only_file_path = "/invalid_only_test.txt";
-        ctx.fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
+        os.fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
 
         let v = serde_json::json!({
             "path": invalid_only_file_path,
@@ -952,7 +952,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
@@ -970,7 +970,7 @@ mod tests {
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 

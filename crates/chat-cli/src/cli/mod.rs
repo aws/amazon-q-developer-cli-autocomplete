@@ -46,7 +46,7 @@ use crate::logging::{
     LogArgs,
     initialize_logging,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::TelemetryThread;
 use crate::util::directories::logs_dir;
 use crate::util::{
@@ -128,12 +128,7 @@ impl RootSubcommand {
         matches!(self, Self::Chat(_) | Self::Profile)
     }
 
-    pub async fn execute(
-        self,
-        ctx: &mut Context,
-        database: &mut Database,
-        telemetry: &TelemetryThread,
-    ) -> Result<ExitCode> {
+    pub async fn execute(self, os: &mut Os, database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
         // Check for auth on subcommands that require it.
         if self.requires_auth() && !crate::auth::is_logged_in(database).await {
             bail!(
@@ -153,10 +148,10 @@ impl RootSubcommand {
             Self::Logout => user::logout(database).await,
             Self::Whoami(args) => args.execute(database).await,
             Self::Profile => user::profile(database, telemetry).await,
-            Self::Settings(settings_args) => settings_args.execute(ctx, database).await,
+            Self::Settings(settings_args) => settings_args.execute(os, database).await,
             Self::Issue(args) => args.execute().await,
             Self::Version { changelog } => Cli::print_version(changelog),
-            Self::Chat(args) => args.execute(ctx, database, telemetry).await,
+            Self::Chat(args) => args.execute(os, database, telemetry).await,
             Self::Mcp(args) => args.execute(&mut std::io::stderr()).await,
         }
     }
@@ -235,11 +230,11 @@ impl Cli {
 
         debug!(command =? std::env::args().collect::<Vec<_>>(), "Command being ran");
 
-        let mut ctx = Context::new();
+        let mut os = Os::new();
         let mut database = crate::database::Database::new().await?;
-        let telemetry = crate::telemetry::TelemetryThread::new(&ctx.env, &mut database).await?;
+        let telemetry = crate::telemetry::TelemetryThread::new(&os.env, &mut database).await?;
 
-        let result = subcommand.execute(&mut ctx, &mut database, &telemetry).await;
+        let result = subcommand.execute(&mut os, &mut database, &telemetry).await;
 
         let telemetry_result = telemetry.finish().await;
         let exit_code = result?;

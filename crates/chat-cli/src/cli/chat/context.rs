@@ -24,7 +24,7 @@ use crate::cli::chat::cli::hooks::{
     Hook,
     HookExecutor,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::util::directories;
 
 pub const AMAZONQ_FILENAME: &str = "AmazonQ.md";
@@ -67,22 +67,22 @@ impl ContextManager {
     /// 3. Load the default profile configuration
     ///
     /// # Arguments
-    /// * `ctx` - The context to use
+    /// * `os` - The context to use
     /// * `max_context_files_size` - Optional maximum token size for context files. If not provided,
     ///   defaults to `CONTEXT_FILES_MAX_SIZE`.
     ///
     /// # Returns
     /// A Result containing the new ContextManager or an error
-    pub async fn new(ctx: &Context, max_context_files_size: Option<usize>) -> Result<Self> {
+    pub async fn new(os: &Os, max_context_files_size: Option<usize>) -> Result<Self> {
         let max_context_files_size = max_context_files_size.unwrap_or(CONTEXT_FILES_MAX_SIZE);
 
-        let profiles_dir = directories::chat_profiles_dir(ctx)?;
+        let profiles_dir = directories::chat_profiles_dir(os)?;
 
-        ctx.fs.create_dir_all(&profiles_dir).await?;
+        os.fs.create_dir_all(&profiles_dir).await?;
 
-        let global_config = load_global_config(ctx).await?;
+        let global_config = load_global_config(os).await?;
         let current_profile = "default".to_string();
-        let profile_config = load_profile_config(ctx, &current_profile).await?;
+        let profile_config = load_profile_config(os, &current_profile).await?;
 
         Ok(Self {
             max_context_files_size,
@@ -101,31 +101,31 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    async fn save_config(&self, ctx: &Context, global: bool) -> Result<()> {
+    async fn save_config(&self, os: &Os, global: bool) -> Result<()> {
         if global {
-            let global_path = directories::chat_global_context_path(ctx)?;
+            let global_path = directories::chat_global_context_path(os)?;
             let contents = serde_json::to_string_pretty(&self.global_config)
                 .map_err(|e| eyre!("Failed to serialize global configuration: {}", e))?;
 
-            ctx.fs.write(&global_path, contents).await?;
+            os.fs.write(&global_path, contents).await?;
         } else {
-            let profile_path = profile_context_path(ctx, &self.current_profile)?;
+            let profile_path = profile_context_path(os, &self.current_profile)?;
             if let Some(parent) = profile_path.parent() {
-                ctx.fs.create_dir_all(parent).await?;
+                os.fs.create_dir_all(parent).await?;
             }
             let contents = serde_json::to_string_pretty(&self.profile_config)
                 .map_err(|e| eyre!("Failed to serialize profile configuration: {}", e))?;
 
-            ctx.fs.write(&profile_path, contents).await?;
+            os.fs.write(&profile_path, contents).await?;
         }
 
         Ok(())
     }
 
     /// Reloads the global and profile config from disk.
-    pub async fn reload_config(&mut self, ctx: &Context) -> Result<()> {
-        self.global_config = load_global_config(ctx).await?;
-        self.profile_config = load_profile_config(ctx, &self.current_profile).await?;
+    pub async fn reload_config(&mut self, os: &Os) -> Result<()> {
+        self.global_config = load_global_config(os).await?;
+        self.profile_config = load_profile_config(os, &self.current_profile).await?;
         Ok(())
     }
 
@@ -139,7 +139,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn add_paths(&mut self, ctx: &Context, paths: Vec<String>, global: bool, force: bool) -> Result<()> {
+    pub async fn add_paths(&mut self, os: &Os, paths: Vec<String>, global: bool, force: bool) -> Result<()> {
         let mut all_paths = self.global_config.paths.clone();
         all_paths.append(&mut self.profile_config.paths.clone());
 
@@ -151,7 +151,7 @@ impl ContextManager {
             for path in &paths {
                 // We're using a temporary context_files vector just for validation
                 // Pass is_validation=true to ensure we error if glob patterns don't match any files
-                match process_path(ctx, path, &mut context_files, true).await {
+                match process_path(os, path, &mut context_files, true).await {
                     Ok(_) => {}, // Path is valid
                     Err(e) => return Err(eyre!("Invalid path '{}': {}. Use --force to add anyway.", path, e)),
                 }
@@ -171,7 +171,7 @@ impl ContextManager {
         }
 
         // Save the updated configuration
-        self.save_config(ctx, global).await?;
+        self.save_config(os, global).await?;
 
         Ok(())
     }
@@ -185,7 +185,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn remove_paths(&mut self, ctx: &Context, paths: Vec<String>, global: bool) -> Result<()> {
+    pub async fn remove_paths(&mut self, os: &Os, paths: Vec<String>, global: bool) -> Result<()> {
         // Get reference to the appropriate config
         let config = self.get_config_mut(global);
 
@@ -207,7 +207,7 @@ impl ContextManager {
         }
 
         // Save the updated configuration
-        self.save_config(ctx, global).await?;
+        self.save_config(os, global).await?;
 
         Ok(())
     }
@@ -216,16 +216,16 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result containing a vector of profile names, with "default" always first
-    pub async fn list_profiles(&self, ctx: &Context) -> Result<Vec<String>> {
+    pub async fn list_profiles(&self, os: &Os) -> Result<Vec<String>> {
         let mut profiles = Vec::new();
 
         // Always include default profile
         profiles.push("default".to_string());
 
         // Read profile directory and extract profile names
-        let profiles_dir = directories::chat_profiles_dir(ctx)?;
+        let profiles_dir = directories::chat_profiles_dir(os)?;
         if profiles_dir.exists() {
-            let mut read_dir = ctx.fs.read_dir(&profiles_dir).await?;
+            let mut read_dir = os.fs.read_dir(&profiles_dir).await?;
             while let Some(entry) = read_dir.next_entry().await? {
                 let path = entry.path();
                 if let (true, Some(name)) = (path.is_dir(), path.file_name()) {
@@ -250,7 +250,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result containing a vector of profile names, with "default" always first
-    pub fn list_profiles_blocking(&self, ctx: &Context) -> Result<Vec<String>> {
+    pub fn list_profiles_blocking(&self, os: &Os) -> Result<Vec<String>> {
         let _ = self;
 
         let mut profiles = Vec::new();
@@ -259,7 +259,7 @@ impl ContextManager {
         profiles.push("default".to_string());
 
         // Read profile directory and extract profile names
-        let profiles_dir = directories::chat_profiles_dir(ctx)?;
+        let profiles_dir = directories::chat_profiles_dir(os)?;
         if profiles_dir.exists() {
             for entry in std::fs::read_dir(profiles_dir)? {
                 let entry = entry?;
@@ -288,7 +288,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn clear(&mut self, ctx: &Context, global: bool) -> Result<()> {
+    pub async fn clear(&mut self, os: &Os, global: bool) -> Result<()> {
         // Clear the appropriate config
         if global {
             self.global_config.paths.clear();
@@ -297,7 +297,7 @@ impl ContextManager {
         }
 
         // Save the updated configuration
-        self.save_config(ctx, global).await?;
+        self.save_config(os, global).await?;
 
         Ok(())
     }
@@ -309,11 +309,11 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn create_profile(&self, ctx: &Context, name: &str) -> Result<()> {
+    pub async fn create_profile(&self, os: &Os, name: &str) -> Result<()> {
         validate_profile_name(name)?;
 
         // Check if profile already exists
-        let profile_path = profile_context_path(ctx, name)?;
+        let profile_path = profile_context_path(os, name)?;
         if profile_path.exists() {
             return Err(eyre!("Profile '{}' already exists", name));
         }
@@ -325,9 +325,9 @@ impl ContextManager {
 
         // Create the file
         if let Some(parent) = profile_path.parent() {
-            ctx.fs.create_dir_all(parent).await?;
+            os.fs.create_dir_all(parent).await?;
         }
-        ctx.fs.write(&profile_path, contents).await?;
+        os.fs.write(&profile_path, contents).await?;
 
         Ok(())
     }
@@ -339,7 +339,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn delete_profile(&self, ctx: &Context, name: &str) -> Result<()> {
+    pub async fn delete_profile(&self, os: &Os, name: &str) -> Result<()> {
         if name == "default" {
             return Err(eyre!("Cannot delete the default profile"));
         } else if name == self.current_profile {
@@ -348,12 +348,12 @@ impl ContextManager {
             ));
         }
 
-        let profile_path = profile_dir_path(ctx, name)?;
+        let profile_path = profile_dir_path(os, name)?;
         if !profile_path.exists() {
             return Err(eyre!("Profile '{}' does not exist", name));
         }
 
-        ctx.fs.remove_dir_all(&profile_path).await?;
+        os.fs.remove_dir_all(&profile_path).await?;
 
         Ok(())
     }
@@ -366,7 +366,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn rename_profile(&mut self, ctx: &Context, old_name: &str, new_name: &str) -> Result<()> {
+    pub async fn rename_profile(&mut self, os: &Os, old_name: &str, new_name: &str) -> Result<()> {
         // Validate profile names
         if old_name == "default" {
             return Err(eyre!("Cannot rename the default profile"));
@@ -377,22 +377,22 @@ impl ContextManager {
 
         validate_profile_name(new_name)?;
 
-        let old_profile_path = profile_dir_path(ctx, old_name)?;
+        let old_profile_path = profile_dir_path(os, old_name)?;
         if !old_profile_path.exists() {
             return Err(eyre!("Profile '{}' not found", old_name));
         }
 
-        let new_profile_path = profile_dir_path(ctx, new_name)?;
+        let new_profile_path = profile_dir_path(os, new_name)?;
         if new_profile_path.exists() {
             return Err(eyre!("Profile '{}' already exists", new_name));
         }
 
-        ctx.fs.rename(&old_profile_path, &new_profile_path).await?;
+        os.fs.rename(&old_profile_path, &new_profile_path).await?;
 
         // If the current profile is being renamed, update the current_profile field
         if self.current_profile == old_name {
             self.current_profile = new_name.to_string();
-            self.profile_config = load_profile_config(ctx, new_name).await?;
+            self.profile_config = load_profile_config(os, new_name).await?;
         }
 
         Ok(())
@@ -405,14 +405,14 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn switch_profile(&mut self, ctx: &Context, name: &str) -> Result<()> {
+    pub async fn switch_profile(&mut self, os: &Os, name: &str) -> Result<()> {
         validate_profile_name(name)?;
         self.hook_executor.profile_cache.clear();
 
         // Special handling for default profile - it always exists
         if name == "default" {
             // Load the default profile configuration
-            let profile_config = load_profile_config(ctx, name).await?;
+            let profile_config = load_profile_config(os, name).await?;
 
             // Update the current profile
             self.current_profile = name.to_string();
@@ -422,14 +422,14 @@ impl ContextManager {
         }
 
         // Check if profile exists
-        let profile_path = profile_context_path(ctx, name)?;
+        let profile_path = profile_context_path(os, name)?;
         if !profile_path.exists() {
             return Err(eyre!("Profile '{}' does not exist. Use 'create' to create it", name));
         }
 
         // Update the current profile
         self.current_profile = name.to_string();
-        self.profile_config = load_profile_config(ctx, name).await?;
+        self.profile_config = load_profile_config(os, name).await?;
 
         Ok(())
     }
@@ -445,12 +445,12 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result containing a vector of (filename, content) pairs or an error
-    pub async fn get_context_files(&self, ctx: &Context) -> Result<Vec<(String, String)>> {
+    pub async fn get_context_files(&self, os: &Os) -> Result<Vec<(String, String)>> {
         let mut context_files = Vec::new();
 
-        self.collect_context_files(ctx, &self.global_config.paths, &mut context_files)
+        self.collect_context_files(os, &self.global_config.paths, &mut context_files)
             .await?;
-        self.collect_context_files(ctx, &self.profile_config.paths, &mut context_files)
+        self.collect_context_files(os, &self.profile_config.paths, &mut context_files)
             .await?;
 
         context_files.sort_by(|a, b| a.0.cmp(&b.0));
@@ -459,9 +459,9 @@ impl ContextManager {
         Ok(context_files)
     }
 
-    pub async fn get_context_files_by_path(&self, ctx: &Context, path: &str) -> Result<Vec<(String, String)>> {
+    pub async fn get_context_files_by_path(&self, os: &Os, path: &str) -> Result<Vec<(String, String)>> {
         let mut context_files = Vec::new();
-        process_path(ctx, path, &mut context_files, true).await?;
+        process_path(os, path, &mut context_files, true).await?;
         Ok(context_files)
     }
 
@@ -469,9 +469,9 @@ impl ContextManager {
     /// Returns (files_to_use, dropped_files)
     pub async fn collect_context_files_with_limit(
         &self,
-        ctx: &Context,
+        os: &Os,
     ) -> Result<(Vec<(String, String)>, Vec<(String, String)>)> {
-        let mut files = self.get_context_files(ctx).await?;
+        let mut files = self.get_context_files(os).await?;
 
         let dropped_files = drop_matched_context_files(&mut files, self.max_context_files_size).unwrap_or_default();
 
@@ -483,13 +483,13 @@ impl ContextManager {
 
     async fn collect_context_files(
         &self,
-        ctx: &Context,
+        os: &Os,
         paths: &[String],
         context_files: &mut Vec<(String, String)>,
     ) -> Result<()> {
         for path in paths {
             // Use is_validation=false to handle non-matching globs gracefully
-            process_path(ctx, path, context_files, false).await?;
+            process_path(os, path, context_files, false).await?;
         }
         Ok(())
     }
@@ -511,7 +511,7 @@ impl ContextManager {
     ///   config.
     /// * `conversation_start` - If true, add the hook to conversation_start. Otherwise, it will be
     ///   added to per_prompt.
-    pub async fn add_hook(&mut self, ctx: &Context, name: String, hook: Hook, global: bool) -> Result<()> {
+    pub async fn add_hook(&mut self, os: &Os, name: String, hook: Hook, global: bool) -> Result<()> {
         let config = self.get_config_mut(global);
 
         if config.hooks.contains_key(&name) {
@@ -519,7 +519,7 @@ impl ContextManager {
         }
 
         config.hooks.insert(name, hook);
-        self.save_config(ctx, global).await
+        self.save_config(os, global).await
     }
 
     /// Delete hook(s) by name
@@ -527,7 +527,7 @@ impl ContextManager {
     /// * `name` - name of the hook to delete
     /// * `global` - If true, the delete from the global config. If false, delete from the current
     ///   profile config
-    pub async fn remove_hook(&mut self, ctx: &Context, name: &str, global: bool) -> Result<()> {
+    pub async fn remove_hook(&mut self, os: &Os, name: &str, global: bool) -> Result<()> {
         let config = self.get_config_mut(global);
 
         if !config.hooks.contains_key(name) {
@@ -536,13 +536,13 @@ impl ContextManager {
 
         config.hooks.remove(name);
 
-        self.save_config(ctx, global).await
+        self.save_config(os, global).await
     }
 
     /// Sets the "disabled" field on any [`Hook`] with the given name
     /// # Arguments
     /// * `disable` - Set "disabled" field to this value
-    pub async fn set_hook_disabled(&mut self, ctx: &Context, name: &str, global: bool, disable: bool) -> Result<()> {
+    pub async fn set_hook_disabled(&mut self, os: &Os, name: &str, global: bool, disable: bool) -> Result<()> {
         let config = self.get_config_mut(global);
 
         if !config.hooks.contains_key(name) {
@@ -553,18 +553,18 @@ impl ContextManager {
             hook.disabled = disable;
         }
 
-        self.save_config(ctx, global).await
+        self.save_config(os, global).await
     }
 
     /// Sets the "disabled" field on all [`Hook`]s
     /// # Arguments
     /// * `disable` - Set all "disabled" fields to this value
-    pub async fn set_all_hooks_disabled(&mut self, ctx: &Context, global: bool, disable: bool) -> Result<()> {
+    pub async fn set_all_hooks_disabled(&mut self, os: &Os, global: bool, disable: bool) -> Result<()> {
         let config = self.get_config_mut(global);
 
         config.hooks.iter_mut().for_each(|(_, h)| h.disabled = disable);
 
-        self.save_config(ctx, global).await
+        self.save_config(os, global).await
     }
 
     /// Run all the currently enabled hooks from both the global and profile contexts.
@@ -594,13 +594,13 @@ impl ContextManager {
     }
 }
 
-fn profile_dir_path(ctx: &Context, profile_name: &str) -> Result<PathBuf> {
-    Ok(directories::chat_profiles_dir(ctx)?.join(profile_name))
+fn profile_dir_path(os: &Os, profile_name: &str) -> Result<PathBuf> {
+    Ok(directories::chat_profiles_dir(os)?.join(profile_name))
 }
 
 /// Path to the context config file for `profile_name`.
-pub fn profile_context_path(ctx: &Context, profile_name: &str) -> Result<PathBuf> {
-    Ok(directories::chat_profiles_dir(ctx)?
+pub fn profile_context_path(os: &Os, profile_name: &str) -> Result<PathBuf> {
+    Ok(directories::chat_profiles_dir(os)?
         .join(profile_name)
         .join("context.json"))
 }
@@ -608,11 +608,11 @@ pub fn profile_context_path(ctx: &Context, profile_name: &str) -> Result<PathBuf
 /// Load the global context configuration.
 ///
 /// If the global configuration file doesn't exist, returns a default configuration.
-async fn load_global_config(ctx: &Context) -> Result<ContextConfig> {
-    let global_path = directories::chat_global_context_path(ctx)?;
+async fn load_global_config(os: &Os) -> Result<ContextConfig> {
+    let global_path = directories::chat_global_context_path(os)?;
     debug!(?global_path, "loading profile config");
-    if ctx.fs.exists(&global_path) {
-        let contents = ctx.fs.read_to_string(&global_path).await?;
+    if os.fs.exists(&global_path) {
+        let contents = os.fs.read_to_string(&global_path).await?;
         let config: ContextConfig =
             serde_json::from_str(&contents).map_err(|e| eyre!("Failed to parse global configuration: {}", e))?;
         Ok(config)
@@ -632,11 +632,11 @@ async fn load_global_config(ctx: &Context) -> Result<ContextConfig> {
 /// Load a profile's context configuration.
 ///
 /// If the profile configuration file doesn't exist, creates a default configuration.
-async fn load_profile_config(ctx: &Context, profile_name: &str) -> Result<ContextConfig> {
-    let profile_path = profile_context_path(ctx, profile_name)?;
+async fn load_profile_config(os: &Os, profile_name: &str) -> Result<ContextConfig> {
+    let profile_path = profile_context_path(os, profile_name)?;
     debug!(?profile_path, "loading profile config");
-    if ctx.fs.exists(&profile_path) {
-        let contents = ctx.fs.read_to_string(&profile_path).await?;
+    if os.fs.exists(&profile_path) {
+        let contents = os.fs.read_to_string(&profile_path).await?;
         let config: ContextConfig =
             serde_json::from_str(&contents).map_err(|e| eyre!("Failed to parse profile configuration: {}", e))?;
         Ok(config)
@@ -663,14 +663,14 @@ async fn load_profile_config(ctx: &Context, profile_name: &str) -> Result<Contex
 /// # Returns
 /// A Result indicating success or an error
 async fn process_path(
-    ctx: &Context,
+    os: &Os,
     path: &str,
     context_files: &mut Vec<(String, String)>,
     is_validation: bool,
 ) -> Result<()> {
     // Expand ~ to home directory
     let expanded_path = if path.starts_with('~') {
-        if let Some(home_dir) = ctx.env.home() {
+        if let Some(home_dir) = os.env.home() {
             home_dir.join(&path[2..]).to_string_lossy().to_string()
         } else {
             return Err(eyre!("Could not determine home directory"));
@@ -683,15 +683,11 @@ async fn process_path(
     let full_path = if expanded_path.starts_with('/') {
         expanded_path
     } else {
-        ctx.env
-            .current_dir()?
-            .join(&expanded_path)
-            .to_string_lossy()
-            .to_string()
+        os.env.current_dir()?.join(&expanded_path).to_string_lossy().to_string()
     };
 
     // Required in chroot testing scenarios so that we can use `Path::exists`.
-    let full_path = ctx.fs.chroot_path_str(full_path);
+    let full_path = os.fs.chroot_path_str(full_path);
 
     // Check if the path contains glob patterns
     if full_path.contains('*') || full_path.contains('?') || full_path.contains('[') {
@@ -704,7 +700,7 @@ async fn process_path(
                     match entry {
                         Ok(path) => {
                             if path.is_file() {
-                                add_file_to_context(ctx, &path, context_files).await?;
+                                add_file_to_context(os, &path, context_files).await?;
                                 found_any = true;
                             }
                         },
@@ -726,14 +722,14 @@ async fn process_path(
         let path = Path::new(&full_path);
         if path.exists() {
             if path.is_file() {
-                add_file_to_context(ctx, path, context_files).await?;
+                add_file_to_context(os, path, context_files).await?;
             } else if path.is_dir() {
                 // For directories, add all files in the directory (non-recursive)
-                let mut read_dir = ctx.fs.read_dir(path).await?;
+                let mut read_dir = os.fs.read_dir(path).await?;
                 while let Some(entry) = read_dir.next_entry().await? {
                     let path = entry.path();
                     if path.is_file() {
-                        add_file_to_context(ctx, &path, context_files).await?;
+                        add_file_to_context(os, &path, context_files).await?;
                     }
                 }
             }
@@ -758,9 +754,9 @@ async fn process_path(
 ///
 /// # Returns
 /// A Result indicating success or an error
-async fn add_file_to_context(ctx: &Context, path: &Path, context_files: &mut Vec<(String, String)>) -> Result<()> {
+async fn add_file_to_context(os: &Os, path: &Path, context_files: &mut Vec<(String, String)>) -> Result<()> {
     let filename = path.to_string_lossy().to_string();
-    let content = ctx.fs.read_to_string(path).await?;
+    let content = os.fs.read_to_string(path).await?;
     context_files.push((filename, content));
     Ok(())
 }
@@ -817,58 +813,56 @@ mod tests {
 
     #[tokio::test]
     async fn test_profile_ops() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
 
         assert_eq!(manager.current_profile, "default");
 
         // Create ops
-        manager.create_profile(&ctx, "test_profile").await?;
-        assert!(profile_context_path(&ctx, "test_profile")?.exists());
-        assert!(manager.create_profile(&ctx, "test_profile").await.is_err());
-        manager.create_profile(&ctx, "alt").await?;
+        manager.create_profile(&os, "test_profile").await?;
+        assert!(profile_context_path(&os, "test_profile")?.exists());
+        assert!(manager.create_profile(&os, "test_profile").await.is_err());
+        manager.create_profile(&os, "alt").await?;
 
         // Listing
-        let profiles = manager.list_profiles(&ctx).await?;
+        let profiles = manager.list_profiles(&os).await?;
         assert!(profiles.contains(&"default".to_string()));
         assert!(profiles.contains(&"test_profile".to_string()));
         assert!(profiles.contains(&"alt".to_string()));
 
         // Switching
-        manager.switch_profile(&ctx, "test_profile").await?;
-        assert!(manager.switch_profile(&ctx, "notexists").await.is_err());
+        manager.switch_profile(&os, "test_profile").await?;
+        assert!(manager.switch_profile(&os, "notexists").await.is_err());
 
         // Renaming
-        manager.rename_profile(&ctx, "alt", "renamed").await?;
-        assert!(!profile_context_path(&ctx, "alt")?.exists());
-        assert!(profile_context_path(&ctx, "renamed")?.exists());
+        manager.rename_profile(&os, "alt", "renamed").await?;
+        assert!(!profile_context_path(&os, "alt")?.exists());
+        assert!(profile_context_path(&os, "renamed")?.exists());
 
         // Delete ops
-        assert!(manager.delete_profile(&ctx, "test_profile").await.is_err());
-        manager.switch_profile(&ctx, "default").await?;
-        manager.delete_profile(&ctx, "test_profile").await?;
-        assert!(!profile_context_path(&ctx, "test_profile")?.exists());
-        assert!(manager.delete_profile(&ctx, "test_profile").await.is_err());
-        assert!(manager.delete_profile(&ctx, "default").await.is_err());
+        assert!(manager.delete_profile(&os, "test_profile").await.is_err());
+        manager.switch_profile(&os, "default").await?;
+        manager.delete_profile(&os, "test_profile").await?;
+        assert!(!profile_context_path(&os, "test_profile")?.exists());
+        assert!(manager.delete_profile(&os, "test_profile").await.is_err());
+        assert!(manager.delete_profile(&os, "default").await.is_err());
 
         Ok(())
     }
 
     #[tokio::test]
     async fn test_collect_exceeds_limit() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(Some(2)).await?;
 
-        ctx.fs.create_dir_all("test").await?;
-        ctx.fs.write("test/to-include.md", "ha").await?;
-        ctx.fs
-            .write("test/to-drop.md", "long content that exceed limit")
-            .await?;
+        os.fs.create_dir_all("test").await?;
+        os.fs.write("test/to-include.md", "ha").await?;
+        os.fs.write("test/to-drop.md", "long content that exceed limit").await?;
         manager
-            .add_paths(&ctx, vec!["test/*.md".to_string()], false, false)
+            .add_paths(&os, vec!["test/*.md".to_string()], false, false)
             .await?;
 
-        let (used, dropped) = manager.collect_context_files_with_limit(&ctx).await.unwrap();
+        let (used, dropped) = manager.collect_context_files_with_limit(&os).await.unwrap();
 
         assert!(used.len() + dropped.len() == 2);
         assert!(used.len() == 1);
@@ -878,23 +872,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_ops() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).await?;
 
         // Create some test files for matching.
-        ctx.fs.create_dir_all("test").await?;
-        ctx.fs.write("test/p1.md", "p1").await?;
-        ctx.fs.write("test/p2.md", "p2").await?;
+        os.fs.create_dir_all("test").await?;
+        os.fs.write("test/p1.md", "p1").await?;
+        os.fs.write("test/p2.md", "p2").await?;
 
         assert!(
-            manager.get_context_files(&ctx).await?.is_empty(),
+            manager.get_context_files(&os).await?.is_empty(),
             "no files should be returned for an empty profile when force is false"
         );
 
         manager
-            .add_paths(&ctx, vec!["test/*.md".to_string()], false, false)
+            .add_paths(&os, vec!["test/*.md".to_string()], false, false)
             .await?;
-        let files = manager.get_context_files(&ctx).await?;
+        let files = manager.get_context_files(&os).await?;
         assert!(files[0].0.ends_with("p1.md"));
         assert_eq!(files[0].1, "p1");
         assert!(files[1].0.ends_with("p2.md"));
@@ -902,7 +896,7 @@ mod tests {
 
         assert!(
             manager
-                .add_paths(&ctx, vec!["test/*.txt".to_string()], false, false)
+                .add_paths(&os, vec!["test/*.txt".to_string()], false, false)
                 .await
                 .is_err(),
             "adding a glob with no matching and without force should fail"

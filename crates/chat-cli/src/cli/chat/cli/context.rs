@@ -18,7 +18,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
@@ -68,7 +68,7 @@ pub enum ContextSubcommand {
 }
 
 impl ContextSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             execute!(
                 session.stderr,
@@ -104,7 +104,7 @@ impl ContextSubcommand {
                 } else {
                     for path in &context_manager.global_config.paths {
                         execute!(session.stderr, style::Print(format!("    {} ", path)))?;
-                        if let Ok(context_files) = context_manager.get_context_files_by_path(ctx, path).await {
+                        if let Ok(context_files) = context_manager.get_context_files_by_path(os, path).await {
                             execute!(
                                 session.stderr,
                                 style::SetForegroundColor(Color::Green),
@@ -140,7 +140,7 @@ impl ContextSubcommand {
                 } else {
                     for path in &context_manager.profile_config.paths {
                         execute!(session.stderr, style::Print(format!("    {} ", path)))?;
-                        if let Ok(context_files) = context_manager.get_context_files_by_path(ctx, path).await {
+                        if let Ok(context_files) = context_manager.get_context_files_by_path(os, path).await {
                             execute!(
                                 session.stderr,
                                 style::SetForegroundColor(Color::Green),
@@ -304,7 +304,7 @@ impl ContextSubcommand {
                 }
             },
             Self::Add { global, force, paths } => {
-                match context_manager.add_paths(ctx, paths.clone(), global, force).await {
+                match context_manager.add_paths(os, paths.clone(), global, force).await {
                     Ok(_) => {
                         let target = if global { "global" } else { "profile" };
                         execute!(
@@ -324,7 +324,7 @@ impl ContextSubcommand {
                     },
                 }
             },
-            Self::Remove { global, paths } => match context_manager.remove_paths(ctx, paths.clone(), global).await {
+            Self::Remove { global, paths } => match context_manager.remove_paths(os, paths.clone(), global).await {
                 Ok(_) => {
                     let target = if global { "global" } else { "profile" };
                     execute!(
@@ -347,7 +347,7 @@ impl ContextSubcommand {
                     )?;
                 },
             },
-            Self::Clear { global } => match context_manager.clear(ctx, global).await {
+            Self::Clear { global } => match context_manager.clear(os, global).await {
                 Ok(_) => {
                     let target = if global {
                         "global".to_string()

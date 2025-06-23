@@ -21,7 +21,7 @@ use crate::cli::chat::{
 };
 use crate::database::Database;
 use crate::database::settings::Setting;
-use crate::platform::Context;
+use crate::os::Os;
 use crate::util::knowledge_store::KnowledgeStore;
 
 /// Knowledge base management commands
@@ -58,7 +58,7 @@ enum OperationResult {
 impl KnowledgeSubcommand {
     pub async fn execute(
         self,
-        ctx: &Context,
+        os: &Os,
         database: &Database,
         session: &mut ChatSession,
     ) -> Result<ChatState, ChatError> {
@@ -67,7 +67,7 @@ impl KnowledgeSubcommand {
             return Ok(Self::default_chat_state());
         }
 
-        let result = self.execute_operation(ctx, session).await;
+        let result = self.execute_operation(os, session).await;
 
         Self::write_operation_result(session, result)?;
 
@@ -93,7 +93,7 @@ impl KnowledgeSubcommand {
         }
     }
 
-    async fn execute_operation(&self, ctx: &Context, session: &mut ChatSession) -> OperationResult {
+    async fn execute_operation(&self, os: &Os, session: &mut ChatSession) -> OperationResult {
         match self {
             KnowledgeSubcommand::Show => {
                 match Self::handle_show(session).await {
@@ -101,9 +101,9 @@ impl KnowledgeSubcommand {
                     Err(e) => OperationResult::Error(format!("Failed to show contexts: {}", e)),
                 }
             },
-            KnowledgeSubcommand::Add { path } => Self::handle_add(ctx, path).await,
-            KnowledgeSubcommand::Remove { path } => Self::handle_remove(ctx, path).await,
-            KnowledgeSubcommand::Update { path } => Self::handle_update(ctx, path).await,
+            KnowledgeSubcommand::Add { path } => Self::handle_add(os, path).await,
+            KnowledgeSubcommand::Remove { path } => Self::handle_remove(os, path).await,
+            KnowledgeSubcommand::Update { path } => Self::handle_update(os, path).await,
             KnowledgeSubcommand::Clear => Self::handle_clear(session).await,
             KnowledgeSubcommand::Status => Self::handle_status().await,
             KnowledgeSubcommand::Cancel { operation_id } => Self::handle_cancel(operation_id.as_deref()).await,
@@ -213,8 +213,8 @@ impl KnowledgeSubcommand {
     }
 
     /// Handle add operation
-    async fn handle_add(ctx: &Context, path: &str) -> OperationResult {
-        match Self::validate_and_sanitize_path(ctx, path) {
+    async fn handle_add(os: &Os, path: &str) -> OperationResult {
+        match Self::validate_and_sanitize_path(os, path) {
             Ok(sanitized_path) => {
                 let async_knowledge_store = KnowledgeStore::get_async_instance().await;
                 let mut store = async_knowledge_store.lock().await;
@@ -230,8 +230,8 @@ impl KnowledgeSubcommand {
     }
 
     /// Handle remove operation
-    async fn handle_remove(ctx: &Context, path: &str) -> OperationResult {
-        let sanitized_path = sanitize_path_tool_arg(ctx, path);
+    async fn handle_remove(os: &Os, path: &str) -> OperationResult {
+        let sanitized_path = sanitize_path_tool_arg(os, path);
         let async_knowledge_store = KnowledgeStore::get_async_instance().await;
         let mut store = async_knowledge_store.lock().await;
 
@@ -246,8 +246,8 @@ impl KnowledgeSubcommand {
     }
 
     /// Handle update operation
-    async fn handle_update(ctx: &Context, path: &str) -> OperationResult {
-        match Self::validate_and_sanitize_path(ctx, path) {
+    async fn handle_update(os: &Os, path: &str) -> OperationResult {
+        match Self::validate_and_sanitize_path(os, path) {
             Ok(sanitized_path) => {
                 let async_knowledge_store = KnowledgeStore::get_async_instance().await;
                 let mut store = async_knowledge_store.lock().await;
@@ -430,17 +430,17 @@ impl KnowledgeSubcommand {
     }
 
     /// Validate and sanitize path
-    fn validate_and_sanitize_path(ctx: &Context, path: &str) -> Result<String, String> {
+    fn validate_and_sanitize_path(os: &Os, path: &str) -> Result<String, String> {
         if path.contains('\n') {
             return Ok(path.to_string());
         }
 
-        let ctx_path = sanitize_path_tool_arg(ctx, path);
-        if !ctx_path.exists() {
+        let os_path = sanitize_path_tool_arg(os, path);
+        if !os_path.exists() {
             return Err(format!("Path '{}' does not exist", path));
         }
 
-        Ok(ctx_path.to_string_lossy().to_string())
+        Ok(os_path.to_string_lossy().to_string())
     }
 
     fn write_operation_result(session: &mut ChatSession, result: OperationResult) -> Result<(), std::io::Error> {

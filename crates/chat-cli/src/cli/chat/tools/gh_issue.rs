@@ -23,7 +23,7 @@ use super::{
     ToolPermission,
 };
 use crate::cli::chat::token_counter::TokenCounter;
-use crate::platform::Context;
+use crate::os::Os;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct GhIssue {
@@ -48,7 +48,7 @@ pub struct GhIssueContext {
 const MAX_TRANSCRIPT_CHAR_LEN: usize = 3_000;
 
 impl GhIssue {
-    pub async fn invoke(&self, ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, _updates: impl Write) -> Result<InvokeOutput> {
         let Some(context) = self.context.as_ref() else {
             return Err(eyre!(
                 "report_issue: Required tool context (GhIssueContext) not set by the program."
@@ -59,7 +59,7 @@ impl GhIssue {
         let additional_environment = [
             Self::get_chat_settings(context),
             Self::get_request_ids(context),
-            Self::get_context(ctx, context).await,
+            Self::get_context(os, context).await,
         ]
         .join("\n\n");
 
@@ -139,58 +139,58 @@ impl GhIssue {
         )
     }
 
-    async fn get_context(ctx: &Context, context: &GhIssueContext) -> String {
-        let mut ctx_str = "[chat-context]\n".to_string();
-        let Some(ctx_manager) = &context.context_manager else {
-            ctx_str.push_str("No context available.");
-            return ctx_str;
+    async fn get_context(os: &Os, context: &GhIssueContext) -> String {
+        let mut os_str = "[chat-context]\n".to_string();
+        let Some(os_manager) = &context.context_manager else {
+            os_str.push_str("No context available.");
+            return os_str;
         };
 
-        ctx_str.push_str(&format!("current_profile={}\n", ctx_manager.current_profile));
-        match ctx_manager.list_profiles(ctx).await {
+        os_str.push_str(&format!("current_profile={}\n", os_manager.current_profile));
+        match os_manager.list_profiles(os).await {
             Ok(profiles) if !profiles.is_empty() => {
-                ctx_str.push_str(&format!("profiles=\n{}\n\n", profiles.join("\n")));
+                os_str.push_str(&format!("profiles=\n{}\n\n", profiles.join("\n")));
             },
-            _ => ctx_str.push_str("profiles=none\n\n"),
+            _ => os_str.push_str("profiles=none\n\n"),
         }
 
         // Context file categories
-        if ctx_manager.global_config.paths.is_empty() {
-            ctx_str.push_str("global_context=none\n\n");
+        if os_manager.global_config.paths.is_empty() {
+            os_str.push_str("global_context=none\n\n");
         } else {
-            ctx_str.push_str(&format!(
+            os_str.push_str(&format!(
                 "global_context=\n{}\n\n",
-                &ctx_manager.global_config.paths.join("\n")
+                &os_manager.global_config.paths.join("\n")
             ));
         }
 
-        if ctx_manager.profile_config.paths.is_empty() {
-            ctx_str.push_str("profile_context=none\n\n");
+        if os_manager.profile_config.paths.is_empty() {
+            os_str.push_str("profile_context=none\n\n");
         } else {
-            ctx_str.push_str(&format!(
+            os_str.push_str(&format!(
                 "profile_context=\n{}\n\n",
-                &ctx_manager.profile_config.paths.join("\n")
+                &os_manager.profile_config.paths.join("\n")
             ));
         }
 
         // Handle context files
-        match ctx_manager.get_context_files(ctx).await {
+        match os_manager.get_context_files(os).await {
             Ok(context_files) if !context_files.is_empty() => {
-                ctx_str.push_str("files=\n");
+                os_str.push_str("files=\n");
                 let total_size: usize = context_files
                     .iter()
                     .map(|(file, content)| {
                         let size = TokenCounter::count_tokens(content);
-                        ctx_str.push_str(&format!("{}, {} tkns\n", file, size));
+                        os_str.push_str(&format!("{}, {} tkns\n", file, size));
                         size
                     })
                     .sum();
-                ctx_str.push_str(&format!("total context size={total_size} tkns"));
+                os_str.push_str(&format!("total context size={total_size} tkns"));
             },
-            _ => ctx_str.push_str("files=none"),
+            _ => os_str.push_str("files=none"),
         }
 
-        ctx_str
+        os_str
     }
 
     fn get_chat_settings(context: &GhIssueContext) -> String {
@@ -213,7 +213,7 @@ impl GhIssue {
         )?)
     }
 
-    pub async fn validate(&mut self, _ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, _os: &Os) -> Result<()> {
         Ok(())
     }
 }
