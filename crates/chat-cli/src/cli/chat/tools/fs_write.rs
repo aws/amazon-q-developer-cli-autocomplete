@@ -172,10 +172,11 @@ impl FsWrite {
         match self {
             FsWrite::Create { path, .. } => {
                 let file_text = self.canonical_create_command_text();
-                let relative_path = format_path(cwd, path);
-                let prev = if ctx.fs.exists(path) {
-                    let file = ctx.fs.read_to_string_sync(path)?;
-                    stylize_output_if_able(ctx, path, &file)
+                let path = sanitize_path_tool_arg(ctx, path);
+                let relative_path = format_path(cwd, &path);
+                let prev = if ctx.fs.exists(&path) {
+                    let file = ctx.fs.read_to_string_sync(&path)?;
+                    stylize_output_if_able(ctx, &path, &file)
                 } else {
                     Default::default()
                 };
@@ -188,8 +189,9 @@ impl FsWrite {
                 insert_line,
                 new_str,
             } => {
-                let relative_path = format_path(cwd, path);
-                let file = ctx.fs.read_to_string_sync(&relative_path)?;
+                let path = sanitize_path_tool_arg(ctx, path);
+                let relative_path = format_path(cwd, &path);
+                let file = ctx.fs.read_to_string_sync(&path)?;
 
                 // Diff the old with the new by adding extra context around the line being inserted
                 // at.
@@ -207,8 +209,9 @@ impl FsWrite {
                 Ok(())
             },
             FsWrite::StrReplace { path, old_str, new_str } => {
-                let relative_path = format_path(cwd, path);
-                let file = ctx.fs.read_to_string_sync(&relative_path)?;
+                let path = sanitize_path_tool_arg(ctx, path);
+                let relative_path = format_path(cwd, &path);
+                let file = ctx.fs.read_to_string_sync(&path)?;
                 let (start_line, _) = match line_number_at(&file, old_str) {
                     Some((start_line, end_line)) => (start_line, end_line),
                     _ => (0, 0),
@@ -220,8 +223,9 @@ impl FsWrite {
                 Ok(())
             },
             FsWrite::Append { path, new_str } => {
-                let relative_path = format_path(cwd, path);
-                let start_line = ctx.fs.read_to_string_sync(&relative_path)?.lines().count() + 1;
+                let path = sanitize_path_tool_arg(ctx, path);
+                let relative_path = format_path(cwd, &path);
+                let start_line = ctx.fs.read_to_string_sync(&path)?.lines().count() + 1;
                 let file = stylize_output_if_able(ctx, &relative_path, new_str);
                 print_diff(output, &Default::default(), &file, start_line)?;
                 Ok(())
