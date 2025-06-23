@@ -42,11 +42,13 @@ pub struct ListArgs {
     pub single: bool,
 }
 
-enum Purpose {
-    NumAgents,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum MessagePurpose {
     List,
     Prompt,
     Summary,
+    NumAgents,
+    Default,
 }
 
 #[derive(Debug, Args, PartialEq, Eq)]
@@ -68,7 +70,7 @@ pub struct SendArgs {
     #[arg(long, short, value_enum, default_value_t)]
     pub format: OutputFormat,
     #[arg(long, help = "Optional purpose for this message")]
-    pub purpose: Option<String>,
+    pub purpose: Option<MessagePurpose>,
 }
 
 #[derive(Debug, Serialize)]
@@ -81,6 +83,19 @@ pub struct AgentInfo {
     pub status: String,
 }
 
+impl std::str::FromStr for MessagePurpose {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "list" => Ok(MessagePurpose::List),
+            "prompt" => Ok(MessagePurpose::Prompt),
+            "summary" => Ok(MessagePurpose::Summary),
+            "num_agents" => Ok(MessagePurpose::NumAgents),
+            _ => Ok(MessagePurpose::Default),
+        }
+    }
+}
 // TODO: Fix error handling logic instead of just adding eprintln everywhere
 // Lists all chat_cli instances metadata running in system
 pub async fn list_agents(args: ListArgs) -> Result<ExitCode> {
@@ -444,15 +459,15 @@ pub async fn send_agent_message(args: SendArgs) -> Result<ExitCode> {
     match UnixStream::connect(&socket_path).await {
         Ok(mut stream) => {
             let prefix = if let Some(purpose) = agent_args.purpose {
-                match purpose.as_str() {
-                    "num_agents" => "NUM_AGENTS ",
-                    "list" => "LIST ",
-                    "prompt" => "PROMPT ",
-                    "summary" => "SUMMARY ",
-                    _ => "MESSAGE_SEND_BEGIN ", // Default if purpose doesn't match
+                match purpose {
+                    MessagePurpose::List => "LIST ",
+                    MessagePurpose::Prompt => "PROMPT ",
+                    MessagePurpose::Summary => "SUMMARY ",
+                    MessagePurpose::NumAgents => "NUM_AGENTS ",
+                    MessagePurpose::Default => "MESSAGE_SEND_BEGIN ",
                 }
             } else {
-                "MESSAGE_SEND_BEGIN " // Default if no purpose specified
+                "MESSAGE_SEND_BEGIN "
             };
 
             // Write the prefix followed by the message

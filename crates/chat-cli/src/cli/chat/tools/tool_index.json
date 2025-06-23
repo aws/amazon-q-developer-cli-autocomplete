@@ -202,16 +202,20 @@
           "items": {
             "type": "object",
             "properties": {
+              "agent_name": {
+                "type": "string",
+                "description": "Brief 3-5 word description of the subagent's role, which uniquely identifies the task it is completing. Ensure the last word is always 'Agent'."
+              },
               "prompt": {
                 "type": "string",
-                "description": "Clear, specific instructions for what the subagent should accomplish. Each subagent should have a focused task."
+                "description": "Detailed, actionable instructions for the subagent's task. Include specific goals, required outputs, methodology, and any constraints. Be precise about what information or artifacts the subagent should produce and how they should be formatted. Each subagent should have a clearly defined, focused responsibility. Ensure that the prompting also indicates that they are a subagent so that they can act accordingly."
               },
               "model": {
                 "type": "string",
                 "description": "Optional model for subagent to use (e.g., 'claude-3.5-sonnet', 'claude-3.7-sonnet', 'claude-4-sonnet'). Defaults to system default if not specified."
               }
             },
-            "required": ["prompt"]
+            "required": ["agent_name", "prompt"]
           }
         }
       },

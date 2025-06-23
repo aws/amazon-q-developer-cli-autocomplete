@@ -49,7 +49,6 @@ use token_counter::{TokenCount, TokenCounter};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixListener;
 use tokio::signal::ctrl_c;
-use tokio::sync::Mutex;
 use tool_manager::{GetPromptError, LoadingRecord, McpServerConfig, PromptBundle, ToolManager, ToolManagerBuilder};
 use tools::gh_issue::GhIssueContext;
 use tools::{OutputKind, QueuedTool, Tool, ToolOrigin, ToolPermissions, ToolSpec};
@@ -767,56 +766,6 @@ impl ChatContext {
         }
     }
 
-    /// Clears summaries arc mutex and makes space for numAgents entries
-    async fn handle_num_agents_command(
-        buffer: &[u8],
-        summaries: &Arc<Mutex<Vec<String>>>,
-        expected_summaries: &Arc<Mutex<usize>>,
-    ) {
-        let full_content = std::str::from_utf8(buffer).unwrap_or("").trim();
-        let num_str = full_content.strip_prefix("NUM_AGENTS ").unwrap_or("").trim();
-
-        if let Ok(num_agents) = num_str.parse::<usize>() {
-            let mut summaries_guard = summaries.lock().await;
-            summaries_guard.clear();
-            summaries_guard.reserve(num_agents);
-            *expected_summaries.lock().await = num_agents;
-        }
-    }
-
-    ///  Adds summary to shared ds and writes to MPSC once all summaries received
-    async fn handle_summary_command(
-        buffer: &[u8],
-        summaries: &Arc<Mutex<Vec<String>>>,
-        expected_summaries: &Arc<Mutex<usize>>,
-        message_sender: &tokio::sync::mpsc::Sender<String>, // adjust type as needed
-    ) {
-        let full_content = std::str::from_utf8(buffer).unwrap_or("").trim();
-        let summary_content = full_content.strip_prefix("SUMMARY ").unwrap_or("").trim();
-
-        let mut summaries_guard = summaries.lock().await;
-        let expected_count = *expected_summaries.lock().await;
-
-        if summaries_guard.len() < expected_count {
-            summaries_guard.push(summary_content.to_string());
-            eprintln!(
-                "\n\nReceived update from agent {} of {}",
-                summaries_guard.len(),
-                expected_count
-            );
-            if summaries_guard.len() == expected_count {
-                let concatenated_summary = summaries_guard.join("\n");
-                drop(summaries_guard);
-                if let Err(e) = message_sender.send(concatenated_summary).await {
-                    eprintln!("Failed to send concatenated summary: {}", e);
-                }
-            }
-        } else {
-            let response = "{\"status\":\"error\",\"message\":\"Already received all expected summaries\"}";
-            eprintln!("Failed to write response: {}", response);
-        }
-    }
-
     /// Sets up a Unix domain socket server for subagent communication
     async fn setup_agent_socket() -> (
         Arc<tokio::sync::Mutex<String>>,
@@ -887,28 +836,16 @@ impl ChatContext {
                                         }
                                     // TODO: add an atomic boolean: indicates whether theres something in the mpsc or not.
                                     } else if command.starts_with("PROMPT ") {
-                                        let full_content = std::str::from_utf8(&buffer[..n]).unwrap_or("").trim();
-                                        let message_content =
-                                            full_content.strip_prefix("PROMPT ").unwrap_or(full_content).trim();
+                                        let message_content = command.strip_prefix("PROMPT ").unwrap_or(command).trim();
                                         // pass prompt to main chat loop through mpsc
                                         if let Err(e) = message_sender.send(message_content.to_string()).await {
                                             eprintln!("Failed to send message: {}", e);
                                         }
-                                    } else if command.starts_with("NUM_AGENTS ") {
-                                        Self::handle_num_agents_command(
-                                            &buffer[..n],
-                                            &summaries_clone,
-                                            &expected_summaries_clone,
-                                        )
-                                        .await;
                                     } else if command.starts_with("SUMMARY ") {
-                                        Self::handle_summary_command(
-                                            &buffer[..n],
-                                            &summaries_clone,
-                                            &expected_summaries_clone,
-                                            &message_sender,
-                                        )
-                                        .await;
+                                        let message_content = command.strip_prefix("PROMPT ").unwrap_or(command).trim();
+                                        if let Err(e) = message_sender.send(message_content.to_string()).await {
+                                            eprintln!("Failed to send concatenated summary: {}", e);
+                                        }
                                     } else {
                                         // Unknown command
                                         eprintln!("Failed to write response due to unknown prefix");
@@ -944,21 +881,6 @@ impl ChatContext {
         tool_uses: Option<Vec<QueuedTool>>,
         pending_tool_index: Option<usize>,
     ) -> Result<ChatState, ChatError> {
-        // execute!(
-        //     self.output,
-        //     style::SetForegroundColor(Color::Yellow),
-        //     style::Print("\n\nWaiting for agent summaries...\n"),
-        //     style::SetForegroundColor(Color::Reset)
-        // )?;
-        if self.interactive {
-            execute!(self.output, cursor::Hide)?;
-            execute!(self.output, style::Print("\n"), style::SetAttribute(Attribute::Reset))?;
-            self.spinner = Some(Spinner::new(
-                Spinners::Dots,
-                "Waiting for agent to complete...".to_string(),
-            ));
-        }
-
         // Check if we have a message receiver
         if let Some(receiver) = &mut self.message_receiver {
             match receiver.recv().await {
@@ -3531,11 +3453,11 @@ impl ChatContext {
             tool_telemetry = tool_telemetry.and_modify(|ev| ev.is_accepted = true);
 
             let tool_start = std::time::Instant::now();
-            let invoke_result = tool.tool.invoke(&self.ctx, &mut self.output).await;
-
             if tool.name == "launch_agent" {
                 sub_agent_context = true;
             }
+
+            let invoke_result = tool.tool.invoke(&self.ctx, &mut self.output).await;
 
             if self.interactive && self.spinner.is_some() {
                 queue!(
@@ -3642,6 +3564,26 @@ impl ChatContext {
         } else {
             self.conversation_state.add_tool_results(tool_results);
         }
+
+        // New code for subagents state
+        // At this point we are returning tool use result of launch_agents back to main chat loop
+        // Model must understand synthesis of all summaries
+        // if sub_agent_context {
+        //     self.send_tool_use_telemetry(telemetry).await;
+        //     if self.interactive {
+        //         execute!(self.output, cursor::Hide)?;
+        //         execute!(self.output, style::Print("\n"), style::SetAttribute(Attribute::Reset))?;
+        //         self.spinner = Some(Spinner::new(
+        //             Spinners::Dots,
+        //             "Understanding subagents summary...".to_string(),
+        //         ));
+        //     }
+        //     return Ok(ChatState::WaitingOnAgents {
+        //         tool_uses: None,
+        //         pending_tool_index: None,
+        //     });
+        // }
+
         if self.interactive {
             execute!(self.output, cursor::Hide)?;
             execute!(self.output, style::Print("\n"), style::SetAttribute(Attribute::Reset))?;
@@ -3649,13 +3591,6 @@ impl ChatContext {
         }
 
         self.send_tool_use_telemetry(telemetry).await;
-
-        if sub_agent_context {
-            return Ok(ChatState::WaitingOnAgents {
-                tool_uses: None,
-                pending_tool_index: None,
-            });
-        }
 
         return Ok(ChatState::HandleResponseStream(
             self.client
@@ -4068,19 +4003,6 @@ impl ChatContext {
     fn read_user_input(&mut self, prompt: &str, exit_on_single_ctrl_c: bool) -> Option<String> {
         let mut ctrl_c = false;
         loop {
-            // TODO: Fix busy waiting through seperate async logic
-            // if Q_SUBAGENT Env Var set, we are in subagent context
-            // if let Some(receiver) = &mut self.message_receiver {
-            //     if std::env::var("Q_SUBAGENT").is_ok() {
-            //         loop {
-            //             if let Ok(subagent_prompt) = receiver.try_recv() {
-            //                 return Some(subagent_prompt);
-            //             }
-            //             std::thread::sleep(Duration::from_millis(50));
-            //         }
-            //     }
-            // }
-
             // check if user input provided
             match (self.input_source.read_line(Some(prompt)), ctrl_c) {
                 (Ok(Some(line)), _) => {
