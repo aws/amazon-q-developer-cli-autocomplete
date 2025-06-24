@@ -4704,17 +4704,17 @@ dependencies = [
 
 [[package]]
 name = "hnsw_rs"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87e59cf4d04a56c67454ad104938ae4c785bc5db7ac17d27b93e3cb5a9abe6a5"
+checksum = "b53dc5b9b07424143d016ba843c9b510f424e239118697f5d5d582f2d437df41"
 dependencies = [
  "anndists",
  "anyhow",
  "bincode",
  "cfg-if",
  "cpu-time",
- "env_logger 0.10.2",
- "hashbrown 0.14.5",
+ "env_logger 0.11.8",
+ "hashbrown 0.15.3",
  "indexmap 2.9.0",
  "lazy_static",
  "log",
@@ -4722,7 +4722,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "parking_lot",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rayon",
  "serde",
 ]
