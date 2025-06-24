@@ -4,7 +4,6 @@ use rustyline::error::ReadlineError;
 use super::prompt::rl;
 #[cfg(unix)]
 use super::skim_integration::SkimCommandSelector;
-#[cfg(unix)]
 use crate::os::Os;
 
 #[derive(Debug)]

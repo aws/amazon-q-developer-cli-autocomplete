@@ -1096,9 +1096,6 @@ impl ChatSession {
 
     /// Read input from the user.
     async fn prompt_user(&mut self, os: &Os, skip_printing_tools: bool) -> Result<ChatState, ChatError> {
-        #[cfg(windows)]
-        let _ = database;
-
         execute!(self.stderr, cursor::Show)?;
 
         // Check token usage and display warnings if needed
@@ -1499,6 +1496,7 @@ impl ChatSession {
         let mut ended = false;
         let mut parser = ResponseParser::new(response);
         let mut state = ParseState::new(Some(self.terminal_width()));
+        let mut response_prefix_printed = false;
 
         let mut tool_uses = Vec::new();
         let mut tool_name_being_recvd: Option<String> = None;
@@ -1528,6 +1526,17 @@ impl ChatSession {
                             tool_name_being_recvd = Some(name);
                         },
                         parser::ResponseEvent::AssistantText(text) => {
+                            // Add Q response prefix before the first assistant text
+                            if !response_prefix_printed && !text.trim().is_empty() {
+                                // Print the Q response prefix with cyan color
+                                execute!(
+                                    self.stdout,
+                                    style::SetForegroundColor(Color::Cyan),
+                                    style::Print("> "),
+                                    style::SetForegroundColor(Color::Reset)
+                                )?;
+                                response_prefix_printed = true;
+                            }
                             buf.push_str(&text);
                         },
                         parser::ResponseEvent::ToolUse(tool_use) => {
