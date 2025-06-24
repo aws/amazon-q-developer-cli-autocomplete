@@ -188,12 +188,12 @@ where
             // If so, they need to reboot.
             let uuid = shell_extensions.extension_uuid().await?;
             let local_extension_path = local_extension_directory(ctx, &uuid)?;
-            if ctx.fs.exists(&local_extension_path) {
+            if ctx.fs().exists(&local_extension_path) {
                 // The user could still have an old extension installed, so parse the metadata.json to
                 // check the version, returning "NotInstalled" if we run into any errors.
                 let metadata_path = local_extension_path.join("metadata.json");
                 debug!("checking: {}", &metadata_path.to_string_lossy());
-                match ctx.fs.read_to_string(metadata_path).await {
+                match ctx.fs().read_to_string(metadata_path).await {
                     Ok(metadata) => {
                         let metadata: ExtensionMetadata = match serde_json::from_str(&metadata) {
                             Ok(metadata) => metadata,
@@ -351,8 +351,8 @@ where
                 // actually be uninstalled, so remove the extension directory if it still exists.
                 let ctx = ctx.upgrade().ok_or(ExtensionsError::InvalidContext)?;
                 let extension_path = local_extension_directory(ctx.as_ref(), &uuid)?;
-                if ctx.fs.exists(&extension_path) {
-                    ctx.fs.remove_dir_all(&extension_path).await?;
+                if ctx.fs().exists(&extension_path) {
+                    ctx.fs().remove_dir_all(&extension_path).await?;
                     was_uninstalled = true;
                 }
 
@@ -365,8 +365,8 @@ where
                     let ctx = self.ctx().await?;
                     let uuid = self.extension_uuid().await?;
                     let extension_path = local_extension_directory(ctx.as_ref(), &uuid)?;
-                    if ctx.fs.exists(&extension_path) {
-                        ctx.fs.remove_dir_all(&extension_path).await?;
+                    if ctx.fs().exists(&extension_path) {
+                        ctx.fs().remove_dir_all(&extension_path).await?;
                     }
                 }
                 // If keys were still present, then it means we hadn't uninstalled yet, in which
@@ -520,8 +520,8 @@ where
             let uuid = self.extension_uuid().await?;
             let ctx = self.ctx().await?;
             let extension_dir_path = local_extension_directory(ctx.as_ref(), &uuid)?;
-            ctx.fs.create_dir_all(&extension_dir_path).await.ok();
-            ctx.fs
+            ctx.fs().create_dir_all(&extension_dir_path).await.ok();
+            ctx.fs()
                 .write(
                     extension_dir_path.join("metadata.json"),
                     json!({ "version": version }).to_string(),
@@ -684,7 +684,7 @@ mod tests {
         // Installing will require a reboot
         let extension_version = 1;
         let extension_bundle_path = PathBuf::from_str("extension.zip").unwrap();
-        ctx.fs
+        ctx.fs()
             .write(&extension_bundle_path, extension_version.to_string())
             .await
             .unwrap();
@@ -784,9 +784,9 @@ mod tests {
                 .unwrap()
                 .join(".local/share/gnome-shell/extensions")
                 .join(shell_extensions.extension_uuid().await.unwrap());
-            ctx.fs.create_dir_all(&extension_dir_path).await.unwrap();
+            ctx.fs().create_dir_all(&extension_dir_path).await.unwrap();
             let expected_version: u32 = 2;
-            ctx.fs
+            ctx.fs()
                 .write(
                     extension_dir_path.join("metadata.json"),
                     json!({ "version": 1 }).to_string(),

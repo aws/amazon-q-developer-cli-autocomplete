@@ -11,7 +11,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
@@ -38,7 +38,7 @@ pub enum ProfileSubcommand {
 }
 
 impl ProfileSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             return Ok(ChatState::PromptUser {
                 skip_printing_tools: true,
@@ -48,7 +48,7 @@ impl ProfileSubcommand {
         macro_rules! print_err {
             ($err:expr) => {
                 execute!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Red),
                     style::Print(format!("\nError: {}\n\n", $err)),
                     style::SetForegroundColor(Color::Reset)
@@ -58,11 +58,11 @@ impl ProfileSubcommand {
 
         match self {
             Self::List => {
-                let profiles = match context_manager.list_profiles(ctx).await {
+                let profiles = match context_manager.list_profiles(os).await {
                     Ok(profiles) => profiles,
                     Err(e) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Red),
                             style::Print(format!("\nError listing profiles: {}\n\n", e)),
                             style::SetForegroundColor(Color::Reset)
@@ -71,11 +71,11 @@ impl ProfileSubcommand {
                     },
                 };
 
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
                 for profile in profiles {
                     if profile == context_manager.current_profile {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print("* "),
                             style::Print(&profile),
@@ -84,35 +84,35 @@ impl ProfileSubcommand {
                         )?;
                     } else {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::Print("  "),
                             style::Print(&profile),
                             style::Print("\n")
                         )?;
                     }
                 }
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
             },
-            Self::Create { name } => match context_manager.create_profile(ctx, &name).await {
+            Self::Create { name } => match context_manager.create_profile(os, &name).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nCreated profile: {}\n\n", name)),
                         style::SetForegroundColor(Color::Reset)
                     )?;
                     context_manager
-                        .switch_profile(ctx, &name)
+                        .switch_profile(os, &name)
                         .await
                         .map_err(|e| warn!(?e, "failed to switch to newly created profile"))
                         .ok();
                 },
                 Err(e) => print_err!(e),
             },
-            Self::Delete { name } => match context_manager.delete_profile(ctx, &name).await {
+            Self::Delete { name } => match context_manager.delete_profile(os, &name).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nDeleted profile: {}\n\n", name)),
                         style::SetForegroundColor(Color::Reset)
@@ -120,10 +120,10 @@ impl ProfileSubcommand {
                 },
                 Err(e) => print_err!(e),
             },
-            Self::Set { name } => match context_manager.switch_profile(ctx, &name).await {
+            Self::Set { name } => match context_manager.switch_profile(os, &name).await {
                 Ok(_) => {
                     execute!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         style::Print(format!("\nSwitched to profile: {}\n\n", name)),
                         style::SetForegroundColor(Color::Reset)
@@ -132,10 +132,10 @@ impl ProfileSubcommand {
                 Err(e) => print_err!(e),
             },
             Self::Rename { old_name, new_name } => {
-                match context_manager.rename_profile(ctx, &old_name, &new_name).await {
+                match context_manager.rename_profile(os, &old_name, &new_name).await {
                     Ok(_) => {
                         execute!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::Green),
                             style::Print(format!("\nRenamed profile: {} -> {}\n\n", old_name, new_name)),
                             style::SetForegroundColor(Color::Reset)

@@ -180,7 +180,8 @@ impl Client<StdioTransport> {
             command
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
+                .stderr(Stdio::piped())
+                .envs(std::env::vars());
 
             #[cfg(not(windows))]
             command.process_group(0);

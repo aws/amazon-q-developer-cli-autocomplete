@@ -7,6 +7,11 @@ use semantic_search_client::SemanticSearchClient;
 
 #[test]
 fn test_client_initialization() {
+    if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
+        println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
+        assert!(true);
+        return;
+    }
     // Create a temporary directory for the test
     let temp_dir = env::temp_dir().join("semantic_search_test_client_init");
     let base_dir = temp_dir.join("semantic_search");
@@ -29,6 +34,11 @@ fn test_client_initialization() {
 
 #[test]
 fn test_add_context_from_text() {
+    if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
+        println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
+        assert!(true);
+        return;
+    }
     // Create a temporary directory for the test
     let temp_dir = env::temp_dir().join("semantic_search_test_add_text");
     let base_dir = temp_dir.join("semantic_search");
@@ -64,6 +74,11 @@ fn test_add_context_from_text() {
 
 #[test]
 fn test_search_all_contexts() {
+    if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
+        println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
+        assert!(true);
+        return;
+    }
     // Create a temporary directory for the test
     let temp_dir = env::temp_dir().join("semantic_search_test_search_all");
     let base_dir = temp_dir.join("semantic_search");
@@ -105,6 +120,11 @@ fn test_search_all_contexts() {
 
 #[test]
 fn test_persistent_context() {
+    if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
+        println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
+        assert!(true);
+        return;
+    }
     // Create a temporary directory for the test
     let temp_dir = env::temp_dir().join("semantic_search_test_persistent");
     let base_dir = temp_dir.join("semantic_search");
@@ -145,6 +165,11 @@ fn test_persistent_context() {
 
 #[test]
 fn test_remove_context() {
+    if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
+        println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
+        assert!(true);
+        return;
+    }
     // Create a temporary directory for the test
     let temp_dir = env::temp_dir().join("semantic_search_test_remove");
     let base_dir = temp_dir.join("semantic_search");

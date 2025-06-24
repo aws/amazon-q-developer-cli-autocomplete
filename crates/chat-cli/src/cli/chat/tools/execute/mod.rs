@@ -14,7 +14,7 @@ use crate::cli::chat::tools::{
     OutputKind,
 };
 use crate::cli::chat::util::truncate_safe;
-use crate::platform::Context;
+use crate::os::Os;
 
 // Platform-specific modules
 #[cfg(windows)]
@@ -135,7 +135,7 @@ impl ExecuteCommand {
         Ok(())
     }
 
-    pub async fn validate(&mut self, _ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, _os: &Os) -> Result<()> {
         // TODO: probably some small amount of PATH checking
         Ok(())
     }

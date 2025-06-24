@@ -37,11 +37,10 @@ use crate::auth::builder_id::{
     start_device_authorization,
 };
 use crate::auth::pkce::start_pkce_authorization;
-use crate::database::Database;
+use crate::os::Os;
 use crate::telemetry::{
     QProfileSwitchIntent,
     TelemetryResult,
-    TelemetryThread,
 };
 use crate::util::spinner::{
     Spinner,
@@ -76,8 +75,8 @@ pub struct LoginArgs {
 }
 
 impl LoginArgs {
-    pub async fn execute(self, database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
-        if crate::auth::is_logged_in(database).await {
+    pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
+        if crate::auth::is_logged_in(&mut os.database).await {
             eyre::bail!(
                 "Already logged in, please logout with {} first",
                 format!("{CLI_BINARY_NAME} logout").magenta()
@@ -111,18 +110,18 @@ impl LoginArgs {
                     AuthMethod::IdentityCenter => {
                         let default_start_url = match self.identity_provider {
                             Some(start_url) => Some(start_url),
-                            None => database.get_start_url()?,
+                            None => os.database.get_start_url()?,
                         };
                         let default_region = match self.region {
                             Some(region) => Some(region),
-                            None => database.get_idc_region()?,
+                            None => os.database.get_idc_region()?,
                         };
 
                         let start_url = input("Enter Start URL", default_start_url.as_deref())?;
                         let region = input("Enter Region", default_region.as_deref())?;
 
-                        let _ = database.set_start_url(start_url.clone());
-                        let _ = database.set_idc_region(region.clone());
+                        let _ = os.database.set_start_url(start_url.clone());
+                        let _ = os.database.set_idc_region(region.clone());
 
                         (Some(start_url), Some(region))
                     },
@@ -131,7 +130,7 @@ impl LoginArgs {
                 // Remote machine won't be able to handle browser opening and redirects,
                 // hence always use device code flow.
                 if is_remote() || self.use_device_flow {
-                    try_device_authorization(database, telemetry, start_url.clone(), region.clone()).await?;
+                    try_device_authorization(os, start_url.clone(), region.clone()).await?;
                 } else {
                     let (client, registration) = start_pkce_authorization(start_url.clone(), region.clone()).await?;
 
@@ -144,13 +143,13 @@ impl LoginArgs {
                             ]);
                             let ctrl_c_stream = ctrl_c();
                             tokio::select! {
-                                res = registration.finish(&client, Some(database)) => res?,
+                                res = registration.finish(&client, Some(&mut os.database)) => res?,
                                 Ok(_) = ctrl_c_stream => {
                                     #[allow(clippy::exit)]
                                     exit(1);
                                 },
                             }
-                            telemetry.send_user_logged_in().ok();
+                            os.telemetry.send_user_logged_in().ok();
                             spinner.stop_with_message("Logged in".into());
                         },
                         // If we are unable to open the link with the browser, then fallback to
@@ -159,7 +158,7 @@ impl LoginArgs {
                             error!(%err, "Failed to open URL with browser, falling back to device code flow");
 
                             // Try device code flow.
-                            try_device_authorization(database, telemetry, start_url.clone(), region.clone()).await?;
+                            try_device_authorization(os, start_url.clone(), region.clone()).await?;
                         },
                     }
                 }
@@ -167,15 +166,15 @@ impl LoginArgs {
         };
 
         if login_method == AuthMethod::IdentityCenter {
-            select_profile_interactive(database, telemetry, true).await?;
+            select_profile_interactive(os, true).await?;
         }
 
         Ok(ExitCode::SUCCESS)
     }
 }
 
-pub async fn logout(database: &mut Database) -> Result<ExitCode> {
-    let _ = crate::auth::logout(database).await;
+pub async fn logout(os: &mut Os) -> Result<ExitCode> {
+    let _ = crate::auth::logout(&mut os.database).await;
 
     eprintln!("You are now logged out");
     eprintln!(
@@ -194,8 +193,8 @@ pub struct WhoamiArgs {
 }
 
 impl WhoamiArgs {
-    pub async fn execute(self, database: &mut Database) -> Result<ExitCode> {
-        let builder_id = BuilderIdToken::load(database).await;
+    pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
+        let builder_id = BuilderIdToken::load(&os.database).await;
 
         match builder_id {
             Ok(Some(token)) => {
@@ -222,7 +221,7 @@ impl WhoamiArgs {
                 );
 
                 if matches!(token.token_type(), TokenType::IamIdentityCenter) {
-                    if let Ok(Some(profile)) = database.get_auth_profile() {
+                    if let Ok(Some(profile)) = os.database.get_auth_profile() {
                         color_print::cprintln!("\n<em>Profile:</em>\n{}\n{}\n", profile.profile_name, profile.arn);
                     }
                 }
@@ -245,14 +244,14 @@ pub enum LicenseType {
     Pro,
 }
 
-pub async fn profile(database: &mut Database, telemetry: &TelemetryThread) -> Result<ExitCode> {
-    if let Ok(Some(token)) = BuilderIdToken::load(database).await {
+pub async fn profile(os: &mut Os) -> Result<ExitCode> {
+    if let Ok(Some(token)) = BuilderIdToken::load(&os.database).await {
         if matches!(token.token_type(), TokenType::BuilderId) {
             bail!("This command is only available for Pro users");
         }
     }
 
-    select_profile_interactive(database, telemetry, false).await?;
+    select_profile_interactive(os, false).await?;
 
     Ok(ExitCode::SUCCESS)
 }
@@ -279,13 +278,8 @@ pub enum UserSubcommand {
     Profile,
 }
 
-async fn try_device_authorization(
-    database: &mut Database,
-    telemetry: &TelemetryThread,
-    start_url: Option<String>,
-    region: Option<String>,
-) -> Result<()> {
-    let device_auth = start_device_authorization(database, start_url.clone(), region.clone()).await?;
+async fn try_device_authorization(os: &mut Os, start_url: Option<String>, region: Option<String>) -> Result<()> {
+    let device_auth = start_device_authorization(&os.database, start_url.clone(), region.clone()).await?;
 
     println!();
     println!("Confirm the following code in the browser");
@@ -316,7 +310,7 @@ async fn try_device_authorization(
             }
         }
         match poll_create_token(
-            database,
+            &os.database,
             device_auth.device_code.clone(),
             start_url.clone(),
             region.clone(),
@@ -325,7 +319,7 @@ async fn try_device_authorization(
         {
             PollCreateToken::Pending => {},
             PollCreateToken::Complete => {
-                telemetry.send_user_logged_in().ok();
+                os.telemetry.send_user_logged_in().ok();
                 spinner.stop_with_message("Logged in".into());
                 break;
             },
@@ -338,23 +332,23 @@ async fn try_device_authorization(
     Ok(())
 }
 
-async fn select_profile_interactive(database: &mut Database, telemetry: &TelemetryThread, whoami: bool) -> Result<()> {
+async fn select_profile_interactive(os: &mut Os, whoami: bool) -> Result<()> {
     let mut spinner = Spinner::new(vec![
         SpinnerComponent::Spinner,
         SpinnerComponent::Text(" Fetching profiles...".into()),
     ]);
-    let profiles = list_available_profiles(database).await?;
+    let profiles = list_available_profiles(&mut os.database).await?;
     if profiles.is_empty() {
         info!("Available profiles was empty");
         return Ok(());
     }
 
-    let sso_region = database.get_idc_region()?;
+    let sso_region = os.database.get_idc_region()?;
     let total_profiles = profiles.len() as i64;
 
     if whoami && profiles.len() == 1 {
         if let Some(profile_region) = profiles[0].arn.split(':').nth(3) {
-            telemetry
+            os.telemetry
                 .send_profile_state(
                     QProfileSwitchIntent::Update,
                     profile_region.to_string(),
@@ -365,7 +359,7 @@ async fn select_profile_interactive(database: &mut Database, telemetry: &Telemet
         }
 
         spinner.stop_with_message(String::new());
-        database.set_auth_profile(&profiles[0])?;
+        os.database.set_auth_profile(&profiles[0])?;
         return Ok(());
     }
 
@@ -373,7 +367,7 @@ async fn select_profile_interactive(database: &mut Database, telemetry: &Telemet
         .iter()
         .map(|p| format!("{} (arn: {})", p.profile_name, p.arn))
         .collect();
-    let active_profile = database.get_auth_profile()?;
+    let active_profile = os.database.get_auth_profile()?;
 
     if let Some(default_idx) = active_profile
         .as_ref()
@@ -393,7 +387,7 @@ async fn select_profile_interactive(database: &mut Database, telemetry: &Telemet
         Some(i) => {
             let chosen = &profiles[i];
             eprintln!("Profile set");
-            database.set_auth_profile(chosen)?;
+            os.database.set_auth_profile(chosen)?;
 
             if let Some(profile_region) = chosen.arn.split(':').nth(3) {
                 let intent = if whoami {
@@ -402,7 +396,7 @@ async fn select_profile_interactive(database: &mut Database, telemetry: &Telemet
                     QProfileSwitchIntent::User
                 };
 
-                telemetry
+                os.telemetry
                     .send_did_select_profile(
                         intent,
                         profile_region.to_string(),
@@ -414,7 +408,7 @@ async fn select_profile_interactive(database: &mut Database, telemetry: &Telemet
             }
         },
         None => {
-            telemetry
+            os.telemetry
                 .send_did_select_profile(
                     QProfileSwitchIntent::User,
                     "not-set".to_string(),

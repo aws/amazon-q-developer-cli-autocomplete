@@ -19,6 +19,7 @@ use crossterm::{
 use thiserror::Error;
 use unicode_width::UnicodeWidthStr;
 
+use crate::cli::chat::error_formatter::format_mcp_error;
 use crate::cli::chat::tool_manager::PromptBundle;
 use crate::cli::chat::{
     ChatError,
@@ -88,8 +89,23 @@ impl PromptsArgs {
                 optimal_case
             }
         };
+        // Add usage guidance at the top
         queue!(
-            session.output,
+            session.stderr,
+            style::Print("\n"),
+            style::SetAttribute(Attribute::Bold),
+            style::Print("Usage: "),
+            style::SetAttribute(Attribute::Reset),
+            style::Print("You can use a prompt by typing "),
+            style::SetAttribute(Attribute::Bold),
+            style::SetForegroundColor(Color::Green),
+            style::Print("'@<prompt name> [...args]'"),
+            style::SetForegroundColor(Color::Reset),
+            style::SetAttribute(Attribute::Reset),
+            style::Print("\n\n"),
+        )?;
+        queue!(
+            session.stderr,
             style::Print("\n"),
             style::SetAttribute(Attribute::Bold),
             style::Print("Prompt"),
@@ -131,10 +147,10 @@ impl PromptsArgs {
             bundles.sort_by_key(|bundle| &bundle.prompt_get.name);
 
             if i > 0 {
-                queue!(session.output, style::Print("\n"))?;
+                queue!(session.stderr, style::Print("\n"))?;
             }
             queue!(
-                session.output,
+                session.stderr,
                 style::SetAttribute(Attribute::Bold),
                 style::Print(server_name),
                 style::Print(" (MCP):"),
@@ -143,7 +159,7 @@ impl PromptsArgs {
             )?;
             for bundle in bundles {
                 queue!(
-                    session.output,
+                    session.stderr,
                     style::Print("- "),
                     style::Print(&bundle.prompt_get.name),
                     style::Print({
@@ -164,7 +180,7 @@ impl PromptsArgs {
                 if let Some(args) = bundle.prompt_get.arguments.as_ref() {
                     for (i, arg) in args.iter().enumerate() {
                         queue!(
-                            session.output,
+                            session.stderr,
                             style::SetForegroundColor(Color::DarkGrey),
                             style::Print(match arg.required {
                                 Some(true) => format!("{}*", arg.name),
@@ -213,7 +229,7 @@ impl PromptsSubcommand {
                 match e {
                     GetPromptError::AmbiguousPrompt(prompt_name, alt_msg) => {
                         queue!(
-                            session.output,
+                            session.stderr,
                             style::Print("\n"),
                             style::SetForegroundColor(Color::Yellow),
                             style::Print("Prompt "),
@@ -228,7 +244,7 @@ impl PromptsSubcommand {
                     },
                     GetPromptError::PromptNotFound(prompt_name) => {
                         queue!(
-                            session.output,
+                            session.stderr,
                             style::Print("\n"),
                             style::SetForegroundColor(Color::Yellow),
                             style::Print("Prompt "),
@@ -245,7 +261,7 @@ impl PromptsSubcommand {
                     },
                     _ => return Err(ChatError::Custom(e.to_string().into())),
                 }
-                execute!(session.output, style::Print("\n"))?;
+                execute!(session.stderr, style::Print("\n"))?;
                 return Ok(ChatState::PromptUser {
                     skip_printing_tools: true,
                 });
@@ -256,16 +272,14 @@ impl PromptsSubcommand {
             // and abort.
             let to_display = serde_json::json!(err);
             queue!(
-                session.output,
+                session.stderr,
                 style::Print("\n"),
                 style::SetAttribute(Attribute::Bold),
                 style::Print("Error encountered while retrieving prompt:"),
                 style::SetAttribute(Attribute::Reset),
                 style::Print("\n"),
                 style::SetForegroundColor(Color::Red),
-                style::Print(
-                    serde_json::to_string_pretty(&to_display).unwrap_or_else(|_| format!("{:?}", &to_display))
-                ),
+                style::Print(format_mcp_error(&to_display)),
                 style::SetForegroundColor(Color::Reset),
                 style::Print("\n"),
             )?;
@@ -282,7 +296,7 @@ impl PromptsSubcommand {
             });
         }
 
-        execute!(session.output, style::Print("\n"))?;
+        execute!(session.stderr, style::Print("\n"))?;
 
         Ok(ChatState::PromptUser {
             skip_printing_tools: true,

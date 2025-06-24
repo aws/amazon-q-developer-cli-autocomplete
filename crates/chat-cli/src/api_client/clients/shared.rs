@@ -8,7 +8,11 @@ use aws_credential_types::provider::ProvideCredentials;
 use aws_types::SdkConfig;
 use aws_types::sdk_config::StalledStreamProtectionConfig;
 
-use crate::api_client::Endpoint;
+use crate::api_client::credentials::CredentialsChain;
+use crate::api_client::{
+    ApiClientError,
+    Endpoint,
+};
 use crate::aws_common::behavior_version;
 use crate::database::Database;
 use crate::database::settings::Setting;
@@ -54,4 +58,14 @@ async fn base_sdk_config(
 pub async fn bearer_sdk_config(database: &Database, endpoint: &Endpoint) -> SdkConfig {
     let credentials = Credentials::new("xxx", "xxx", None, None, "xxx");
     base_sdk_config(database, endpoint.region().clone(), credentials).await
+}
+
+pub async fn sigv4_sdk_config(database: &Database, endpoint: &Endpoint) -> Result<SdkConfig, ApiClientError> {
+    let credentials_chain = CredentialsChain::new().await;
+
+    if let Err(err) = credentials_chain.provide_credentials().await {
+        return Err(ApiClientError::Credentials(err));
+    };
+
+    Ok(base_sdk_config(database, endpoint.region().clone(), credentials_chain).await)
 }

@@ -3,6 +3,8 @@ use std::process::ExitCode;
 use clap::Args;
 use eyre::Result;
 
+use crate::os::Os;
+
 #[derive(Clone, Debug, Args, PartialEq, Eq)]
 pub struct IssueArgs {
     /// Force issue creation
@@ -13,8 +15,7 @@ pub struct IssueArgs {
 }
 
 impl IssueArgs {
-    #[allow(unreachable_code)]
-    pub async fn execute(&self) -> Result<ExitCode> {
+    pub async fn execute(&self, os: &Os) -> Result<ExitCode> {
         let joined_description = self.description.join(" ").trim().to_owned();
 
         let issue_title = match joined_description.len() {
@@ -31,7 +32,7 @@ impl IssueArgs {
             steps_to_reproduce: None,
             additional_environment: None,
         }
-        .create_url()
+        .create_url(os)
         .await;
 
         Ok(ExitCode::SUCCESS)

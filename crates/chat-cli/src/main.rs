@@ -5,7 +5,7 @@ mod cli;
 mod database;
 mod logging;
 mod mcp_client;
-mod platform;
+mod os;
 mod request;
 mod telemetry;
 mod util;
