@@ -77,12 +77,12 @@ impl PersistSubcommand {
             },
             Self::Load { path } => {
                 // Try the original path first
-                let original_result = ctx.fs.read_to_string(&path).await;
+                let original_result = os.fs.read_to_string(&path).await;
 
                 // If the original path fails and doesn't end with .json, try with .json appended
                 let contents = if original_result.is_err() && !path.ends_with(".json") {
                     let json_path = format!("{}.json", path);
-                    match ctx.fs.read_to_string(&json_path).await {
+                    match os.fs.read_to_string(&json_path).await {
                         Ok(content) => content,
                         Err(_) => {
                             // If both paths fail, return the original error for better user experience
