@@ -78,7 +78,7 @@ impl InputSource {
                         if let Some(helper) = rl.helper_mut() {
                             helper.update_hinter_history(&line);
                         }
-                        
+
                         Ok(Some(line))
                     },
                     Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),

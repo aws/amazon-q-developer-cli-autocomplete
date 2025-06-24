@@ -385,6 +385,12 @@ pub fn rl(
         EventHandler::Simple(Cmd::Insert(1, "\n".to_string())),
     );
 
+    // Add custom keybinding for Ctrl+F to accept hint (like fish shell)
+    rl.bind_sequence(
+        KeyEvent(KeyCode::Char('f'), Modifiers::CTRL),
+        EventHandler::Simple(Cmd::CompleteHint),
+    );
+
     Ok(rl)
 }
 

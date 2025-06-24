@@ -348,10 +348,15 @@ const ROTATING_TIPS: [&str; 16] = [
 
 const GREETING_BREAK_POINT: usize = 80;
 
-const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>  <green!>ctrl + j</green!> new lines  <em>•</em>  <green!>ctrl + s</green!> fuzzy search</black!>"};
+const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>
+<green!>ctrl + j</green!> new lines  <em>•</em>  
+<green!>ctrl + s</green!> fuzzy search  <em>•</em>  
+<green!>ctrl + f</green!> accept completion
+</black!>"};
 const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands
 <green!>ctrl + j</green!> new lines
 <green!>ctrl + s</green!> fuzzy search
+<green!>ctrl + f</green!> accept completion
 </black!>"};
 
 const RESPONSE_TIMEOUT_CONTENT: &str = "Response timed out - message took too long to generate";
