@@ -9,6 +9,7 @@ use amzn_consolas_client::operation::generate_recommendations::GenerateRecommend
 use amzn_consolas_client::operation::list_customizations::ListCustomizationsError;
 use amzn_qdeveloper_streaming_client::operation::send_message::SendMessageError as QDeveloperSendMessageError;
 use amzn_qdeveloper_streaming_client::types::error::ChatResponseStreamError as QDeveloperChatResponseStreamError;
+use aws_credential_types::provider::error::CredentialsError;
 use aws_sdk_ssooidc::error::ProvideErrorMetadata;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 pub use aws_smithy_runtime_api::client::result::SdkError;
@@ -88,6 +89,10 @@ pub enum ApiClientError {
         request_id: Option<String>,
         status_code: Option<u16>,
     },
+
+    // Credential errors
+    #[error("failed to load credentials: {}", .0)]
+    Credentials(CredentialsError),
 }
 
 impl ApiClientError {
@@ -110,6 +115,7 @@ impl ApiClientError {
             ApiClientError::AuthError(_) => None,
             ApiClientError::ModelOverloadedError { status_code, .. } => *status_code,
             ApiClientError::MonthlyLimitReached { status_code } => *status_code,
+            ApiClientError::Credentials(_e) => None,
         }
     }
 }
@@ -134,6 +140,7 @@ impl ReasonCode for ApiClientError {
             ApiClientError::AuthError(_) => "AuthError".to_string(),
             ApiClientError::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
             ApiClientError::MonthlyLimitReached { .. } => "MonthlyLimitReached".to_string(),
+            ApiClientError::Credentials(_) => "CredentialsError".to_string(),
         }
     }
 }
@@ -171,6 +178,7 @@ mod tests {
 
     fn all_errors() -> Vec<ApiClientError> {
         vec![
+            ApiClientError::Credentials(CredentialsError::unhandled("<unhandled>")),
             ApiClientError::GenerateCompletions(SdkError::service_error(
                 GenerateCompletionsError::unhandled("<unhandled>"),
                 response(),

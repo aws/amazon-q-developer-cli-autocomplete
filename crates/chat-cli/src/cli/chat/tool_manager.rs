@@ -77,6 +77,7 @@ use crate::cli::chat::tools::execute::ExecuteCommand;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
 use crate::cli::chat::tools::gh_issue::GhIssue;
+use crate::cli::chat::tools::knowledge::Knowledge;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
 use crate::cli::chat::tools::{
@@ -91,7 +92,7 @@ use crate::mcp_client::{
     Messenger,
     PromptGet,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::TelemetryThread;
 use crate::util::MCP_SERVER_TOOL_DELIMITER;
 use crate::util::directories::home_dir;
@@ -102,12 +103,12 @@ const NAMESPACE_DELIMITER: &str = "___";
 const VALID_TOOL_NAME: &str = "^[a-zA-Z][a-zA-Z0-9_]*$";
 const SPINNER_CHARS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-pub fn workspace_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(ctx.env.current_dir()?.join(".amazonq").join("mcp.json"))
+pub fn workspace_mcp_config_path(os: &Os) -> eyre::Result<PathBuf> {
+    Ok(os.env.current_dir()?.join(".amazonq").join("mcp.json"))
 }
 
-pub fn global_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("mcp.json"))
+pub fn global_mcp_config_path(os: &Os) -> eyre::Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("mcp.json"))
 }
 
 /// Messages used for communication between the tool initialization thread and the loading
@@ -890,6 +891,9 @@ impl ToolManager {
             if !crate::cli::chat::tools::thinking::Thinking::is_enabled(database) {
                 tool_specs.remove("thinking");
             }
+            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(database) {
+                tool_specs.remove("knowledge");
+            }
 
             #[cfg(windows)]
             {
@@ -1043,6 +1047,7 @@ impl ToolManager {
             "use_aws" => Tool::UseAws(serde_json::from_value::<UseAws>(value.args).map_err(map_err)?),
             "report_issue" => Tool::GhIssue(serde_json::from_value::<GhIssue>(value.args).map_err(map_err)?),
             "thinking" => Tool::Thinking(serde_json::from_value::<Thinking>(value.args).map_err(map_err)?),
+            "knowledge" => Tool::Knowledge(serde_json::from_value::<Knowledge>(value.args).map_err(map_err)?),
             // Note that this name is namespaced with server_name{DELIMITER}tool_name
             name => {
                 // Note: tn_map also has tools that underwent no transformation. In otherwords, if

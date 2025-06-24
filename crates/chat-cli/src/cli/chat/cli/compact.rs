@@ -6,7 +6,7 @@ use crate::cli::chat::{
     ChatState,
 };
 use crate::database::Database;
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::TelemetryThread;
 
 #[deny(missing_docs)]
@@ -38,13 +38,13 @@ pub struct CompactArgs {
 impl CompactArgs {
     pub async fn execute(
         self,
-        ctx: &Context,
+        os: &Os,
         database: &mut Database,
         telemetry: &TelemetryThread,
         session: &mut ChatSession,
     ) -> Result<ChatState, ChatError> {
         session
-            .compact_history(ctx, database, telemetry, self.prompt, self.show_summary)
+            .compact_history(os, database, telemetry, self.prompt, self.show_summary)
             .await
     }
 }

@@ -9,7 +9,6 @@ members = [
     "tests/fig-api/fig-api-mock",
     "tests/figterm2",
 ]
-exclude = ["crates/semantic_search_client"]
 
 [workspace.package]
 authors = [

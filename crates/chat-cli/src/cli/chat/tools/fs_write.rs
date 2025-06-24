@@ -42,7 +42,7 @@ use crate::cli::agent::{
     PermissionCandidate,
     PermissionEvalResult,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 static SYNTAX_SET: LazyLock<SyntaxSet> = LazyLock::new(SyntaxSet::load_defaults_newlines);
 static THEME_SET: LazyLock<ThemeSet> = LazyLock::new(ThemeSet::load_defaults);
@@ -75,17 +75,17 @@ pub enum FsWrite {
 }
 
 impl FsWrite {
-    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
-        let cwd = ctx.env.current_dir()?;
+    pub async fn invoke(&self, os: &Os, output: &mut impl Write) -> Result<InvokeOutput> {
+        let cwd = os.env.current_dir()?;
         match self {
             FsWrite::Create { path, .. } => {
                 let file_text = self.canonical_create_command_text();
-                let path = sanitize_path_tool_arg(ctx, path);
+                let path = sanitize_path_tool_arg(os, path);
                 if let Some(parent) = path.parent() {
-                    ctx.fs.create_dir_all(parent).await?;
+                    os.fs.create_dir_all(parent).await?;
                 }
 
-                let invoke_description = if ctx.fs.exists(&path) {
+                let invoke_description = if os.fs.exists(&path) {
                     "Replacing: "
                 } else {
                     "Creating: "
@@ -99,12 +99,12 @@ impl FsWrite {
                     style::Print("\n"),
                 )?;
 
-                write_to_file(ctx, path, file_text).await?;
+                write_to_file(os, path, file_text).await?;
                 Ok(Default::default())
             },
             FsWrite::StrReplace { path, old_str, new_str } => {
-                let path = sanitize_path_tool_arg(ctx, path);
-                let file = ctx.fs.read_to_string(&path).await?;
+                let path = sanitize_path_tool_arg(os, path);
+                let file = os.fs.read_to_string(&path).await?;
                 let matches = file.match_indices(old_str).collect::<Vec<_>>();
                 queue!(
                     output,
@@ -118,7 +118,7 @@ impl FsWrite {
                     0 => Err(eyre!("no occurrences of \"{old_str}\" were found")),
                     1 => {
                         let file = file.replacen(old_str, new_str, 1);
-                        ctx.fs.write(path, file).await?;
+                        os.fs.write(path, file).await?;
                         Ok(Default::default())
                     },
                     x => Err(eyre!("{x} occurrences of old_str were found when only 1 is expected")),
@@ -129,8 +129,8 @@ impl FsWrite {
                 insert_line,
                 new_str,
             } => {
-                let path = sanitize_path_tool_arg(ctx, path);
-                let mut file = ctx.fs.read_to_string(&path).await?;
+                let path = sanitize_path_tool_arg(os, path);
+                let mut file = os.fs.read_to_string(&path).await?;
                 queue!(
                     output,
                     style::Print("Updating: "),
@@ -149,11 +149,11 @@ impl FsWrite {
                     i += line_len;
                 }
                 file.insert_str(i, new_str);
-                write_to_file(ctx, &path, file).await?;
+                write_to_file(os, &path, file).await?;
                 Ok(Default::default())
             },
             FsWrite::Append { path, new_str } => {
-                let path = sanitize_path_tool_arg(ctx, path);
+                let path = sanitize_path_tool_arg(os, path);
 
                 queue!(
                     output,
@@ -164,31 +164,32 @@ impl FsWrite {
                     style::Print("\n"),
                 )?;
 
-                let mut file = ctx.fs.read_to_string(&path).await?;
+                let mut file = os.fs.read_to_string(&path).await?;
                 if !file.ends_with_newline() {
                     file.push('\n');
                 }
                 file.push_str(new_str);
-                write_to_file(ctx, path, file).await?;
+                write_to_file(os, path, file).await?;
                 Ok(Default::default())
             },
         }
     }
 
-    pub fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
-        let cwd = ctx.env.current_dir()?;
-        self.print_relative_path(ctx, output)?;
+    pub fn queue_description(&self, os: &Os, output: &mut impl Write) -> Result<()> {
+        let cwd = os.env.current_dir()?;
+        self.print_relative_path(os, output)?;
         match self {
             FsWrite::Create { path, .. } => {
                 let file_text = self.canonical_create_command_text();
-                let relative_path = format_path(cwd, path);
-                let prev = if ctx.fs.exists(path) {
-                    let file = ctx.fs.read_to_string_sync(path)?;
-                    stylize_output_if_able(ctx, path, &file)
+                let path = sanitize_path_tool_arg(os, path);
+                let relative_path = format_path(cwd, &path);
+                let prev = if os.fs.exists(&path) {
+                    let file = os.fs.read_to_string_sync(&path)?;
+                    stylize_output_if_able(os, &path, &file)
                 } else {
                     Default::default()
                 };
-                let new = stylize_output_if_able(ctx, &relative_path, &file_text);
+                let new = stylize_output_if_able(os, &relative_path, &file_text);
                 print_diff(output, &prev, &new, 1)?;
                 Ok(())
             },
@@ -197,8 +198,9 @@ impl FsWrite {
                 insert_line,
                 new_str,
             } => {
-                let relative_path = format_path(cwd, path);
-                let file = ctx.fs.read_to_string_sync(&relative_path)?;
+                let path = sanitize_path_tool_arg(os, path);
+                let relative_path = format_path(cwd, &path);
+                let file = os.fs.read_to_string_sync(&path)?;
 
                 // Diff the old with the new by adding extra context around the line being inserted
                 // at.
@@ -210,35 +212,37 @@ impl FsWrite {
                 let old = [prefix, insert_line_content, suffix].join("");
                 let new = [prefix, insert_line_content, new_str, suffix].join("");
 
-                let old = stylize_output_if_able(ctx, &relative_path, &old);
-                let new = stylize_output_if_able(ctx, &relative_path, &new);
+                let old = stylize_output_if_able(os, &relative_path, &old);
+                let new = stylize_output_if_able(os, &relative_path, &new);
                 print_diff(output, &old, &new, start_line)?;
                 Ok(())
             },
             FsWrite::StrReplace { path, old_str, new_str } => {
-                let relative_path = format_path(cwd, path);
-                let file = ctx.fs.read_to_string_sync(&relative_path)?;
+                let path = sanitize_path_tool_arg(os, path);
+                let relative_path = format_path(cwd, &path);
+                let file = os.fs.read_to_string_sync(&path)?;
                 let (start_line, _) = match line_number_at(&file, old_str) {
                     Some((start_line, end_line)) => (start_line, end_line),
                     _ => (0, 0),
                 };
-                let old_str = stylize_output_if_able(ctx, &relative_path, old_str);
-                let new_str = stylize_output_if_able(ctx, &relative_path, new_str);
+                let old_str = stylize_output_if_able(os, &relative_path, old_str);
+                let new_str = stylize_output_if_able(os, &relative_path, new_str);
                 print_diff(output, &old_str, &new_str, start_line)?;
 
                 Ok(())
             },
             FsWrite::Append { path, new_str } => {
-                let relative_path = format_path(cwd, path);
-                let start_line = ctx.fs.read_to_string_sync(&relative_path)?.lines().count() + 1;
-                let file = stylize_output_if_able(ctx, &relative_path, new_str);
+                let path = sanitize_path_tool_arg(os, path);
+                let relative_path = format_path(cwd, &path);
+                let start_line = os.fs.read_to_string_sync(&path)?.lines().count() + 1;
+                let file = stylize_output_if_able(os, &relative_path, new_str);
                 print_diff(output, &Default::default(), &file, start_line)?;
                 Ok(())
             },
         }
     }
 
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         match self {
             FsWrite::Create { path, .. } => {
                 if path.is_empty() {
@@ -246,7 +250,7 @@ impl FsWrite {
                 };
             },
             FsWrite::StrReplace { path, .. } | FsWrite::Insert { path, .. } => {
-                let path = sanitize_path_tool_arg(ctx, path);
+                let path = sanitize_path_tool_arg(os, path);
                 if !path.exists() {
                     bail!("The provided path must exist in order to replace or insert contents into it")
                 }
@@ -264,8 +268,8 @@ impl FsWrite {
         Ok(())
     }
 
-    fn print_relative_path(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
-        let cwd = ctx.env.current_dir()?;
+    fn print_relative_path(&self, os: &Os, output: &mut impl Write) -> Result<()> {
+        let cwd = os.env.current_dir()?;
         let path = match self {
             FsWrite::Create { path, .. } => path,
             FsWrite::StrReplace { path, .. } => path,
@@ -273,7 +277,7 @@ impl FsWrite {
             FsWrite::Append { path, .. } => path,
         };
         // Sanitize the path to handle tilde expansion
-        let path = sanitize_path_tool_arg(ctx, path);
+        let path = sanitize_path_tool_arg(os, path);
         let relative_path = format_path(cwd, &path);
         queue!(
             output,
@@ -389,7 +393,7 @@ impl PermissionCandidate for FsWrite {
 }
 
 /// Writes `content` to `path`, adding a newline if necessary.
-async fn write_to_file(ctx: &Context, path: impl AsRef<Path>, mut content: String) -> Result<()> {
+async fn write_to_file(os: &Os, path: impl AsRef<Path>, mut content: String) -> Result<()> {
     let path_ref = path.as_ref();
 
     // Log the path being written to
@@ -398,7 +402,7 @@ async fn write_to_file(ctx: &Context, path: impl AsRef<Path>, mut content: Strin
     if !content.ends_with_newline() {
         content.push('\n');
     }
-    ctx.fs.write(path.as_ref(), content).await?;
+    os.fs.write(path.as_ref(), content).await?;
     Ok(())
 }
 
@@ -589,8 +593,8 @@ fn terminal_width_required_for_line_count(line_count: usize) -> usize {
     line_count.to_string().chars().count()
 }
 
-fn stylize_output_if_able(ctx: &Context, path: impl AsRef<Path>, file_text: &str) -> StylizedFile {
-    if supports_truecolor(ctx) {
+fn stylize_output_if_able(os: &Os, path: impl AsRef<Path>, file_text: &str) -> StylizedFile {
+    if supports_truecolor(os) {
         match stylized_file(path, file_text) {
             Ok(s) => return s,
             Err(err) => {
@@ -739,7 +743,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_create() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         let file_text = "Hello, world!";
@@ -750,12 +754,12 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
         assert_eq!(
-            ctx.fs.read_to_string("/my-file").await.unwrap(),
+            os.fs.read_to_string("/my-file").await.unwrap(),
             format!("{}\n", file_text)
         );
 
@@ -767,13 +771,13 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
         // File should end with a newline
         assert_eq!(
-            ctx.fs.read_to_string("/my-file").await.unwrap(),
+            os.fs.read_to_string("/my-file").await.unwrap(),
             format!("{}\n", file_text)
         );
 
@@ -785,19 +789,19 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
         assert_eq!(
-            ctx.fs.read_to_string("/my-file").await.unwrap(),
+            os.fs.read_to_string("/my-file").await.unwrap(),
             format!("{}\n", file_text)
         );
     }
 
     #[tokio::test]
     async fn test_fs_write_tool_str_replace() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // No instances found
@@ -810,7 +814,7 @@ mod tests {
         assert!(
             serde_json::from_value::<FsWrite>(v)
                 .unwrap()
-                .invoke(&ctx, &mut stdout)
+                .invoke(&os, &mut stdout)
                 .await
                 .is_err()
         );
@@ -825,7 +829,7 @@ mod tests {
         assert!(
             serde_json::from_value::<FsWrite>(v)
                 .unwrap()
-                .invoke(&ctx, &mut stdout)
+                .invoke(&os, &mut stdout)
                 .await
                 .is_err()
         );
@@ -839,11 +843,11 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
         assert_eq!(
-            ctx.fs
+            os.fs
                 .read_to_string(TEST_FILE_PATH)
                 .await
                 .unwrap()
@@ -857,7 +861,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_insert_at_beginning() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         let new_str = "1: New first line!\n";
@@ -869,10 +873,10 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
+        let actual = os.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
         assert_eq!(
             format!("{}\n", actual.lines().next().unwrap()),
             new_str,
@@ -888,7 +892,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_insert_after_first_line() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         let new_str = "2: New second line!\n";
@@ -901,10 +905,10 @@ mod tests {
 
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
+        let actual = os.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
         assert_eq!(
             format!("{}\n", actual.lines().nth(1).unwrap()),
             new_str,
@@ -920,12 +924,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_insert_when_no_newlines_in_file() {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         let test_file_path = "/file.txt";
         let test_file_contents = "hello there";
-        ctx.fs.write(test_file_path, test_file_contents).await.unwrap();
+        os.fs.write(test_file_path, test_file_contents).await.unwrap();
 
         let new_str = "test";
 
@@ -938,10 +942,10 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs.read_to_string(test_file_path).await.unwrap();
+        let actual = os.fs.read_to_string(test_file_path).await.unwrap();
         assert_eq!(actual, format!("{}{}\n", test_file_contents, new_str));
 
         // Then, test prepending
@@ -953,16 +957,16 @@ mod tests {
         });
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        let actual = ctx.fs.read_to_string(test_file_path).await.unwrap();
+        let actual = os.fs.read_to_string(test_file_path).await.unwrap();
         assert_eq!(actual, format!("{}{}{}\n", new_str, test_file_contents, new_str));
     }
 
     #[tokio::test]
     async fn test_fs_write_tool_append() {
-        let ctx = setup_test_directory().await;
+        let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // Test appending to existing file
@@ -975,11 +979,11 @@ mod tests {
 
         serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await
             .unwrap();
 
-        let actual = ctx.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
+        let actual = os.fs.read_to_string(TEST_FILE_PATH).await.unwrap();
         assert_eq!(
             actual,
             format!("{}{}\n", TEST_FILE_CONTENTS, content_to_append),
@@ -997,7 +1001,7 @@ mod tests {
 
         let result = serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await;
 
         assert!(result.is_err(), "Appending to non-existent file should fail");
@@ -1028,19 +1032,19 @@ mod tests {
     #[tokio::test]
     async fn test_fs_write_with_tilde_paths() {
         // Create a test context
-        let ctx = Context::new();
+        let os = Os::new();
         let mut stdout = std::io::stdout();
 
         // Get the home directory from the context
-        let home_dir = ctx.env.home().unwrap_or_default();
+        let home_dir = os.env.home().unwrap_or_default();
         println!("Test home directory: {:?}", home_dir);
 
         // Create a file directly in the home directory first to ensure it exists
-        let home_path = ctx.fs.chroot_path(&home_dir);
+        let home_path = os.fs.chroot_path(&home_dir);
         println!("Chrooted home path: {:?}", home_path);
 
         // Ensure the home directory exists
-        ctx.fs.create_dir_all(&home_path).await.unwrap();
+        os.fs.create_dir_all(&home_path).await.unwrap();
 
         let v = serde_json::json!({
             "path": "~/file.txt",
@@ -1050,7 +1054,7 @@ mod tests {
 
         let result = serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await;
 
         match &result {
@@ -1064,7 +1068,7 @@ mod tests {
         let file_path = home_path.join("file.txt");
         println!("Checking file at: {:?}", file_path);
 
-        let content_result = ctx.fs.read_to_string(&file_path).await;
+        let content_result = os.fs.read_to_string(&file_path).await;
         match &content_result {
             Ok(content) => println!("Read content: {:?}", content),
             Err(e) => println!("Failed to read content: {:?}", e),
@@ -1075,7 +1079,7 @@ mod tests {
 
         // Test with "~/nested/path/file.txt" to ensure deep paths work
         let nested_dir = home_path.join("nested").join("path");
-        ctx.fs.create_dir_all(&nested_dir).await.unwrap();
+        os.fs.create_dir_all(&nested_dir).await.unwrap();
 
         let v = serde_json::json!({
             "path": "~/nested/path/file.txt",
@@ -1085,14 +1089,14 @@ mod tests {
 
         let result = serde_json::from_value::<FsWrite>(v)
             .unwrap()
-            .invoke(&ctx, &mut stdout)
+            .invoke(&os, &mut stdout)
             .await;
 
         assert!(result.is_ok(), "Writing to ~/nested/path/file.txt should succeed");
 
         // Verify nested path content
         let nested_file_path = nested_dir.join("file.txt");
-        let nested_content = ctx.fs.read_to_string(&nested_file_path).await.unwrap();
+        let nested_content = os.fs.read_to_string(&nested_file_path).await.unwrap();
         assert_eq!(nested_content, "content in nested path\n");
     }
 }

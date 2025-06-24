@@ -21,7 +21,8 @@ use crate::cli::chat::cli::hooks::{
     HookExecutor,
     HookTrigger,
 };
-use crate::platform::Context;
+use crate::os::Os;
+use crate::util::directories;
 
 /// Configuration for context files, containing paths to include in the context.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -122,7 +123,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result indicating success or an error
-    pub async fn add_paths(&mut self, ctx: &Context, paths: Vec<String>, force: bool) -> Result<()> {
+    pub async fn add_paths(&mut self, os: &Os, paths: Vec<String>, force: bool) -> Result<()> {
         // Validate paths exist before adding them
         if !force {
             let mut context_files = Vec::new();
@@ -131,7 +132,7 @@ impl ContextManager {
             for path in &paths {
                 // We're using a temporary context_files vector just for validation
                 // Pass is_validation=true to ensure we error if glob patterns don't match any files
-                match process_path(ctx, path, &mut context_files, true).await {
+                match process_path(os, path, &mut context_files, true).await {
                     Ok(_) => {}, // Path is valid
                     Err(e) => return Err(eyre!("Invalid path '{}': {}. Use --force to add anyway.", path, e)),
                 }
@@ -184,10 +185,10 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result containing a vector of (filename, content) pairs or an error
-    pub async fn get_context_files(&self, ctx: &Context) -> Result<Vec<(String, String)>> {
+    pub async fn get_context_files(&self, os: &Os) -> Result<Vec<(String, String)>> {
         let mut context_files = Vec::new();
 
-        self.collect_context_files(ctx, &self.profile_config.paths, &mut context_files)
+        self.collect_context_files(os, &self.profile_config.paths, &mut context_files)
             .await?;
 
         context_files.sort_by(|a, b| a.0.cmp(&b.0));
@@ -196,9 +197,9 @@ impl ContextManager {
         Ok(context_files)
     }
 
-    pub async fn get_context_files_by_path(&self, ctx: &Context, path: &str) -> Result<Vec<(String, String)>> {
+    pub async fn get_context_files_by_path(&self, os: &Os, path: &str) -> Result<Vec<(String, String)>> {
         let mut context_files = Vec::new();
-        process_path(ctx, path, &mut context_files, true).await?;
+        process_path(os, path, &mut context_files, true).await?;
         Ok(context_files)
     }
 
@@ -206,9 +207,9 @@ impl ContextManager {
     /// Returns (files_to_use, dropped_files)
     pub async fn collect_context_files_with_limit(
         &self,
-        ctx: &Context,
+        os: &Os,
     ) -> Result<(Vec<(String, String)>, Vec<(String, String)>)> {
-        let mut files = self.get_context_files(ctx).await?;
+        let mut files = self.get_context_files(os).await?;
 
         let dropped_files = drop_matched_context_files(&mut files, self.max_context_files_size).unwrap_or_default();
 
@@ -220,13 +221,13 @@ impl ContextManager {
 
     async fn collect_context_files(
         &self,
-        ctx: &Context,
+        os: &Os,
         paths: &[String],
         context_files: &mut Vec<(String, String)>,
     ) -> Result<()> {
         for path in paths {
             // Use is_validation=false to handle non-matching globs gracefully
-            process_path(ctx, path, context_files, false).await?;
+            process_path(os, path, context_files, false).await?;
         }
         Ok(())
     }
@@ -303,14 +304,14 @@ impl ContextManager {
 /// # Returns
 /// A Result indicating success or an error
 async fn process_path(
-    ctx: &Context,
+    os: &Os,
     path: &str,
     context_files: &mut Vec<(String, String)>,
     is_validation: bool,
 ) -> Result<()> {
     // Expand ~ to home directory
     let expanded_path = if path.starts_with('~') {
-        if let Some(home_dir) = ctx.env.home() {
+        if let Some(home_dir) = os.env.home() {
             home_dir.join(&path[2..]).to_string_lossy().to_string()
         } else {
             return Err(eyre!("Could not determine home directory"));
@@ -323,15 +324,11 @@ async fn process_path(
     let full_path = if expanded_path.starts_with('/') {
         expanded_path
     } else {
-        ctx.env
-            .current_dir()?
-            .join(&expanded_path)
-            .to_string_lossy()
-            .to_string()
+        os.env.current_dir()?.join(&expanded_path).to_string_lossy().to_string()
     };
 
     // Required in chroot testing scenarios so that we can use `Path::exists`.
-    let full_path = ctx.fs.chroot_path_str(full_path);
+    let full_path = os.fs.chroot_path_str(full_path);
 
     // Check if the path contains glob patterns
     if full_path.contains('*') || full_path.contains('?') || full_path.contains('[') {
@@ -344,7 +341,7 @@ async fn process_path(
                     match entry {
                         Ok(path) => {
                             if path.is_file() {
-                                add_file_to_context(ctx, &path, context_files).await?;
+                                add_file_to_context(os, &path, context_files).await?;
                                 found_any = true;
                             }
                         },
@@ -366,14 +363,14 @@ async fn process_path(
         let path = Path::new(&full_path);
         if path.exists() {
             if path.is_file() {
-                add_file_to_context(ctx, path, context_files).await?;
+                add_file_to_context(os, path, context_files).await?;
             } else if path.is_dir() {
                 // For directories, add all files in the directory (non-recursive)
-                let mut read_dir = ctx.fs.read_dir(path).await?;
+                let mut read_dir = os.fs.read_dir(path).await?;
                 while let Some(entry) = read_dir.next_entry().await? {
                     let path = entry.path();
                     if path.is_file() {
-                        add_file_to_context(ctx, &path, context_files).await?;
+                        add_file_to_context(os, &path, context_files).await?;
                     }
                 }
             }
@@ -398,9 +395,9 @@ async fn process_path(
 ///
 /// # Returns
 /// A Result indicating success or an error
-async fn add_file_to_context(ctx: &Context, path: &Path, context_files: &mut Vec<(String, String)>) -> Result<()> {
+async fn add_file_to_context(os: &Os, path: &Path, context_files: &mut Vec<(String, String)>) -> Result<()> {
     let filename = path.to_string_lossy().to_string();
-    let content = ctx.fs.read_to_string(path).await?;
+    let content = os.fs.read_to_string(path).await?;
     context_files.push((filename, content));
     Ok(())
 }
@@ -422,7 +419,7 @@ mod tests {
             .await?;
         manager.add_paths(&ctx, vec!["test/*.md".to_string()], false).await?;
 
-        let (used, dropped) = manager.collect_context_files_with_limit(&ctx).await.unwrap();
+        let (used, dropped) = manager.collect_context_files_with_limit(&os).await.unwrap();
 
         assert!(used.len() + dropped.len() == 2);
         assert!(used.len() == 1);
@@ -432,21 +429,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_ops() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(None).expect("Failed to create test context manager");
 
         // Create some test files for matching.
-        ctx.fs.create_dir_all("test").await?;
-        ctx.fs.write("test/p1.md", "p1").await?;
-        ctx.fs.write("test/p2.md", "p2").await?;
+        os.fs.create_dir_all("test").await?;
+        os.fs.write("test/p1.md", "p1").await?;
+        os.fs.write("test/p2.md", "p2").await?;
 
         assert!(
-            manager.get_context_files(&ctx).await?.is_empty(),
+            manager.get_context_files(&os).await?.is_empty(),
             "no files should be returned for an empty profile when force is false"
         );
 
         manager.add_paths(&ctx, vec!["test/*.md".to_string()], false).await?;
-        let files = manager.get_context_files(&ctx).await?;
+        let files = manager.get_context_files(&os).await?;
         assert!(files[0].0.ends_with("p1.md"));
         assert_eq!(files[0].1, "p1");
         assert!(files[1].0.ends_with("p2.md"));
@@ -454,7 +451,7 @@ mod tests {
 
         assert!(
             manager
-                .add_paths(&ctx, vec!["test/*.txt".to_string()], false)
+                .add_paths(&os, vec!["test/*.txt".to_string()], false, false)
                 .await
                 .is_err(),
             "adding a glob with no matching and without force should fail"

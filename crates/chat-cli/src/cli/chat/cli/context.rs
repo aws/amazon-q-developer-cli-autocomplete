@@ -18,7 +18,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
@@ -56,7 +56,7 @@ pub enum ContextSubcommand {
 }
 
 impl ContextSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             execute!(
                 session.stderr,
@@ -91,7 +91,7 @@ impl ContextSubcommand {
                 } else {
                     for path in &context_manager.profile_config.paths {
                         execute!(session.stderr, style::Print(format!("    {} ", path)))?;
-                        if let Ok(context_files) = context_manager.get_context_files_by_path(ctx, path).await {
+                        if let Ok(context_files) = context_manager.get_context_files_by_path(os, path).await {
                             execute!(
                                 session.stderr,
                                 style::SetForegroundColor(Color::Green),
@@ -225,7 +225,7 @@ impl ContextSubcommand {
                     }
                 }
             },
-            Self::Add { force, paths } => match context_manager.add_paths(ctx, paths.clone(), force).await {
+            Self::Add { force, paths } => match context_manager.add_paths(os, paths.clone(), force).await {
                 Ok(_) => {
                     execute!(
                         session.stderr,

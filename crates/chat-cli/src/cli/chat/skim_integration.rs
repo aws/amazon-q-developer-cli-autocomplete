@@ -24,7 +24,7 @@ use skim::prelude::*;
 use tempfile::NamedTempFile;
 
 use super::context::ContextManager;
-use crate::platform::Context;
+use crate::os::Os;
 
 pub struct SkimCommandSelector {
     context_manager: Arc<ContextManager>,
@@ -42,15 +42,9 @@ impl SkimCommandSelector {
 }
 
 impl ConditionalEventHandler for SkimCommandSelector {
-    fn handle(
-        &self,
-        _evt: &rustyline::Event,
-        _n: RepeatCount,
-        _positive: bool,
-        _ctx: &EventContext<'_>,
-    ) -> Option<Cmd> {
+    fn handle(&self, _evt: &rustyline::Event, _n: RepeatCount, _positive: bool, _os: &EventContext<'_>) -> Option<Cmd> {
         // TODO: Remove this line... I hate traits
-        let context = Context::new();
+        let context = Os::new();
 
         // Launch skim command selector with the context manager if available
         match select_command(&context, self.context_manager.as_ref(), &self.tool_names) {
@@ -215,7 +209,7 @@ pub fn select_context_paths_with_skim(context_manager: &ContextManager) -> Resul
 }
 
 /// Launch the command selector and handle the selected command
-pub fn select_command(_ctx: &Context, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
+pub fn select_command(_os: &Os, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
     let commands = get_available_commands();
 
     match launch_skim_selector(&commands, "Select command: ", false)? {

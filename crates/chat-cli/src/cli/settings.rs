@@ -17,7 +17,7 @@ use serde_json::json;
 use super::OutputFormat;
 use crate::database::Database;
 use crate::database::settings::Setting;
-use crate::platform::Context;
+use crate::os::Os;
 use crate::util::directories;
 
 #[derive(Clone, Debug, Subcommand, PartialEq, Eq)]
@@ -55,11 +55,11 @@ pub struct SettingsArgs {
 }
 
 impl SettingsArgs {
-    pub async fn execute(&self, ctx: &Context, database: &mut Database) -> Result<ExitCode> {
+    pub async fn execute(&self, os: &Os, database: &mut Database) -> Result<ExitCode> {
         match self.cmd {
             Some(SettingsSubcommands::Open) => {
                 let file = directories::settings_path().context("Could not get settings path")?;
-                if let Ok(editor) = ctx.env.get("EDITOR") {
+                if let Ok(editor) = os.env.get("EDITOR") {
                     tokio::process::Command::new(editor).arg(file).spawn()?.wait().await?;
                     Ok(ExitCode::SUCCESS)
                 } else {

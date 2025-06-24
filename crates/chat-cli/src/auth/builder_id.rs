@@ -518,7 +518,9 @@ pub async fn poll_create_token(
 }
 
 pub async fn is_logged_in(database: &mut Database) -> bool {
-    matches!(BuilderIdToken::load(database).await, Ok(Some(_)))
+    // Check for BuilderId if not using Sigv4
+    std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty())
+        || matches!(BuilderIdToken::load(database).await, Ok(Some(_)))
 }
 
 pub async fn logout(database: &mut Database) -> Result<(), AuthError> {

@@ -21,7 +21,7 @@ use spinners::{
 };
 
 use super::OutputFormat;
-use crate::platform::diagnostics::Diagnostics;
+use crate::os::diagnostics::Diagnostics;
 
 #[derive(Clone, Debug, Args, PartialEq, Eq)]
 pub struct DiagnosticArgs {

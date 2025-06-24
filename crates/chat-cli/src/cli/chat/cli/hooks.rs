@@ -47,6 +47,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
+use crate::os::Os;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_MAX_OUTPUT_SIZE: usize = 1024 * 10;
@@ -403,9 +404,9 @@ pub struct HooksArgs {
 }
 
 impl HooksArgs {
-    pub async fn execute(self, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         if let Some(subcommand) = self.subcommand {
-            return subcommand.execute(session).await;
+            return subcommand.execute(os, session).await;
         }
 
         let Some(context_manager) = &mut session.conversation.context_manager else {
@@ -488,7 +489,7 @@ pub enum HooksSubcommand {
 }
 
 impl HooksSubcommand {
-    pub async fn execute(self, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             return Ok(ChatState::PromptUser {
                 skip_printing_tools: true,
@@ -503,7 +504,7 @@ impl HooksSubcommand {
                     HookTrigger::PerPrompt
                 };
 
-                match context_manager.add_hook(name.clone(), Hook::new_inline_hook(trigger, command)) {
+                match context_manager.add_hook(os, name.clone(), Hook::new_inline_hook(trigger, command)) {
                     Ok(_) => {
                         execute!(
                             session.stderr,
@@ -523,7 +524,7 @@ impl HooksSubcommand {
                 }
             },
             Self::Remove { name } => {
-                let result = context_manager.remove_hook(&name);
+                let result = context_manager.remove_hook(os, &name);
                 match result {
                     Ok(_) => {
                         execute!(
@@ -544,7 +545,7 @@ impl HooksSubcommand {
                 }
             },
             Self::Enable { name } => {
-                let result = context_manager.set_hook_disabled(&name, false);
+                let result = context_manager.set_hook_disabled(os, &name, false);
                 match result {
                     Ok(_) => {
                         execute!(
@@ -565,7 +566,7 @@ impl HooksSubcommand {
                 }
             },
             Self::Disable { name } => {
-                let result = context_manager.set_hook_disabled(&name, true);
+                let result = context_manager.set_hook_disabled(os, &name, true);
                 match result {
                     Ok(_) => {
                         execute!(
@@ -586,7 +587,7 @@ impl HooksSubcommand {
                 }
             },
             Self::EnableAll => {
-                context_manager.set_all_hooks_disabled(false);
+                context_manager.set_all_hooks_disabled(os, false);
                 execute!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
@@ -595,7 +596,7 @@ impl HooksSubcommand {
                 )?;
             },
             Self::DisableAll => {
-                context_manager.set_all_hooks_disabled(true);
+                context_manager.set_all_hooks_disabled(os, true);
                 execute!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
@@ -696,13 +697,14 @@ mod tests {
     async fn test_add_hook() -> Result<()> {
         let mut manager = create_test_context_manager(None).unwrap();
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let os = Os::new();
 
         // Test adding hook to profile config
-        manager.add_hook("test_hook".to_string(), hook.clone())?;
+        manager.add_hook(&os, "test_hook".to_string(), hook.clone())?;
         assert!(manager.profile_config.hooks.contains_key("test_hook"));
 
         // Test adding duplicate hook name
-        assert!(manager.add_hook("test_hook".to_string(), hook).is_err());
+        assert!(manager.add_hook(&os, "test_hook".to_string(), hook).is_err());
 
         Ok(())
     }
@@ -711,13 +713,14 @@ mod tests {
     async fn test_remove_hook() -> Result<()> {
         let mut manager = create_test_context_manager(None).unwrap();
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let os = Os::new();
 
         manager
-            .add_hook("test_hook".to_string(), hook)
+            .add_hook(&os, "test_hook".to_string(), hook)
             .expect("Hook addition failed");
 
         // Test removing existing hook
-        manager.remove_hook("test_hook").expect("Hook removal failed");
+        manager.remove_hook(&os, "test_hook").expect("Hook removal failed");
         assert!(!manager.profile_config.hooks.contains_key("test_hook"));
 
         // Test removing non-existent hook
@@ -730,19 +733,20 @@ mod tests {
     async fn test_set_hook_disabled() -> Result<()> {
         let mut manager = create_test_context_manager(None).unwrap();
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let os = Os::new();
 
-        manager.add_hook("test_hook".to_string(), hook).unwrap();
+        manager.add_hook(&os, "test_hook".to_string(), hook).unwrap();
 
         // Test disabling hook
-        manager.set_hook_disabled("test_hook", true).unwrap();
+        manager.set_hook_disabled(&os, "test_hook", true).unwrap();
         assert!(manager.profile_config.hooks.get("test_hook").unwrap().disabled);
 
         // Test enabling hook
-        manager.set_hook_disabled("test_hook", false).unwrap();
+        manager.set_hook_disabled(&os, "test_hook", false).unwrap();
         assert!(!manager.profile_config.hooks.get("test_hook").unwrap().disabled);
 
         // Test with non-existent hook
-        assert!(manager.set_hook_disabled("nonexistent", true).is_err());
+        assert!(manager.set_hook_disabled(&os, "nonexistent", true).is_err());
 
         Ok(())
     }
@@ -752,20 +756,21 @@ mod tests {
         let mut manager = create_test_context_manager(None).unwrap();
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let os = Os::new();
 
         manager
-            .add_hook("hook1".to_string(), hook1)
+            .add_hook(&os, "hook1".to_string(), hook1)
             .expect("Hook addition failed");
         manager
-            .add_hook("hook2".to_string(), hook2)
+            .add_hook(&os, "hook2".to_string(), hook2)
             .expect("Hook addition failed");
 
         // Test disabling all hooks
-        manager.set_all_hooks_disabled(true);
+        manager.set_all_hooks_disabled(&os, true);
         assert!(manager.profile_config.hooks.values().all(|h| h.disabled));
 
         // Test enabling all hooks
-        manager.set_all_hooks_disabled(false);
+        manager.set_all_hooks_disabled(&os, false);
         assert!(manager.profile_config.hooks.values().all(|h| !h.disabled));
 
         Ok(())
@@ -776,9 +781,10 @@ mod tests {
         let mut manager = create_test_context_manager(None).unwrap();
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
+        let os = Os::new();
 
-        manager.add_hook("hook1".to_string(), hook1).unwrap();
-        manager.add_hook("hook2".to_string(), hook2).unwrap();
+        manager.add_hook(&os, "hook1".to_string(), hook1).unwrap();
+        manager.add_hook(&os, "hook2".to_string(), hook2).unwrap();
 
         // Run the hooks
         let results = manager.run_hooks(&mut vec![]).await.unwrap();

@@ -3,7 +3,7 @@ use eyre::Result;
 use crate::cli::agent::Agent;
 use crate::cli::chat::consts::CONTEXT_FILES_MAX_SIZE;
 use crate::cli::chat::context::ContextManager;
-use crate::platform::Context;
+use crate::os::Os;
 
 pub const TEST_FILE_CONTENTS: &str = "\
 1: Hello world!
@@ -32,14 +32,14 @@ pub fn create_test_context_manager(context_file_size: Option<usize>) -> Result<C
 /// /aaaa2/
 ///     .hidden
 /// ```
-pub async fn setup_test_directory() -> Context {
-    let ctx = Context::new();
-    ctx.fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
-    ctx.fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
-    ctx.fs.create_dir_all("/aaaa2").await.unwrap();
-    ctx.fs
+pub async fn setup_test_directory() -> Os {
+    let os = Os::new();
+    os.fs.write(TEST_FILE_PATH, TEST_FILE_CONTENTS).await.unwrap();
+    os.fs.create_dir_all("/aaaa1/bbbb1/cccc1").await.unwrap();
+    os.fs.create_dir_all("/aaaa2").await.unwrap();
+    os.fs
         .write(TEST_HIDDEN_FILE_PATH, "this is a hidden file")
         .await
         .unwrap();
-    ctx
+    os
 }

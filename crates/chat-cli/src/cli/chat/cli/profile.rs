@@ -11,7 +11,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::util::directories::chat_global_persona_path;
 
 #[deny(missing_docs)]
@@ -39,7 +39,7 @@ pub enum ProfileSubcommand {
 }
 
 impl ProfileSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let agents = &session.conversation.agents;
 
         macro_rules! _print_err {

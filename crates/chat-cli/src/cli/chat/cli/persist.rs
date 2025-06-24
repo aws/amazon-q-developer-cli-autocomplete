@@ -11,7 +11,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
@@ -27,7 +27,7 @@ pub enum PersistSubcommand {
 }
 
 impl PersistSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         macro_rules! tri {
             ($v:expr, $name:expr, $path:expr) => {
                 match $v {
@@ -51,7 +51,7 @@ impl PersistSubcommand {
         match self {
             Self::Save { path, force } => {
                 let contents = tri!(serde_json::to_string_pretty(&session.conversation), "export to", &path);
-                if ctx.fs.exists(&path) && !force {
+                if os.fs.exists(&path) && !force {
                     execute!(
                         session.stderr,
                         style::SetForegroundColor(Color::Red),
@@ -65,7 +65,7 @@ impl PersistSubcommand {
                         skip_printing_tools: true,
                     });
                 }
-                tri!(ctx.fs.write(&path, contents).await, "export to", &path);
+                tri!(os.fs.write(&path, contents).await, "export to", &path);
 
                 execute!(
                     session.stderr,

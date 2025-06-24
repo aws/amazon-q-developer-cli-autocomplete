@@ -3,10 +3,15 @@ pub mod execute;
 pub mod fs_read;
 pub mod fs_write;
 pub mod gh_issue;
+pub mod knowledge;
 pub mod thinking;
 pub mod use_aws;
 
 use std::borrow::Borrow;
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use std::io::Write;
 use std::path::{
     Path,
@@ -19,6 +24,7 @@ use eyre::Result;
 use fs_read::FsRead;
 use fs_write::FsWrite;
 use gh_issue::GhIssue;
+use knowledge::Knowledge;
 use serde::{
     Deserialize,
     Serialize,
@@ -32,7 +38,7 @@ use crate::cli::agent::{
     Agent,
     PermissionEvalResult,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 pub const DEFAULT_APPROVE: [&str; 1] = ["fs_read"];
 
@@ -46,6 +52,7 @@ pub enum Tool {
     UseAws(UseAws),
     Custom(CustomTool),
     GhIssue(GhIssue),
+    Knowledge(Knowledge),
     Thinking(Thinking),
 }
 
@@ -62,6 +69,7 @@ impl Tool {
             Tool::UseAws(_) => "use_aws",
             Tool::Custom(custom_tool) => &custom_tool.name,
             Tool::GhIssue(_) => "gh_issue",
+            Tool::Knowledge(_) => "knowledge",
             Tool::Thinking(_) => "thinking (prerelease)",
         }
         .to_owned()
@@ -81,41 +89,44 @@ impl Tool {
     }
 
     /// Invokes the tool asynchronously
-    pub async fn invoke(&self, ctx: &Context, stdout: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, stdout: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.invoke(ctx, stdout).await,
-            Tool::FsWrite(fs_write) => fs_write.invoke(ctx, stdout).await,
+            Tool::FsRead(fs_read) => fs_read.invoke(os, stdout).await,
+            Tool::FsWrite(fs_write) => fs_write.invoke(os, stdout).await,
             Tool::ExecuteCommand(execute_command) => execute_command.invoke(stdout).await,
-            Tool::UseAws(use_aws) => use_aws.invoke(ctx, stdout).await,
-            Tool::Custom(custom_tool) => custom_tool.invoke(ctx, stdout).await,
-            Tool::GhIssue(gh_issue) => gh_issue.invoke(ctx, stdout).await,
+            Tool::UseAws(use_aws) => use_aws.invoke(os, stdout).await,
+            Tool::Custom(custom_tool) => custom_tool.invoke(os, stdout).await,
+            Tool::GhIssue(gh_issue) => gh_issue.invoke(os, stdout).await,
+            Tool::Knowledge(knowledge) => knowledge.invoke(os, stdout).await,
             Tool::Thinking(think) => think.invoke(stdout).await,
         }
     }
 
     /// Queues up a tool's intention in a human readable format
-    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, os: &Os, output: &mut impl Write) -> Result<()> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.queue_description(ctx, output).await,
-            Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, output),
+            Tool::FsRead(fs_read) => fs_read.queue_description(os, output).await,
+            Tool::FsWrite(fs_write) => fs_write.queue_description(os, output),
             Tool::ExecuteCommand(execute_command) => execute_command.queue_description(output),
             Tool::UseAws(use_aws) => use_aws.queue_description(output),
             Tool::Custom(custom_tool) => custom_tool.queue_description(output),
             Tool::GhIssue(gh_issue) => gh_issue.queue_description(output),
+            Tool::Knowledge(knowledge) => knowledge.queue_description(os, output).await,
             Tool::Thinking(thinking) => thinking.queue_description(output),
         }
     }
 
     /// Validates the tool with the arguments supplied
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.validate(ctx).await,
-            Tool::FsWrite(fs_write) => fs_write.validate(ctx).await,
-            Tool::ExecuteCommand(execute_command) => execute_command.validate(ctx).await,
-            Tool::UseAws(use_aws) => use_aws.validate(ctx).await,
-            Tool::Custom(custom_tool) => custom_tool.validate(ctx).await,
-            Tool::GhIssue(gh_issue) => gh_issue.validate(ctx).await,
-            Tool::Thinking(think) => think.validate(ctx).await,
+            Tool::FsRead(fs_read) => fs_read.validate(os).await,
+            Tool::FsWrite(fs_write) => fs_write.validate(os).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.validate(os).await,
+            Tool::UseAws(use_aws) => use_aws.validate(os).await,
+            Tool::Custom(custom_tool) => custom_tool.validate(os).await,
+            Tool::GhIssue(gh_issue) => gh_issue.validate(os).await,
+            Tool::Knowledge(knowledge) => knowledge.validate(os).await,
+            Tool::Thinking(think) => think.validate(os).await,
         }
     }
 }
@@ -242,13 +253,13 @@ impl Default for OutputKind {
 ///
 /// Required since path arguments are defined by the model.
 #[allow(dead_code)]
-pub fn sanitize_path_tool_arg(ctx: &Context, path: impl AsRef<Path>) -> PathBuf {
+pub fn sanitize_path_tool_arg(os: &Os, path: impl AsRef<Path>) -> PathBuf {
     let mut res = PathBuf::new();
     // Expand `~` only if it is the first part.
     let mut path = path.as_ref().components();
     match path.next() {
         Some(p) if p.as_os_str() == "~" => {
-            res.push(ctx.env.home().unwrap_or_default());
+            res.push(os.env.home().unwrap_or_default());
         },
         Some(p) => res.push(p),
         None => return res,
@@ -258,7 +269,7 @@ pub fn sanitize_path_tool_arg(ctx: &Context, path: impl AsRef<Path>) -> PathBuf 
     }
     // For testing scenarios, we need to make sure paths are appropriately handled in chroot test
     // file systems since they are passed directly from the model.
-    ctx.fs.chroot_path(res)
+    os.fs.chroot_path(res)
 }
 
 /// Converts `path` to a relative path according to the current working directory `cwd`.
@@ -306,9 +317,9 @@ fn format_path(cwd: impl AsRef<Path>, path: impl AsRef<Path>) -> String {
         .unwrap_or(path.as_ref().to_string_lossy().to_string())
 }
 
-fn supports_truecolor(ctx: &Context) -> bool {
+fn supports_truecolor(os: &Os) -> bool {
     // Simple override to disable truecolor since shell_color doesn't use Context.
-    !ctx.env.get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
+    !os.env.get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
         && shell_color::get_color_support().contains(shell_color::ColorSupport::TERM24BIT)
 }
 
@@ -316,27 +327,26 @@ fn supports_truecolor(ctx: &Context) -> bool {
 mod tests {
     use std::path::MAIN_SEPARATOR;
 
-    use chat_cli::platform::ACTIVE_USER_HOME;
-
     use super::*;
+    use crate::os::ACTIVE_USER_HOME;
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
-        let ctx = Context::new();
+        let os = Os::new();
 
-        let actual = sanitize_path_tool_arg(&ctx, "~");
-        let expected_home = ctx.env.home().unwrap_or_default();
-        assert_eq!(actual, ctx.fs.chroot_path(&expected_home), "tilde should expand");
-        let actual = sanitize_path_tool_arg(&ctx, "~/hello");
+        let actual = sanitize_path_tool_arg(&os, "~");
+        let expected_home = os.env.home().unwrap_or_default();
+        assert_eq!(actual, os.fs.chroot_path(&expected_home), "tilde should expand");
+        let actual = sanitize_path_tool_arg(&os, "~/hello");
         assert_eq!(
             actual,
-            ctx.fs.chroot_path(expected_home.join("hello")),
+            os.fs.chroot_path(expected_home.join("hello")),
             "tilde should expand"
         );
-        let actual = sanitize_path_tool_arg(&ctx, "/~");
+        let actual = sanitize_path_tool_arg(&os, "/~");
         assert_eq!(
             actual,
-            ctx.fs.chroot_path("/~"),
+            os.fs.chroot_path("/~"),
             "tilde should not expand when not the first component"
         );
     }
@@ -344,10 +354,10 @@ mod tests {
     #[tokio::test]
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
-            let ctx = Context::new();
-            let cwd = sanitize_path_tool_arg(&ctx, cwd);
-            let path = sanitize_path_tool_arg(&ctx, path);
-            let fs = ctx.fs;
+            let os = Os::new();
+            let cwd = sanitize_path_tool_arg(&os, cwd);
+            let path = sanitize_path_tool_arg(&os, path);
+            let fs = os.fs;
             fs.create_dir_all(&cwd).await.unwrap();
             fs.create_dir_all(&path).await.unwrap();
 
