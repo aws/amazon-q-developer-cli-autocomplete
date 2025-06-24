@@ -1345,7 +1345,7 @@ fn process_tool_specs(
 ) -> eyre::Result<()> {
     // Tools are subjected to the following validations:
     // 1. ^[a-zA-Z][a-zA-Z0-9_]*$,
-    // 2. less than 64 charcters in length
+    // 2. less than 64 characters in length
     // 3. a non-empty description
     //
     // For non-compliance due to point 1, we shall change it on behalf of the users.
