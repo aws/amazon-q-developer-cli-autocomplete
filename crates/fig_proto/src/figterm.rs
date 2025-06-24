@@ -1,4 +1,3 @@
-
 pub use crate::proto::figterm::*;
 
 impl InsertTextRequest {
@@ -6,8 +5,14 @@ impl InsertTextRequest {
         let mut out = String::new();
 
         match &self.offset.map(|i| i.signum()) {
-            Some(1) => out.extend(std::iter::repeat_n("\x1b[C", self.offset.unwrap_or(0).unsigned_abs() as usize)),
-            Some(-1) => out.extend(std::iter::repeat_n("\x1b[D", self.offset.unwrap_or(0).unsigned_abs() as usize)),
+            Some(1) => out.extend(std::iter::repeat_n(
+                "\x1b[C",
+                self.offset.unwrap_or(0).unsigned_abs() as usize,
+            )),
+            Some(-1) => out.extend(std::iter::repeat_n(
+                "\x1b[D",
+                self.offset.unwrap_or(0).unsigned_abs() as usize,
+            )),
             _ => {},
         }
 

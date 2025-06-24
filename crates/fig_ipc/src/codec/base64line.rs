@@ -56,9 +56,7 @@ impl<T: Message + Default> Decoder for Base64LineCodec<T> {
                 return Err(Error::other(err.to_string()));
             },
         };
-        let base64_decoded = BASE64_STANDARD
-            .decode(line)
-            .map_err(std::io::Error::other)?;
+        let base64_decoded = BASE64_STANDARD.decode(line).map_err(std::io::Error::other)?;
         let message = T::decode(&*base64_decoded)?;
         Ok(Some(message))
     }
@@ -80,9 +78,7 @@ impl<T: Message> Encoder<T> for Base64LineCodec<T> {
         match self.line_delimited.encode(&base64_encoded, dst) {
             Ok(()) => Ok(()),
             Err(AnyDelimiterCodecError::Io(io)) => Err(io),
-            Err(err @ AnyDelimiterCodecError::MaxChunkLengthExceeded) => {
-                Err(Error::other(err.to_string()))
-            },
+            Err(err @ AnyDelimiterCodecError::MaxChunkLengthExceeded) => Err(Error::other(err.to_string())),
         }
     }
 }
