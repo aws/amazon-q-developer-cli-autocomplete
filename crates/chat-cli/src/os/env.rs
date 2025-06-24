@@ -45,8 +45,12 @@ impl Env {
     pub fn new() -> Self {
         if cfg!(test) {
             match cfg!(windows) {
-                true => Env::from_slice(&[("USERPROFILE", ACTIVE_USER_HOME), ("USERNAME", "testuser")]),
-                false => Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser")]),
+                true => Env::from_slice(&[
+                    ("USERPROFILE", ACTIVE_USER_HOME),
+                    ("USERNAME", "testuser"),
+                    ("PATH", ""),
+                ]),
+                false => Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser"), ("PATH", "")]),
             }
         } else {
             Env(inner::Inner::Real)
@@ -165,15 +169,6 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-
-    #[test]
-    fn test_new() {
-        let env = Env::new();
-        assert!(matches!(env, Env(inner::Inner::Real)));
-
-        let env = Env::default();
-        assert!(matches!(env, Env(inner::Inner::Real)));
-    }
 
     #[test]
     fn test_get() {
