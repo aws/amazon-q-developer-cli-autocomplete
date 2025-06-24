@@ -18,6 +18,7 @@ use crossterm::{
 };
 
 use crate::api_client::model::Tool as FigTool;
+use crate::cli::agent::Agent;
 use crate::cli::chat::consts::DUMMY_TOOL_NAME;
 use crate::cli::chat::tools::ToolOrigin;
 use crate::cli::chat::{
@@ -75,7 +76,7 @@ impl ToolsArgs {
             style::SetAttribute(Attribute::Bold),
             style::Print({
                 // Adding 2 because of "- " preceding every tool name
-                let width = longest + 2 - "Tool".len() + 4;
+                let width = (longest + 2).saturating_sub("Tool".len()) + 4;
                 format!("Tool{:>width$}Permission", "", width = width)
             }),
             style::SetAttribute(Attribute::Reset),
@@ -334,10 +335,25 @@ impl ToolsSubcommand {
             },
             Self::Reset => {
                 session.conversation.agents.trust_all_tools = false;
+
+                let active_agent_path = session.conversation.agents.get_active().and_then(|a| a.path.clone());
+                if let Some(path) = active_agent_path {
+                    let result = async {
+                        let content = tokio::fs::read(&path).await?;
+                        let orig_agent: Agent = serde_json::from_slice(&content)?;
+                        Ok::<Agent, Box<dyn std::error::Error>>(orig_agent)
+                    }
+                    .await;
+
+                    if let (Ok(orig_agent), Some(active_agent)) = (result, session.conversation.agents.get_active_mut())
+                    {
+                        active_agent.allowed_tools = orig_agent.allowed_tools;
+                    }
+                }
                 queue!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
-                    style::Print("\nReset all tools to the default permission levels."),
+                    style::Print("\nReset all tools to the permission levels as defined in persona."),
                     style::SetForegroundColor(Color::Reset),
                 )?;
             },

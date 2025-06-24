@@ -938,18 +938,31 @@ fn format_hook_context<'a>(hook_results: impl IntoIterator<Item = &'a (Hook, Str
 
 #[cfg(test)]
 mod tests {
-    use super::super::context::{
-        AMAZONQ_FILENAME,
-        profile_context_path,
-    };
+    use std::io;
+
     use super::super::message::AssistantToolUse;
     use super::*;
     use crate::api_client::model::{
         AssistantResponseMessage,
         ToolResultStatus,
     };
+    use crate::cli::agent::Agent;
     use crate::cli::chat::tool_manager::ToolManager;
     use crate::database::Database;
+
+    const AMAZONQ_FILENAME: &str = "AmazonQ.md";
+
+    struct NullWriter;
+
+    impl Write for NullWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn assert_conversation_state_invariants(state: FigConversationState, assertion_iteration: usize) {
         if let Some(Some(msg)) = state.history.as_ref().map(|h| h.first()) {
@@ -1041,7 +1054,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
-        let mut ctx = Context::new();
+        let ctx = Context::new();
         let mut database = Database::new().await.unwrap();
         let agents = AgentCollection::default();
         let mut output = NullWriter;
@@ -1075,7 +1088,6 @@ mod tests {
         let ctx = Context::new();
         let mut database = Database::new().await.unwrap();
         let agents = AgentCollection::default();
-        let mut output = NullWriter;
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
@@ -1147,11 +1159,17 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_with_context_files() {
         let mut database = Database::new().await.unwrap();
-        let agents = AgentCollection::default();
-        let mut output = NullWriter;
-
-        let mut ctx = Context::new();
+        let ctx = Context::new();
+        let agents = {
+            let mut agents = AgentCollection::default();
+            let mut agent = Agent::default();
+            agent.included_files.push(AMAZONQ_FILENAME.to_string());
+            agents.agents.insert("TestAgent".to_string(), agent);
+            agents.switch("TestAgent").expect("Agent switch failed");
+            agents
+        };
         ctx.fs.write(AMAZONQ_FILENAME, "test context").await.unwrap();
+        let mut output = NullWriter;
 
         let mut tool_manager = ToolManager::default();
         let mut conversation = ConversationState::new(
@@ -1197,33 +1215,37 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_additional_context() {
         let mut database = Database::new().await.unwrap();
-        let agents = AgentCollection::default();
-        let mut output = NullWriter;
-
-        let mut tool_manager = ToolManager::default();
-        let mut ctx = Context::new();
+        let ctx = Context::new();
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
-        let config = serde_json::json!({
-            "hooks": {
-                "test_per_prompt": {
-                    "trigger": "per_prompt",
-                    "type": "inline",
-                    "command": format!("echo {}", prompt_context)
-                },
+        let agents = {
+            let mut agents = AgentCollection::default();
+            let create_hooks = serde_json::json!({
                 "test_conversation_start": {
                     "trigger": "conversation_start",
                     "type": "inline",
                     "command": format!("echo {}", conversation_start_context)
                 }
-            }
-        });
-        let config_path = profile_context_path(&ctx, "default").unwrap();
-        ctx.fs.create_dir_all(config_path.parent().unwrap()).await.unwrap();
-        ctx.fs
-            .write(&config_path, serde_json::to_string(&config).unwrap())
-            .await
-            .unwrap();
+            });
+            let prompt_hooks = serde_json::json!({
+                "test_per_prompt": {
+                    "trigger": "per_prompt",
+                    "type": "inline",
+                    "command": format!("echo {}", prompt_context)
+                }
+            });
+            let agent = Agent {
+                create_hooks,
+                prompt_hooks,
+                ..Default::default()
+            };
+            agents.agents.insert("TestAgent".to_string(), agent);
+            agents.switch("TestAgent").expect("Agent switch failed");
+            agents
+        };
+        let mut output = NullWriter;
+
+        let mut tool_manager = ToolManager::default();
         let mut conversation = ConversationState::new(
             "fake_conv_id",
             agents,

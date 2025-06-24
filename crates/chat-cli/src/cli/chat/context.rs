@@ -413,7 +413,7 @@ mod tests {
     #[tokio::test]
     async fn test_collect_exceeds_limit() -> Result<()> {
         let ctx = Context::new();
-        let mut manager = create_test_context_manager(None).expect("Failed to create test context manager");
+        let mut manager = create_test_context_manager(Some(2)).expect("Failed to create test context manager");
 
         ctx.fs.create_dir_all("test").await?;
         ctx.fs.write("test/to-include.md", "ha").await?;

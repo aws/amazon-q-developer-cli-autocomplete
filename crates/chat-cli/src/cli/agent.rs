@@ -28,8 +28,11 @@ use serde::{
 use tokio::fs::ReadDir;
 use tracing::error;
 
-use super::chat::tools::ToolOrigin;
 use super::chat::tools::custom_tool::CustomToolConfig;
+use super::chat::tools::{
+    DEFAULT_APPROVE,
+    ToolOrigin,
+};
 use crate::platform::Context;
 use crate::util::{
     MCP_SERVER_TOOL_DELIMITER,
@@ -117,7 +120,8 @@ impl Default for Agent {
             alias: Default::default(),
             allowed_tools: {
                 let mut set = HashSet::<String>::new();
-                set.insert("*".to_string());
+                let default_approve = DEFAULT_APPROVE.iter().copied().map(str::to_string);
+                set.extend(default_approve);
                 set
             },
             included_files: vec!["AmazonQ.md", "README.md", ".amazonq/rules/**/*.md"]
@@ -497,7 +501,18 @@ pub trait AgentSubscriber {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::chat::util::shared_writer::NullWriter;
+
+    struct NullWriter;
+
+    impl Write for NullWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     const INPUT: &str = r#"
             {
@@ -769,25 +784,27 @@ mod tests {
 
     #[test]
     fn test_agent_eval_perm() {
+        const NAME: &str = "test_tool";
+
         struct TestTool;
 
         impl PermissionCandidate for TestTool {
-            fn eval(&self, _agent: &Agent) -> PermissionEvalResult {
-                PermissionEvalResult::Ask
+            fn eval(&self, agent: &Agent) -> PermissionEvalResult {
+                if agent.allowed_tools.contains(NAME) {
+                    PermissionEvalResult::Allow
+                } else {
+                    PermissionEvalResult::Ask
+                }
             }
         }
-        // Test with wildcard permission
-        let mut agent = Agent::default(); // Default has "*" in allowed_tools
+        let mut agent = Agent::default();
         let tool = TestTool;
-        assert!(matches!(agent.eval_perm(&tool), PermissionEvalResult::Allow));
 
         // Test with specific permissions
-        agent.allowed_tools = {
-            let mut set = HashSet::new();
-            set.insert("fs_read".to_string());
-            set.insert("fs_write".to_string());
-            set
-        };
         assert!(matches!(agent.eval_perm(&tool), PermissionEvalResult::Ask));
+
+        // Test with tool added
+        agent.allowed_tools.insert(NAME.to_string());
+        assert!(matches!(agent.eval_perm(&tool), PermissionEvalResult::Allow));
     }
 }

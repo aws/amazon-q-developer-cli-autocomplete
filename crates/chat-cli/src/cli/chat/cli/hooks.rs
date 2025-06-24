@@ -701,10 +701,6 @@ mod tests {
         manager.add_hook("test_hook".to_string(), hook.clone())?;
         assert!(manager.profile_config.hooks.contains_key("test_hook"));
 
-        // Test adding hook to global config
-        manager.add_hook("global_hook".to_string(), hook.clone())?;
-        assert!(manager.global_config.hooks.contains_key("global_hook"));
-
         // Test adding duplicate hook name
         assert!(manager.add_hook("test_hook".to_string(), hook).is_err());
 
@@ -716,10 +712,12 @@ mod tests {
         let mut manager = create_test_context_manager(None).unwrap();
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook("test_hook".to_string(), hook);
+        manager
+            .add_hook("test_hook".to_string(), hook)
+            .expect("Hook addition failed");
 
         // Test removing existing hook
-        manager.remove_hook("test_hook");
+        manager.remove_hook("test_hook").expect("Hook removal failed");
         assert!(!manager.profile_config.hooks.contains_key("test_hook"));
 
         // Test removing non-existent hook
@@ -755,8 +753,12 @@ mod tests {
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
-        manager.add_hook("hook1".to_string(), hook1);
-        manager.add_hook("hook2".to_string(), hook2);
+        manager
+            .add_hook("hook1".to_string(), hook1)
+            .expect("Hook addition failed");
+        manager
+            .add_hook("hook2".to_string(), hook2)
+            .expect("Hook addition failed");
 
         // Test disabling all hooks
         manager.set_all_hooks_disabled(true);

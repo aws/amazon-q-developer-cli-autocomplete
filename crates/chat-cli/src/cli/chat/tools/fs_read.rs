@@ -165,11 +165,11 @@ impl PermissionCandidate for FsRead {
                                 }
                             },
                         }
-                        return if allow_read_only {
+                        if allow_read_only {
                             PermissionEvalResult::Allow
                         } else {
                             PermissionEvalResult::Ask
-                        };
+                        }
                     },
                     (allow_res, deny_res) => {
                         if let Err(e) = allow_res {
@@ -179,7 +179,7 @@ impl PermissionCandidate for FsRead {
                             warn!("fs_read failed to build deny set: {:?}", e);
                         }
                         warn!("One or more detailed args failed to parse, falling back to ask");
-                        return PermissionEvalResult::Ask;
+                        PermissionEvalResult::Ask
                     },
                 }
             },

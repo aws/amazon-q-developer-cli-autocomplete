@@ -34,6 +34,8 @@ use crate::cli::agent::{
 };
 use crate::platform::Context;
 
+pub const DEFAULT_APPROVE: [&str; 1] = ["fs_read"];
+
 /// Represents an executable tool use.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
@@ -130,10 +132,19 @@ pub struct ToolSpec {
     pub tool_origin: ToolOrigin,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum ToolOrigin {
     Native,
     McpServer(String),
+}
+
+impl std::hash::Hash for ToolOrigin {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Native => "native".hash(state),
+            Self::McpServer(name) => name.hash(state),
+        }
+    }
 }
 
 impl Borrow<str> for ToolOrigin {
