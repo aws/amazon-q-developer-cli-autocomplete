@@ -85,7 +85,6 @@ use crate::cli::chat::tools::{
     ToolOrigin,
     ToolSpec,
 };
-use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::{
     JsonRpcResponse,
@@ -182,7 +181,7 @@ impl ToolManagerBuilder {
 
     pub async fn build(
         mut self,
-        telemetry: &TelemetryThread,
+        os: &mut Os,
         mut output: Box<dyn Write + Send + Sync + 'static>,
         interactive: bool,
     ) -> eyre::Result<ToolManager> {
@@ -347,7 +346,7 @@ impl ToolManagerBuilder {
         let pending = Arc::new(RwLock::new(HashSet::<String>::new()));
         let pending_clone = pending.clone();
         let (mut msg_rx, messenger_builder) = ServerMessengerBuilder::new(20);
-        let telemetry_clone = telemetry.clone();
+        let telemetry_clone = os.telemetry.clone();
         let notify = Arc::new(Notify::new());
         let notify_weak = Arc::downgrade(&notify);
         let load_record = Arc::new(Mutex::new(HashMap::<String, Vec<LoadingRecord>>::new()));
@@ -592,7 +591,7 @@ impl ToolManagerBuilder {
                 },
                 Err(e) => {
                     error!("Error initializing mcp client for server {}: {:?}", name, &e);
-                    telemetry
+                    os.telemetry
                         .send_mcp_server_init(conversation_id.clone(), Some(e.to_string()), 0)
                         .ok();
                     let _ = messenger.send_tools_list_result(Err(e)).await;
@@ -607,7 +606,7 @@ impl ToolManagerBuilder {
         // TODO: accommodate hot reload of mcp servers
         if let (Some(sender), Some(receiver)) = (sender, receiver) {
             let clients = clients.iter().fold(HashMap::new(), |mut acc, (n, c)| {
-                acc.insert(n.to_string(), Arc::downgrade(c));
+                acc.insert(n.clone(), Arc::downgrade(c));
                 acc
             });
             let prompts_clone = prompts.clone();
@@ -637,7 +636,7 @@ impl ToolManagerBuilder {
                                     return acc;
                                 };
                                 for (prompt_name, prompt_get) in prompt_gets.iter() {
-                                    acc.entry(prompt_name.to_string())
+                                    acc.entry(prompt_name.clone())
                                         .and_modify(|bundles| {
                                             bundles.push(PromptBundle {
                                                 server_name: server_name.to_owned(),
@@ -874,7 +873,7 @@ impl Clone for ToolManager {
 impl ToolManager {
     pub async fn load_tools(
         &mut self,
-        database: &Database,
+        os: &mut Os,
         stderr: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
@@ -888,10 +887,10 @@ impl ToolManager {
                         tool_list.len() == 1 && tool_list.first().is_some_and(|n| n == "*") || tool_list.contains(name)
                     })
                     .collect::<HashMap<_, _>>();
-            if !crate::cli::chat::tools::thinking::Thinking::is_enabled(database) {
+            if !crate::cli::chat::tools::thinking::Thinking::is_enabled(os) {
                 tool_specs.remove("thinking");
             }
-            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(database) {
+            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(os) {
                 tool_specs.remove("knowledge");
             }
 
@@ -945,14 +944,16 @@ impl ToolManager {
             // If there is no server loaded, we want to resolve immediately
             Box::pin(future::ready(()))
         } else if self.is_interactive {
-            let init_timeout = database
+            let init_timeout = os
+                .database
                 .settings
                 .get_int(Setting::McpInitTimeout)
                 .map_or(5000_u64, |s| s as u64);
             Box::pin(tokio::time::sleep(std::time::Duration::from_millis(init_timeout)))
         } else {
             // if it is non-interactive we will want to use the "mcp.noInteractiveTimeout"
-            let init_timeout = database
+            let init_timeout = os
+                .database
                 .settings
                 .get_int(Setting::McpNoInteractiveTimeout)
                 .map_or(30_000_u64, |s| s as u64);
@@ -1228,7 +1229,7 @@ impl ToolManager {
                             .map_err(|e| GetPromptError::Synchronization(e.to_string()))?;
                         for (prompt_name, prompt_get) in prompt_gets.iter() {
                             prompts_wl
-                                .entry(prompt_name.to_string())
+                                .entry(prompt_name.clone())
                                 .and_modify(|bundles| {
                                     let mut is_modified = false;
                                     for bundle in &mut *bundles {
@@ -1296,7 +1297,6 @@ impl ToolManager {
                     has_retried = true;
                     self.refresh_prompts(&mut prompts_wl)?;
                     maybe_bundles = prompts_wl.get(&prompt_name);
-                    continue 'blk;
                 },
                 (_, _, true) => {
                     break 'blk Err(GetPromptError::PromptNotFound(prompt_name));
@@ -1315,7 +1315,7 @@ impl ToolManager {
                     return acc;
                 };
                 for (prompt_name, prompt_get) in prompt_gets.iter() {
-                    acc.entry(prompt_name.to_string())
+                    acc.entry(prompt_name.clone())
                         .and_modify(|bundles| {
                             bundles.push(PromptBundle {
                                 server_name: server_name.to_owned(),

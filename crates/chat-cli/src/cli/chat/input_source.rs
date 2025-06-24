@@ -4,7 +4,8 @@ use rustyline::error::ReadlineError;
 use super::prompt::rl;
 #[cfg(unix)]
 use super::skim_integration::SkimCommandSelector;
-use crate::database::Database;
+#[cfg(unix)]
+use crate::os::Os;
 
 #[derive(Debug)]
 pub struct InputSource(inner::Inner);
@@ -15,6 +16,7 @@ mod inner {
 
     use super::super::prompt::ChatHelper;
 
+    #[allow(clippy::large_enum_variant)]
     #[derive(Debug)]
     pub enum Inner {
         Readline(Editor<ChatHelper, FileHistory>),
@@ -28,17 +30,17 @@ mod inner {
 
 impl InputSource {
     pub fn new(
-        database: &Database,
+        os: &Os,
         sender: std::sync::mpsc::Sender<Option<String>>,
         receiver: std::sync::mpsc::Receiver<Vec<String>>,
     ) -> Result<Self> {
-        Ok(Self(inner::Inner::Readline(rl(database, sender, receiver)?)))
+        Ok(Self(inner::Inner::Readline(rl(os, sender, receiver)?)))
     }
 
     #[cfg(unix)]
     pub fn put_skim_command_selector(
         &mut self,
-        database: &crate::database::Database,
+        os: &Os,
         context_manager: std::sync::Arc<super::context::ContextManager>,
         tool_names: Vec<String>,
     ) {
@@ -50,13 +52,17 @@ impl InputSource {
         use crate::database::settings::Setting;
 
         if let inner::Inner::Readline(rl) = &mut self.0 {
-            let key_char = match database.settings.get_string(Setting::SkimCommandKey) {
+            let key_char = match os.database.settings.get_string(Setting::SkimCommandKey) {
                 Some(key) if key.len() == 1 => key.chars().next().unwrap_or('s'),
                 _ => 's', // Default to 's' if setting is missing or invalid
             };
             rl.bind_sequence(
                 KeyEvent::ctrl(key_char),
-                EventHandler::Conditional(Box::new(SkimCommandSelector::new(context_manager, tool_names))),
+                EventHandler::Conditional(Box::new(SkimCommandSelector::new(
+                    os.clone(),
+                    context_manager,
+                    tool_names,
+                ))),
             );
         }
     }
@@ -74,6 +80,11 @@ impl InputSource {
                 match curr_line {
                     Ok(line) => {
                         let _ = rl.add_history_entry(line.as_str());
+
+                        if let Some(helper) = rl.helper_mut() {
+                            helper.update_hinter_history(&line);
+                        }
+
                         Ok(Some(line))
                     },
                     Err(ReadlineError::Interrupted | ReadlineError::Eof) => Ok(None),

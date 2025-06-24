@@ -13,7 +13,6 @@ use super::{
     InvokeOutput,
     OutputKind,
 };
-use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::os::Os;
 use crate::util::knowledge_store::KnowledgeStore;
@@ -83,8 +82,11 @@ pub struct KnowledgeCancel {
 
 impl Knowledge {
     /// Checks if the knowledge feature is enabled in settings
-    pub fn is_enabled(database: &Database) -> bool {
-        database.settings.get_bool(Setting::EnabledKnowledge).unwrap_or(false)
+    pub fn is_enabled(os: &Os) -> bool {
+        os.database
+            .settings
+            .get_bool(Setting::EnabledKnowledge)
+            .unwrap_or(false)
     }
 
     pub async fn validate(&mut self, os: &Os) -> Result<()> {

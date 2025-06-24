@@ -107,7 +107,6 @@ pub async fn connect_to_ibus_daemon(ctx: &Context) -> Result<Connection, Address
                     "unable to connect to address for {}, ignoring",
                     path.display()
                 );
-                continue;
             },
         }
     }

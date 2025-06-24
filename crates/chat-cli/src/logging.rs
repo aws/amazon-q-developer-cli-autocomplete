@@ -76,7 +76,7 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
 
             // Make the log path parent directory if it doesn't exist.
             if let Some(parent) = log_path.parent() {
-                if log_path.ends_with("chat.log") {
+                if log_path.ends_with("qchat.log") {
                     mcp_path = Some(parent.to_path_buf());
                 }
                 std::fs::create_dir_all(parent)?;

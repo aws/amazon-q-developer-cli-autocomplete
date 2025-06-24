@@ -71,7 +71,6 @@ use crate::cli::chat::cli::hooks::{
     Hook,
     HookTrigger,
 };
-use crate::database::Database;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
 
@@ -225,7 +224,7 @@ impl ConversationState {
     }
 
     /// Sets the response message according to the currently set [Self::next_message].
-    pub fn push_assistant_message(&mut self, message: AssistantMessage, database: &mut Database) {
+    pub fn push_assistant_message(&mut self, os: &mut Os, message: AssistantMessage) {
         debug_assert!(self.next_message.is_some(), "next_message should exist");
         let next_user_message = self.next_message.take().expect("next user message should exist");
 
@@ -233,7 +232,7 @@ impl ConversationState {
         self.history.push_back((next_user_message, message));
 
         if let Ok(cwd) = std::env::current_dir() {
-            database.set_conversation_by_path(cwd, self).ok();
+            os.database.set_conversation_by_path(cwd, self).ok();
         }
     }
 
@@ -295,7 +294,7 @@ impl ConversationState {
 
         // If the last message from the assistant contains tool uses AND next_message is set, we need to
         // ensure that next_message contains tool results.
-        if let (Some((_, AssistantMessage::ToolUse { ref mut tool_uses, .. })), Some(user_msg)) = (
+        if let (Some((_, AssistantMessage::ToolUse { tool_uses, .. })), Some(user_msg)) = (
             self.history
                 .range_mut(self.valid_history_range.0..self.valid_history_range.1)
                 .last(),
@@ -340,7 +339,7 @@ impl ConversationState {
             .collect();
 
         for (_, assistant) in &mut self.history {
-            if let AssistantMessage::ToolUse { ref mut tool_uses, .. } = assistant {
+            if let AssistantMessage::ToolUse { tool_uses, .. } = assistant {
                 for tool_use in tool_uses {
                     if tool_names.contains(tool_use.name.as_str()) {
                         continue;
@@ -948,7 +947,6 @@ mod tests {
     };
     use crate::cli::agent::Agent;
     use crate::cli::chat::tool_manager::ToolManager;
-    use crate::database::Database;
 
     const AMAZONQ_FILENAME: &str = "AmazonQ.md";
 
@@ -1078,7 +1076,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_conversation_state_invariants(s, i);
-            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
             conversation.set_next_user_message(i.to_string()).await;
         }
     }
@@ -1091,7 +1089,7 @@ mod tests {
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
-        let tool_config = tool_manager.load_tools(&database, &mut vec![]).await.unwrap();
+        let tool_config = tool_manager.load_tools(&mut os, &mut vec![]).await.unwrap();
         let mut conversation = ConversationState::new(
             "fake_conv_id",
             agents.clone(),
@@ -1109,13 +1107,13 @@ mod tests {
             assert_conversation_state_invariants(s, i);
 
             conversation.push_assistant_message(
+                &mut os,
                 AssistantMessage::new_tool_use(None, i.to_string(), vec![AssistantToolUse {
                     id: "tool_id".to_string(),
                     name: "tool name".to_string(),
                     args: serde_json::Value::Null,
                     ..Default::default()
                 }]),
-                &mut database,
             );
             conversation.add_tool_results(vec![ToolUseResult {
                 tool_use_id: "tool_id".to_string(),
@@ -1136,13 +1134,13 @@ mod tests {
             assert_conversation_state_invariants(s, i);
             if i % 3 == 0 {
                 conversation.push_assistant_message(
+                    &mut os,
                     AssistantMessage::new_tool_use(None, i.to_string(), vec![AssistantToolUse {
                         id: "tool_id".to_string(),
                         name: "tool name".to_string(),
                         args: serde_json::Value::Null,
                         ..Default::default()
                     }]),
-                    &mut database,
                 );
                 conversation.add_tool_results(vec![ToolUseResult {
                     tool_use_id: "tool_id".to_string(),
@@ -1150,7 +1148,7 @@ mod tests {
                     status: ToolResultStatus::Success,
                 }]);
             } else {
-                conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+                conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
                 conversation.set_next_user_message(i.to_string()).await;
             }
         }
@@ -1207,7 +1205,7 @@ mod tests {
 
             assert_conversation_state_invariants(s, i);
 
-            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
             conversation.set_next_user_message(i.to_string()).await;
         }
     }
@@ -1280,7 +1278,7 @@ mod tests {
                 s.user_input_message.content
             );
 
-            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
             conversation.set_next_user_message(i.to_string()).await;
         }
     }

@@ -10,7 +10,6 @@ use crossterm::{
     style,
 };
 
-use crate::api_client::Client;
 use crate::auth::builder_id::is_idc_user;
 use crate::cli::chat::{
     ActualSubscriptionStatus,
@@ -20,7 +19,7 @@ use crate::cli::chat::{
     get_subscription_status_with_spinner,
     with_spinner,
 };
-use crate::database::Database;
+use crate::os::Os;
 use crate::util::system_info::is_remote;
 
 const SUBSCRIBE_TITLE_TEXT: &str = color_print::cstr! { "<white!,bold>Subscribe to Q Developer Pro</white!,bold>" };
@@ -37,8 +36,8 @@ pub struct SubscribeArgs {
 }
 
 impl SubscribeArgs {
-    pub async fn execute(self, database: &mut Database, session: &mut ChatSession) -> Result<ChatState, ChatError> {
-        if is_idc_user(database)
+    pub async fn execute(self, os: &mut Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+        if is_idc_user(&os.database)
             .await
             .map_err(|e| ChatError::Custom(e.to_string().into()))?
         {
@@ -50,7 +49,7 @@ impl SubscribeArgs {
             )?;
         } else if self.manage {
             queue!(session.stderr, style::Print("\n"),)?;
-            match get_subscription_status_with_spinner(&mut session.stderr, database).await {
+            match get_subscription_status_with_spinner(os, &mut session.stderr).await {
                 Ok(status) => {
                     if status != ActualSubscriptionStatus::Active {
                         queue!(
@@ -79,7 +78,7 @@ impl SubscribeArgs {
 
             let url = format!(
                 "https://{}.console.aws.amazon.com/amazonq/developer/home#/subscriptions",
-                database
+                os.database
                     .get_idc_region()
                     .ok()
                     .flatten()
@@ -94,7 +93,7 @@ impl SubscribeArgs {
                 )?;
             }
         } else {
-            upgrade_to_pro(database, session).await?;
+            upgrade_to_pro(os, session).await?;
         }
 
         Ok(ChatState::PromptUser {
@@ -103,11 +102,11 @@ impl SubscribeArgs {
     }
 }
 
-async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> Result<(), ChatError> {
+async fn upgrade_to_pro(os: &mut Os, session: &mut ChatSession) -> Result<(), ChatError> {
     queue!(session.stderr, style::Print("\n"),)?;
 
     // Get current subscription status
-    match get_subscription_status_with_spinner(&mut session.stderr, database).await {
+    match get_subscription_status_with_spinner(os, &mut session.stderr).await {
         Ok(status) => {
             if status == ActualSubscriptionStatus::Active {
                 queue!(
@@ -167,8 +166,9 @@ async fn upgrade_to_pro(database: &mut Database, session: &mut ChatSession) -> R
     }
 
     // Create a subscription token and open the webpage
-    let url = with_spinner(&mut session.stderr, "Preparing to upgrade...", || async {
-        let r = Client::new(database, None).await?.create_subscription_token().await?;
+    let r = os.client.create_subscription_token().await?;
+
+    let url = with_spinner(&mut session.stderr, "Preparing to upgrade...", || async move {
         Ok::<String, ChatError>(r.encoded_verification_url().to_string())
     })
     .await?;

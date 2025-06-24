@@ -127,7 +127,7 @@ impl Fs {
         match self {
             Self::Real => fs::File::create_new(path).await,
             Self::Chroot(root) => fs::File::create_new(append(root.path(), path)).await,
-            Self::Fake(_) => Err(io::Error::new(io::ErrorKind::Other, "unimplemented")),
+            Self::Fake(_) => Err(io::Error::other("unimplemented")),
         }
     }
 
@@ -135,7 +135,7 @@ impl Fs {
         match self {
             Self::Real => fs::create_dir(path).await,
             Self::Chroot(root) => fs::create_dir(append(root.path(), path)).await,
-            Self::Fake(_) => Err(io::Error::new(io::ErrorKind::Other, "unimplemented")),
+            Self::Fake(_) => Err(io::Error::other("unimplemented")),
         }
     }
 
@@ -143,7 +143,7 @@ impl Fs {
         match self {
             Self::Real => fs::create_dir_all(path).await,
             Self::Chroot(root) => fs::create_dir_all(append(root.path(), path)).await,
-            Self::Fake(_) => Err(io::Error::new(io::ErrorKind::Other, "unimplemented")),
+            Self::Fake(_) => Err(io::Error::other("unimplemented")),
         }
     }
 
@@ -154,7 +154,7 @@ impl Fs {
         match self {
             Self::Real => fs::File::open(path).await,
             Self::Chroot(root) => fs::File::open(append(root.path(), path)).await,
-            Self::Fake(_) => Err(io::Error::new(io::ErrorKind::Other, "unimplemented")),
+            Self::Fake(_) => Err(io::Error::other("unimplemented")),
         }
     }
 
@@ -164,7 +164,7 @@ impl Fs {
             Self::Chroot(root) => fs::read(append(root.path(), path)).await,
             Self::Fake(map) => {
                 let Ok(lock) = map.lock() else {
-                    return Err(io::Error::new(io::ErrorKind::Other, "poisoned lock"));
+                    return Err(io::Error::other("poisoned lock"));
                 };
                 let Some(data) = lock.get(path.as_ref()) else {
                     return Err(io::Error::new(io::ErrorKind::NotFound, "not found"));
@@ -180,7 +180,7 @@ impl Fs {
             Self::Chroot(root) => fs::read_to_string(append(root.path(), path)).await,
             Self::Fake(map) => {
                 let Ok(lock) = map.lock() else {
-                    return Err(io::Error::new(io::ErrorKind::Other, "poisoned lock"));
+                    return Err(io::Error::other("poisoned lock"));
                 };
                 let Some(data) = lock.get(path.as_ref()) else {
                     return Err(io::Error::new(io::ErrorKind::NotFound, "not found"));
@@ -199,7 +199,7 @@ impl Fs {
             Self::Chroot(root) => std::fs::read_to_string(append(root.path(), path)),
             Self::Fake(map) => {
                 let Ok(lock) = map.lock() else {
-                    return Err(io::Error::new(io::ErrorKind::Other, "poisoned lock"));
+                    return Err(io::Error::other("poisoned lock"));
                 };
                 let Some(data) = lock.get(path.as_ref()) else {
                     return Err(io::Error::new(io::ErrorKind::NotFound, "not found"));
@@ -222,7 +222,7 @@ impl Fs {
             Self::Chroot(root) => fs::write(append(root.path(), path), contents).await,
             Self::Fake(map) => {
                 let Ok(mut lock) = map.lock() else {
-                    return Err(io::Error::new(io::ErrorKind::Other, "poisoned lock"));
+                    return Err(io::Error::other("poisoned lock"));
                 };
                 lock.insert(path.as_ref().to_owned(), contents.as_ref().to_owned());
                 Ok(())

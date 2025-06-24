@@ -46,11 +46,11 @@ impl CompletionArgs {
     }
 }
 
-fn generation_completions(gen: impl clap_complete::Generator) -> String {
+fn generation_completions(generator: impl clap_complete::Generator) -> String {
     let mut cli = Cli::command();
     let mut buffer = Vec::new();
 
-    clap_complete::generate(gen, &mut cli, CLI_BINARY_NAME, &mut buffer);
+    clap_complete::generate(generator, &mut cli, CLI_BINARY_NAME, &mut buffer);
 
     String::from_utf8_lossy(&buffer).into()
 }

@@ -77,7 +77,7 @@ pub fn handle_images_from_paths(output: &mut impl Write, paths: &[String]) -> Ri
 
                 extracted_images.push((image_block, ImageMetadata {
                     filename,
-                    filepath: path.to_string(),
+                    filepath: path.clone(),
                     size: image_size,
                 }));
             }
@@ -147,7 +147,7 @@ pub fn handle_images_from_paths(output: &mut impl Write, paths: &[String]) -> Ri
 /// * `false` otherwise
 pub fn is_supported_image_type(maybe_file_path: &str) -> bool {
     let supported_image_types = ["jpg", "jpeg", "png", "gif", "webp"];
-    if let Some(extension) = maybe_file_path.split('.').last() {
+    if let Some(extension) = maybe_file_path.split('.').next_back() {
         return supported_image_types.contains(&extension.trim().to_lowercase().as_str());
     }
     false

@@ -103,15 +103,17 @@ impl Env {
     ///
     /// See [std::env::set_var] for the safety requirements.
     pub unsafe fn set_var(&self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) {
-        use inner::Inner;
-        match &self.0 {
-            Inner::Real => std::env::set_var(key, value),
-            Inner::Fake(fake) => {
-                fake.lock().unwrap().vars.insert(
-                    key.as_ref().to_str().expect("key must be valid str").to_string(),
-                    value.as_ref().to_str().expect("key must be valid str").to_string(),
-                );
-            },
+        unsafe {
+            use inner::Inner;
+            match &self.0 {
+                Inner::Real => std::env::set_var(key, value),
+                Inner::Fake(fake) => {
+                    fake.lock().unwrap().vars.insert(
+                        key.as_ref().to_str().expect("key must be valid str").to_string(),
+                        value.as_ref().to_str().expect("key must be valid str").to_string(),
+                    );
+                },
+            }
         }
     }
 

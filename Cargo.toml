@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/*",
     "crates/fig_desktop/fuzz",
@@ -16,7 +16,7 @@ authors = [
     "Chay Nabors (nabochay@amazon.com)",
     "Brandon Kiser (bskiser@amazon.com)",
 ]
-edition = "2021"
+edition = "2024"
 homepage = "https://aws.amazon.com/q/"
 publish = false
 version = "1.12.1"
@@ -128,7 +128,7 @@ reqwest = { version = "0.12.14", default-features = false, features = [
 ring = "0.17.14"
 rusqlite = { version = "0.32.1", features = ["bundled", "serde_json"] }
 shellexpand = "3.0.0"
-shell-color = { path = "crates/shell-color" }
+shell-color = "1.0.0"
 semver = { version = "1.0.26", features = ["serde"] }
 serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = "1.0.140"

@@ -5,6 +5,7 @@ use anstream::{
 use crossterm::style::Stylize;
 use eyre::Result;
 
+use crate::os::Os;
 use crate::os::diagnostics::Diagnostics;
 use crate::util::GITHUB_REPO_NAME;
 use crate::util::system_info::is_remote;
@@ -25,13 +26,13 @@ pub struct IssueCreator {
 }
 
 impl IssueCreator {
-    pub async fn create_url(&self) -> Result<url::Url> {
+    pub async fn create_url(&self, os: &Os) -> Result<url::Url> {
         println!("Heading over to GitHub...");
 
         let warning = |text: &String| {
             format!("<This will be visible to anyone. Do not include personal or sensitive information>\n\n{text}")
         };
-        let diagnostics = Diagnostics::new().await;
+        let diagnostics = Diagnostics::new(&os.env).await;
 
         let os = match &diagnostics.system_info.os {
             Some(os) => os.to_string(),

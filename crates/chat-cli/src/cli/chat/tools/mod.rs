@@ -14,6 +14,12 @@ use std::path::{
     PathBuf,
 };
 
+use crossterm::queue;
+use crossterm::style::{
+    self,
+    Color,
+    Stylize,
+};
 use custom_tool::CustomTool;
 use execute::ExecuteCommand;
 use eyre::Result;
@@ -320,6 +326,24 @@ fn supports_truecolor(os: &Os) -> bool {
         && shell_color::get_color_support().contains(shell_color::ColorSupport::TERM24BIT)
 }
 
+/// Helper function to display a purpose if available (for execute commands)
+pub fn display_purpose(purpose: Option<&String>, updates: &mut impl Write) -> Result<()> {
+    if let Some(purpose) = purpose {
+        queue!(
+            updates,
+            style::Print(super::CONTINUATION_LINE),
+            style::Print("\n"),
+            style::Print(super::PURPOSE_ARROW),
+            style::SetForegroundColor(Color::Blue),
+            style::Print("Purpose: "),
+            style::ResetColor,
+            style::Print(purpose),
+            style::Print("\n"),
+        )?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::MAIN_SEPARATOR;
@@ -329,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
 
         let actual = sanitize_path_tool_arg(&os, "~");
         let expected_home = os.env.home().unwrap_or_default();
@@ -351,7 +375,7 @@ mod tests {
     #[tokio::test]
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
-            let os = Os::new();
+            let os = Os::new().await.unwrap();
             let cwd = sanitize_path_tool_arg(&os, cwd);
             let path = sanitize_path_tool_arg(&os, path);
             let fs = os.fs;

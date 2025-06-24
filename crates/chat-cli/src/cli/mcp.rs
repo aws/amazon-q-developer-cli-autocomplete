@@ -60,15 +60,13 @@ pub enum McpSubcommand {
 }
 
 impl McpSubcommand {
-    pub async fn execute(self, output: &mut impl Write) -> Result<ExitCode> {
-        let os = Os::new();
-
+    pub async fn execute(self, os: &mut Os, output: &mut impl Write) -> Result<ExitCode> {
         match self {
-            Self::Add(args) => args.execute(&os, output).await?,
-            Self::Remove(args) => args.execute(&os, output).await?,
-            Self::List(args) => args.execute(&os, output).await?,
-            Self::Import(args) => args.execute(&os, output).await?,
-            Self::Status(args) => args.execute(&os, output).await?,
+            Self::Add(args) => args.execute(os, output).await?,
+            Self::Remove(args) => args.execute(os, output).await?,
+            Self::List(args) => args.execute(os, output).await?,
+            Self::Import(args) => args.execute(os, output).await?,
+            Self::Status(args) => args.execute(os, output).await?,
         }
 
         output.flush()?;
@@ -415,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scope_and_profile_defaults_to_workspace() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let path = resolve_scope_profile(&os, None).unwrap();
         assert_eq!(
             path.to_str(),
@@ -426,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_resolve_paths() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         // workspace
         let p = resolve_scope_profile(&os, Some(Scope::Workspace)).unwrap();
         assert_eq!(p, workspace_mcp_config_path(&os).unwrap());
@@ -439,7 +437,7 @@ mod tests {
     #[ignore = "TODO: fix in CI"]
     #[tokio::test]
     async fn ensure_file_created_and_loaded() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let path = workspace_mcp_config_path(&os).unwrap();
 
         let cfg = super::ensure_config_file(&os, &path, &mut vec![]).await.unwrap();
@@ -449,7 +447,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_then_remove_cycle() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
 
         // 1. add
         AddArgs {

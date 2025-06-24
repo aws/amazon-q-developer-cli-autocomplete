@@ -21,6 +21,7 @@ use spinners::{
 };
 
 use super::OutputFormat;
+use crate::os::Os;
 use crate::os::diagnostics::Diagnostics;
 
 #[derive(Clone, Debug, Args, PartialEq, Eq)]
@@ -34,7 +35,7 @@ pub struct DiagnosticArgs {
 }
 
 impl DiagnosticArgs {
-    pub async fn execute(&self) -> Result<ExitCode> {
+    pub async fn execute(&self, os: &Os) -> Result<ExitCode> {
         let spinner = if stdout().is_terminal() {
             Some(Spinner::new(Spinners::Dots, "Generating...".into()))
         } else {
@@ -50,7 +51,7 @@ impl DiagnosticArgs {
             })?;
         }
 
-        let diagnostics = Diagnostics::new().await;
+        let diagnostics = Diagnostics::new(&os.env).await;
 
         if let Some(mut sp) = spinner {
             sp.stop();

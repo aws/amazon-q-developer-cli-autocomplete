@@ -11,7 +11,6 @@ use semantic_search_client::types::ProgressStatus;
 fn test_add_context_from_path_with_directory() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test
@@ -52,7 +51,6 @@ fn test_add_context_from_path_with_file() {
     // Skip this test in CI environments
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
 
@@ -91,7 +89,6 @@ fn test_add_context_from_path_with_file() {
 fn test_add_context_from_path_with_invalid_path() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test
@@ -124,7 +121,6 @@ fn test_backward_compatibility() {
     // Skip this test in CI environments
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
 

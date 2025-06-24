@@ -5,9 +5,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::database::Database;
 use crate::os::Os;
-use crate::telemetry::TelemetryThread;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Args)]
@@ -36,15 +34,7 @@ pub struct CompactArgs {
 }
 
 impl CompactArgs {
-    pub async fn execute(
-        self,
-        os: &Os,
-        database: &mut Database,
-        telemetry: &TelemetryThread,
-        session: &mut ChatSession,
-    ) -> Result<ChatState, ChatError> {
-        session
-            .compact_history(os, database, telemetry, self.prompt, self.show_summary)
-            .await
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+        session.compact_history(os, self.prompt, self.show_summary).await
     }
 }

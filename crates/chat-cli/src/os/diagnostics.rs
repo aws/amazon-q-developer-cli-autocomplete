@@ -10,7 +10,7 @@ use sysinfo::{
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use crate::os::Os;
+use crate::os::Env;
 use crate::telemetry::InstallMethod;
 use crate::util::consts::build::HASH;
 use crate::util::system_info::{
@@ -164,19 +164,15 @@ pub struct CurrentEnvironment {
 }
 
 impl CurrentEnvironment {
-    async fn new() -> CurrentEnvironment {
-        let os = Os::new();
-
+    async fn new(env: &Env) -> CurrentEnvironment {
         let username = format!("/{}", whoami::username());
 
-        let cwd = os
-            .env
+        let cwd = env
             .current_dir()
             .ok()
             .map(|path| path.to_string_lossy().replace(&username, "/USER"));
 
-        let cli_path = os
-            .env
+        let cli_path = env
             .current_dir()
             .ok()
             .map(|path| path.to_string_lossy().replace(&username, "/USER"));
@@ -212,11 +208,11 @@ pub struct Diagnostics {
 }
 
 impl Diagnostics {
-    pub async fn new() -> Diagnostics {
+    pub async fn new(env: &Env) -> Diagnostics {
         Diagnostics {
             build_details: BuildDetails::new(),
             system_info: SystemInfo::new(),
-            environment: CurrentEnvironment::new().await,
+            environment: CurrentEnvironment::new(env).await,
             environment_variables: EnvVarDiagnostic::new(),
         }
     }
@@ -232,7 +228,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_diagnostics_user_readable() {
-        let diagnostics = Diagnostics::new().await;
+        let env = Env::new();
+        let diagnostics = Diagnostics::new(&env).await;
         let toml = diagnostics.user_readable().unwrap();
         assert!(!toml.is_empty());
     }

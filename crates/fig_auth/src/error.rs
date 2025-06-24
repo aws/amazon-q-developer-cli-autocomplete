@@ -7,6 +7,7 @@ use aws_sdk_ssooidc::operation::register_client::RegisterClientError;
 use aws_sdk_ssooidc::operation::start_device_authorization::StartDeviceAuthorizationError;
 use thiserror::Error;
 
+#[allow(variant_size_differences)]
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
