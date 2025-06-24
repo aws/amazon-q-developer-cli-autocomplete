@@ -69,7 +69,6 @@ use parser::{
     ResponseParser,
 };
 use regex::Regex;
-use serde_json::Map;
 use spinners::{
     Spinner,
     Spinners,
@@ -107,19 +106,12 @@ use util::{
 use winnow::Partial;
 use winnow::stream::Offset;
 
-use crate::api_client::clients::{
-    SendMessageOutput,
-    StreamingClient,
-};
+use crate::api_client::ApiClientError;
 use crate::api_client::model::{
-    ChatResponseStream,
     Tool as FigTool,
     ToolResultStatus,
 };
-use crate::api_client::{
-    ApiClientError,
-    Client,
-};
+use crate::api_client::send_message_output::SendMessageOutput;
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
 use crate::cli::chat::cli::SlashCommand;
@@ -175,11 +167,6 @@ impl ChatArgs {
 
         let stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
-
-        let client = match os.env.get("Q_MOCK_CHAT_RESPONSE") {
-            Ok(json) => create_stream(serde_json::from_str(std::fs::read_to_string(json)?.as_str())?),
-            _ => StreamingClient::new(&mut os.database).await?,
-        };
 
         let mcp_server_configs = match McpServerConfig::load_config(&mut stderr).await {
             Ok(config) => {
@@ -285,7 +272,6 @@ impl ChatArgs {
             self.input,
             InputSource::new(os, prompt_request_sender, prompt_response_receiver)?,
             self.resume,
-            client,
             || terminal::window_size().map(|s| s.columns.into()).ok(),
             tool_manager,
             self.profile,
@@ -447,8 +433,6 @@ pub struct ChatSession {
     /// Whether we're starting a new conversation or continuing an old one.
     existing_conversation: bool,
     input_source: InputSource,
-    /// The client to use to interact with the model.
-    client: StreamingClient,
     /// Width of the terminal, required for [ParseState].
     terminal_width_provider: fn() -> Option<usize>,
     spinner: Option<Spinner>,
@@ -480,7 +464,6 @@ impl ChatSession {
         mut input: Option<String>,
         input_source: InputSource,
         resume_conversation: bool,
-        client: StreamingClient,
         terminal_width_provider: fn() -> Option<usize>,
         tool_manager: ToolManager,
         profile: Option<String>,
@@ -546,7 +529,6 @@ impl ChatSession {
             initial_input: input,
             existing_conversation,
             input_source,
-            client,
             terminal_width_provider,
             spinner: None,
             tool_permissions,
@@ -979,7 +961,7 @@ impl ChatSession {
         execute!(self.stderr, cursor::Hide, style::Print("\n"))?;
         self.spinner = Some(Spinner::new(Spinners::Dots, "Creating summary...".to_string()));
 
-        let response = self.client.send_message(summary_state).await;
+        let response = os.client.send_message(summary_state).await;
 
         // TODO(brandonskiser): This is a temporary hotfix for failing compaction. We should instead
         // retry except with less context included.
@@ -1124,7 +1106,7 @@ impl ChatSession {
         // If a next message is set, then retry the request.
         if self.conversation.next_user_message().is_some() {
             Ok(ChatState::HandleResponseStream(
-                self.client
+                os.client
                     .send_message(
                         self.conversation
                             .as_sendable_conversation_state(os, &mut self.stderr, false)
@@ -1326,7 +1308,7 @@ impl ChatSession {
             self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
 
             Ok(ChatState::HandleResponseStream(
-                self.client.send_message(conv_state).await?,
+                os.client.send_message(conv_state).await?,
             ))
         }
     }
@@ -1496,7 +1478,7 @@ impl ChatSession {
 
         self.send_tool_use_telemetry(os).await;
         return Ok(ChatState::HandleResponseStream(
-            self.client
+            os.client
                 .send_message(
                     self.conversation
                         .as_sendable_conversation_state(os, &mut self.stderr, false)
@@ -1610,7 +1592,7 @@ impl ChatSession {
                                 .await;
                             self.send_tool_use_telemetry(os).await;
                             return Ok(ChatState::HandleResponseStream(
-                                self.client
+                                os.client
                                     .send_message(
                                         self.conversation
                                             .as_sendable_conversation_state(os, &mut self.stderr, false)
@@ -1640,7 +1622,7 @@ impl ChatSession {
                             self.conversation.add_tool_results(tool_results);
                             self.send_tool_use_telemetry(os).await;
                             return Ok(ChatState::HandleResponseStream(
-                                self.client
+                                os.client
                                     .send_message(
                                         self.conversation
                                             .as_sendable_conversation_state(os, &mut self.stderr, false)
@@ -1833,7 +1815,7 @@ impl ChatSession {
                 );
             }
 
-            let response = self
+            let response = os
                 .client
                 .send_message(
                     self.conversation
@@ -2044,63 +2026,6 @@ impl ChatSession {
     }
 }
 
-/// Testing helper
-fn split_tool_use_event(value: &Map<String, serde_json::Value>) -> Vec<ChatResponseStream> {
-    let tool_use_id = value.get("tool_use_id").unwrap().as_str().unwrap().to_string();
-    let name = value.get("name").unwrap().as_str().unwrap().to_string();
-    let args_str = value.get("args").unwrap().to_string();
-    let split_point = args_str.len() / 2;
-    vec![
-        ChatResponseStream::ToolUseEvent {
-            tool_use_id: tool_use_id.clone(),
-            name: name.clone(),
-            input: None,
-            stop: None,
-        },
-        ChatResponseStream::ToolUseEvent {
-            tool_use_id: tool_use_id.clone(),
-            name: name.clone(),
-            input: Some(args_str.split_at(split_point).0.to_string()),
-            stop: None,
-        },
-        ChatResponseStream::ToolUseEvent {
-            tool_use_id: tool_use_id.clone(),
-            name: name.clone(),
-            input: Some(args_str.split_at(split_point).1.to_string()),
-            stop: None,
-        },
-        ChatResponseStream::ToolUseEvent {
-            tool_use_id: tool_use_id.clone(),
-            name: name.clone(),
-            input: None,
-            stop: Some(true),
-        },
-    ]
-}
-
-/// Testing helper
-fn create_stream(model_responses: serde_json::Value) -> StreamingClient {
-    let mut mock = Vec::new();
-    for response in model_responses.as_array().unwrap() {
-        let mut stream = Vec::new();
-        for event in response.as_array().unwrap() {
-            match event {
-                serde_json::Value::String(assistant_text) => {
-                    stream.push(ChatResponseStream::AssistantResponseEvent {
-                        content: assistant_text.clone(),
-                    });
-                },
-                serde_json::Value::Object(tool_use) => {
-                    stream.append(&mut split_tool_use_event(tool_use));
-                },
-                other => panic!("Unexpected value: {:?}", other),
-            }
-        }
-        mock.push(stream);
-    }
-    StreamingClient::mock(mock)
-}
-
 /// Replaces amzn_codewhisperer_client::types::SubscriptionStatus with a more descriptive type.
 /// See response expectations in [`get_subscription_status`] for reasoning.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2130,8 +2055,7 @@ async fn get_subscription_status(os: &mut Os) -> Result<ActualSubscriptionStatus
         return Ok(ActualSubscriptionStatus::Active);
     }
 
-    let client = Client::new(&mut os.database, None).await?;
-    match client.create_subscription_token().await {
+    match os.client.create_subscription_token().await {
         Ok(response) => match response.status() {
             SubscriptionStatus::Active => Ok(ActualSubscriptionStatus::Expiring),
             SubscriptionStatus::Inactive => Ok(ActualSubscriptionStatus::None),
@@ -2189,7 +2113,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow() {
         let mut os = Os::new().await.unwrap();
-        let test_client = create_stream(serde_json::json!([
+        os.client.set_mock_output(serde_json::json!([
             [
                 "Sure, I'll create a file for you",
                 {
@@ -2222,7 +2146,6 @@ mod tests {
                 "exit".to_string(),
             ]),
             false,
-            test_client,
             || Some(80),
             tool_manager,
             None,
@@ -2243,7 +2166,7 @@ mod tests {
     #[tokio::test]
     async fn test_flow_tool_permissions() {
         let mut os = Os::new().await.unwrap();
-        let test_client = create_stream(serde_json::json!([
+        os.client.set_mock_output(serde_json::json!([
             [
                 "Ok",
                 {
@@ -2364,7 +2287,6 @@ mod tests {
                 "exit".to_string(),
             ]),
             false,
-            test_client,
             || Some(80),
             tool_manager,
             None,
@@ -2390,7 +2312,7 @@ mod tests {
     async fn test_flow_multiple_tools() {
         // let _ = tracing_subscriber::fmt::try_init();
         let mut os = Os::new().await.unwrap();
-        let test_client = create_stream(serde_json::json!([
+        os.client.set_mock_output(serde_json::json!([
             [
                 "Sure, I'll create a file for you",
                 {
@@ -2460,7 +2382,6 @@ mod tests {
                 "exit".to_string(),
             ]),
             false,
-            test_client,
             || Some(80),
             tool_manager,
             None,
@@ -2485,7 +2406,7 @@ mod tests {
     async fn test_flow_tools_trust_all() {
         // let _ = tracing_subscriber::fmt::try_init();
         let mut os = Os::new().await.unwrap();
-        let test_client = create_stream(serde_json::json!([
+        os.client.set_mock_output(serde_json::json!([
             [
                 "Sure, I'll create a file for you",
                 {
@@ -2535,7 +2456,6 @@ mod tests {
                 "exit".to_string(),
             ]),
             false,
-            test_client,
             || Some(80),
             tool_manager,
             None,
@@ -2572,6 +2492,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscribe_flow() {
         let mut os = Os::new().await.unwrap();
+        os.client.set_mock_output(serde_json::Value::Array(vec![]));
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
@@ -2583,7 +2504,6 @@ mod tests {
             None,
             InputSource::new_mock(vec!["/subscribe".to_string(), "y".to_string(), "/quit".to_string()]),
             false,
-            create_stream(serde_json::json!([])),
             || Some(80),
             tool_manager,
             None,

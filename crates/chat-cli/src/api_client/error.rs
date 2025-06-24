@@ -98,24 +98,24 @@ pub enum ApiClientError {
 impl ApiClientError {
     pub fn status_code(&self) -> Option<u16> {
         match self {
-            ApiClientError::GenerateCompletions(e) => sdk_status_code(e),
-            ApiClientError::GenerateRecommendations(e) => sdk_status_code(e),
-            ApiClientError::ListAvailableCustomizations(e) => sdk_status_code(e),
-            ApiClientError::ListAvailableServices(e) => sdk_status_code(e),
-            ApiClientError::CodewhispererGenerateAssistantResponse(e) => sdk_status_code(e),
-            ApiClientError::QDeveloperSendMessage(e) => sdk_status_code(e),
-            ApiClientError::CodewhispererChatResponseStream(_) => None,
-            ApiClientError::QDeveloperChatResponseStream(_) => None,
-            ApiClientError::ListAvailableProfilesError(e) => sdk_status_code(e),
-            ApiClientError::SendTelemetryEvent(e) => sdk_status_code(e),
-            ApiClientError::CreateSubscriptionToken(e) => sdk_status_code(e),
-            ApiClientError::QuotaBreach { status_code, .. } => *status_code,
-            ApiClientError::ContextWindowOverflow { status_code } => *status_code,
-            ApiClientError::SmithyBuild(_) => None,
-            ApiClientError::AuthError(_) => None,
-            ApiClientError::ModelOverloadedError { status_code, .. } => *status_code,
-            ApiClientError::MonthlyLimitReached { status_code } => *status_code,
-            ApiClientError::Credentials(_e) => None,
+            Self::GenerateCompletions(e) => sdk_status_code(e),
+            Self::GenerateRecommendations(e) => sdk_status_code(e),
+            Self::ListAvailableCustomizations(e) => sdk_status_code(e),
+            Self::ListAvailableServices(e) => sdk_status_code(e),
+            Self::CodewhispererGenerateAssistantResponse(e) => sdk_status_code(e),
+            Self::QDeveloperSendMessage(e) => sdk_status_code(e),
+            Self::CodewhispererChatResponseStream(_) => None,
+            Self::QDeveloperChatResponseStream(_) => None,
+            Self::ListAvailableProfilesError(e) => sdk_status_code(e),
+            Self::SendTelemetryEvent(e) => sdk_status_code(e),
+            Self::CreateSubscriptionToken(e) => sdk_status_code(e),
+            Self::QuotaBreach { status_code, .. } => *status_code,
+            Self::ContextWindowOverflow { status_code } => *status_code,
+            Self::SmithyBuild(_) => None,
+            Self::AuthError(_) => None,
+            Self::ModelOverloadedError { status_code, .. } => *status_code,
+            Self::MonthlyLimitReached { status_code } => *status_code,
+            Self::Credentials(_e) => None,
         }
     }
 }
@@ -123,32 +123,29 @@ impl ApiClientError {
 impl ReasonCode for ApiClientError {
     fn reason_code(&self) -> String {
         match self {
-            ApiClientError::GenerateCompletions(e) => sdk_error_code(e),
-            ApiClientError::GenerateRecommendations(e) => sdk_error_code(e),
-            ApiClientError::ListAvailableCustomizations(e) => sdk_error_code(e),
-            ApiClientError::ListAvailableServices(e) => sdk_error_code(e),
-            ApiClientError::CodewhispererGenerateAssistantResponse(e) => sdk_error_code(e),
-            ApiClientError::QDeveloperSendMessage(e) => sdk_error_code(e),
-            ApiClientError::CodewhispererChatResponseStream(e) => sdk_error_code(e),
-            ApiClientError::QDeveloperChatResponseStream(e) => sdk_error_code(e),
-            ApiClientError::ListAvailableProfilesError(e) => sdk_error_code(e),
-            ApiClientError::SendTelemetryEvent(e) => sdk_error_code(e),
-            ApiClientError::CreateSubscriptionToken(e) => sdk_error_code(e),
-            ApiClientError::QuotaBreach { .. } => "QuotaBreachError".to_string(),
-            ApiClientError::ContextWindowOverflow { .. } => "ContextWindowOverflow".to_string(),
-            ApiClientError::SmithyBuild(_) => "SmithyBuildError".to_string(),
-            ApiClientError::AuthError(_) => "AuthError".to_string(),
-            ApiClientError::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
-            ApiClientError::MonthlyLimitReached { .. } => "MonthlyLimitReached".to_string(),
-            ApiClientError::Credentials(_) => "CredentialsError".to_string(),
+            Self::GenerateCompletions(e) => sdk_error_code(e),
+            Self::GenerateRecommendations(e) => sdk_error_code(e),
+            Self::ListAvailableCustomizations(e) => sdk_error_code(e),
+            Self::ListAvailableServices(e) => sdk_error_code(e),
+            Self::CodewhispererGenerateAssistantResponse(e) => sdk_error_code(e),
+            Self::QDeveloperSendMessage(e) => sdk_error_code(e),
+            Self::CodewhispererChatResponseStream(e) => sdk_error_code(e),
+            Self::QDeveloperChatResponseStream(e) => sdk_error_code(e),
+            Self::ListAvailableProfilesError(e) => sdk_error_code(e),
+            Self::SendTelemetryEvent(e) => sdk_error_code(e),
+            Self::CreateSubscriptionToken(e) => sdk_error_code(e),
+            Self::QuotaBreach { .. } => "QuotaBreachError".to_string(),
+            Self::ContextWindowOverflow { .. } => "ContextWindowOverflow".to_string(),
+            Self::SmithyBuild(_) => "SmithyBuildError".to_string(),
+            Self::AuthError(_) => "AuthError".to_string(),
+            Self::ModelOverloadedError { .. } => "ModelOverloadedError".to_string(),
+            Self::MonthlyLimitReached { .. } => "MonthlyLimitReached".to_string(),
+            Self::Credentials(_) => "CredentialsError".to_string(),
         }
     }
 }
 
-fn sdk_error_code<T, R>(e: &SdkError<T, R>) -> String
-where
-    T: ProvideErrorMetadata,
-{
+fn sdk_error_code<T: ProvideErrorMetadata, R>(e: &SdkError<T, R>) -> String {
     e.as_service_error()
         .and_then(|se| se.meta().code().map(str::to_string))
         .unwrap_or_else(|| e.to_string())
