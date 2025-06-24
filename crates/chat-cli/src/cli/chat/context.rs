@@ -584,7 +584,7 @@ impl ContextManager {
 
         for (hook_list, is_global) in configs {
             hooks.extend(hook_list.iter_mut().map(|(name, h)| {
-                h.name = name.to_string();
+                h.name = name.clone();
                 h.is_global = is_global;
                 &*h
             }));

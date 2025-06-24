@@ -76,7 +76,7 @@ where
                     .headers()
                     .get("Accept")
                     .and_then(|accept| accept.to_str().ok())
-                    .is_some_and(|accept| accept.split('/').last() == Some("json"));
+                    .is_some_and(|accept| accept.split('/').next_back() == Some("json"));
 
                 let mut response = match f(ctx_clone, req, window_id.window_id()).in_current_span().await {
                     Ok(res) => res,

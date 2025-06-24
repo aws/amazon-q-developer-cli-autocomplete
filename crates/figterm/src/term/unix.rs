@@ -1,7 +1,6 @@
 use std::fs::OpenOptions;
 use std::io::{
     Error as IoError,
-    ErrorKind,
     Write,
     stdin,
     stdout,
@@ -130,7 +129,7 @@ impl Write for TtyWriteHandle {
     fn flush(&mut self) -> std::result::Result<(), IoError> {
         self.flush_local_buffer()?;
         self.drain()
-            .map_err(|e| IoError::new(ErrorKind::Other, format!("{e}")))?;
+            .map_err(|e| IoError::other(format!("{e}")))?;
         Ok(())
     }
 }

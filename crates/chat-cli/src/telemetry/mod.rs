@@ -533,12 +533,12 @@ pub fn get_error_reason<E>(error: &E) -> (String, String)
 where
     E: ReasonCode + 'static,
 {
-    let err_chain = eyre::Chain::new(error);
+    let mut err_chain = eyre::Chain::new(error);
     let reason_desc = if err_chain.len() > 1 {
         format!(
             "'{}' caused by: {}",
             error,
-            err_chain.last().map_or("UNKNOWN".to_string(), |e| e.to_string())
+            err_chain.next_back().map_or("UNKNOWN".to_string(), |e| e.to_string())
         )
     } else {
         error.to_string()

@@ -605,7 +605,7 @@ impl ToolManagerBuilder {
         // TODO: accommodate hot reload of mcp servers
         if let (Some(sender), Some(receiver)) = (sender, receiver) {
             let clients = clients.iter().fold(HashMap::new(), |mut acc, (n, c)| {
-                acc.insert(n.to_string(), Arc::downgrade(c));
+                acc.insert(n.clone(), Arc::downgrade(c));
                 acc
             });
             let prompts_clone = prompts.clone();
@@ -635,7 +635,7 @@ impl ToolManagerBuilder {
                                     return acc;
                                 };
                                 for (prompt_name, prompt_get) in prompt_gets.iter() {
-                                    acc.entry(prompt_name.to_string())
+                                    acc.entry(prompt_name.clone())
                                         .and_modify(|bundles| {
                                             bundles.push(PromptBundle {
                                                 server_name: server_name.to_owned(),
@@ -1156,7 +1156,7 @@ impl ToolManager {
                             .map_err(|e| GetPromptError::Synchronization(e.to_string()))?;
                         for (prompt_name, prompt_get) in prompt_gets.iter() {
                             prompts_wl
-                                .entry(prompt_name.to_string())
+                                .entry(prompt_name.clone())
                                 .and_modify(|bundles| {
                                     let mut is_modified = false;
                                     for bundle in &mut *bundles {
@@ -1224,7 +1224,6 @@ impl ToolManager {
                     has_retried = true;
                     self.refresh_prompts(&mut prompts_wl)?;
                     maybe_bundles = prompts_wl.get(&prompt_name);
-                    continue 'blk;
                 },
                 (_, _, true) => {
                     break 'blk Err(GetPromptError::PromptNotFound(prompt_name));
@@ -1243,7 +1242,7 @@ impl ToolManager {
                     return acc;
                 };
                 for (prompt_name, prompt_get) in prompt_gets.iter() {
-                    acc.entry(prompt_name.to_string())
+                    acc.entry(prompt_name.clone())
                         .and_modify(|bundles| {
                             bundles.push(PromptBundle {
                                 server_name: server_name.to_owned(),

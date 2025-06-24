@@ -49,6 +49,7 @@ static PKCE_REGISTRATION: LazyLock<Arc<PkceState<Client>>> = LazyLock::new(PkceS
 
 const BUILDER_ID_DATA_KEY: &str = "builder-id-data";
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum PkceError {
     InvalidRequestId,

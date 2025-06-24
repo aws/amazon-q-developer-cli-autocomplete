@@ -102,7 +102,7 @@ impl Env {
     /// # Safety
     ///
     /// See [std::env::set_var] for the safety requirements.
-    pub unsafe fn set_var(&self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) {
+    pub unsafe fn set_var(&self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) { unsafe {
         use inner::Inner;
         match &self.0 {
             Inner::Real => std::env::set_var(key, value),
@@ -113,7 +113,7 @@ impl Env {
                 );
             },
         }
-    }
+    }}
 
     pub fn home(&self) -> Option<PathBuf> {
         match &self.0 {

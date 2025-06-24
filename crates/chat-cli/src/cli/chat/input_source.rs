@@ -16,6 +16,7 @@ mod inner {
 
     use super::super::prompt::ChatHelper;
 
+    #[allow(clippy::large_enum_variant)]
     #[derive(Debug)]
     pub enum Inner {
         Readline(Editor<ChatHelper, FileHistory>),

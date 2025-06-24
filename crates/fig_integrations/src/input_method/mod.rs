@@ -372,7 +372,7 @@ impl InputMethod {
     }
 
     pub fn target_bundle_path(&self) -> Result<PathBuf, InputMethodError> {
-        let input_method_name = match self.bundle_path.components().last() {
+        let input_method_name = match self.bundle_path.components().next_back() {
             Some(name) => name.as_os_str(),
             None => {
                 return Err(InputMethodError::InvalidBundle {

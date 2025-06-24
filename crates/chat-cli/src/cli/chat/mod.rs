@@ -379,11 +379,11 @@ enum ToolUseStatus {
 #[derive(Debug, Error)]
 pub enum ChatError {
     #[error("{0}")]
-    Client(#[from] crate::api_client::ApiClientError),
+    Client(Box<crate::api_client::ApiClientError>),
     #[error("{0}")]
     Auth(#[from] AuthError),
     #[error("{0}")]
-    ResponseStream(#[from] parser::RecvError),
+    ResponseStream(Box<parser::RecvError>),
     #[error("{0}")]
     Std(#[from] std::io::Error),
     #[error("{0}")]
@@ -423,6 +423,18 @@ impl ReasonCode for ChatError {
             ChatError::GetPromptError(_) => "GetPromptError".to_string(),
             ChatError::Auth(_) => "AuthError".to_string(),
         }
+    }
+}
+
+impl From<ApiClientError> for ChatError {
+    fn from(value: ApiClientError) -> Self {
+        Self::Client(Box::new(value))
+    }
+}
+
+impl From<parser::RecvError> for ChatError {
+    fn from(value: parser::RecvError) -> Self {
+        Self::ResponseStream(Box::new(value))
     }
 }
 
@@ -649,7 +661,7 @@ impl ChatSession {
 
                 ("Tool use was interrupted", Report::from(err))
             },
-            ChatError::Client(err) => match err {
+            ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
                 // this case, attempt to automatically compact the history for the user.
                 ApiClientError::ContextWindowOverflow { .. } => {
@@ -807,6 +819,7 @@ impl Drop for ChatSession {
 ///
 /// Intended to provide more robust handling around state transitions while dealing with, e.g.,
 /// tool validation, execution, response stream handling, etc.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 enum ChatState {
     /// Prompt the user with `tool_uses`, if available.
@@ -2074,7 +2087,7 @@ fn create_stream(model_responses: serde_json::Value) -> StreamingClient {
             match event {
                 serde_json::Value::String(assistant_text) => {
                     stream.push(ChatResponseStream::AssistantResponseEvent {
-                        content: assistant_text.to_string(),
+                        content: assistant_text.clone(),
                     });
                 },
                 serde_json::Value::Object(tool_use) => {

@@ -19,7 +19,6 @@ use std::ffi::{
     CString,
     OsStr,
 };
-use std::iter::repeat;
 use std::sync::{
     LazyLock,
     Mutex,
@@ -734,8 +733,7 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
                                                 let buffer = buffer.trim();
                                                 if buffer.len() > 1 && buffer.starts_with('#') && term.columns() > buffer.len() {
                                                     write_buffer.extend(
-                                                        &repeat(b'\x08')
-                                                            .take(buffer.len()
+                                                        &std::iter::repeat_n(b'\x08', buffer.len()
                                                             .max(cursor_idx.unwrap_or(0)))
                                                             .collect::<Vec<_>>()
                                                     );

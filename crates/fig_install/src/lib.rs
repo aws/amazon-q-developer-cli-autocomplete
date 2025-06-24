@@ -148,10 +148,7 @@ pub async fn check_for_updates(ignore_rollout: bool) -> Result<Option<UpdatePack
     let manifest = manifest();
     let ctx = Context::new();
     let file_type = match (&manifest.variant, ctx.platform().os()) {
-        (Variant::Full, fig_os_shim::Os::Linux) => match index::get_file_type(&ctx, &manifest.variant).await {
-            Ok(file_type) => Some(file_type),
-            _ => None,
-        },
+        (Variant::Full, fig_os_shim::Os::Linux) => (index::get_file_type(&ctx, &manifest.variant).await).ok(),
         _ => Some(index::get_file_type(&Context::new(), &manifest.variant).await?),
     };
     index::check_for_updates(

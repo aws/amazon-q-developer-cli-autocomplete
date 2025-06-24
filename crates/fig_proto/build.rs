@@ -16,7 +16,7 @@ fn protoc_version() -> Option<Version> {
 
     let version = version.trim();
     eprintln!("version: {version:?}");
-    let version = version.split(' ').last().expect("No version");
+    let version = version.split(' ').next_back().expect("No version");
     let version = version.split('.').collect::<Vec<_>>();
     let version = version
         .iter()

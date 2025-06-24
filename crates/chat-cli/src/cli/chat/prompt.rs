@@ -146,10 +146,10 @@ impl PromptCompleter {
         let receiver = &self.receiver;
         sender
             .send(if !word.is_empty() { Some(word.to_string()) } else { None })
-            .map_err(|e| ReadlineError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| ReadlineError::Io(std::io::Error::other(e.to_string())))?;
         let prompt_info = receiver
             .recv()
-            .map_err(|e| ReadlineError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+            .map_err(|e| ReadlineError::Io(std::io::Error::other(e.to_string())))?
             .iter()
             .map(|n| format!("@{n}"))
             .collect::<Vec<_>>();
