@@ -22,7 +22,6 @@ use crate::cli::chat::cli::hooks::{
     HookTrigger,
 };
 use crate::os::Os;
-use crate::util::directories;
 
 /// Configuration for context files, containing paths to include in the context.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -409,15 +408,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_exceeds_limit() -> Result<()> {
-        let ctx = Context::new();
+        let os = Os::new();
         let mut manager = create_test_context_manager(Some(2)).expect("Failed to create test context manager");
 
-        ctx.fs.create_dir_all("test").await?;
-        ctx.fs.write("test/to-include.md", "ha").await?;
-        ctx.fs
-            .write("test/to-drop.md", "long content that exceed limit")
-            .await?;
-        manager.add_paths(&ctx, vec!["test/*.md".to_string()], false).await?;
+        os.fs.create_dir_all("test").await?;
+        os.fs.write("test/to-include.md", "ha").await?;
+        os.fs.write("test/to-drop.md", "long content that exceed limit").await?;
+        manager.add_paths(&os, vec!["test/*.md".to_string()], false).await?;
 
         let (used, dropped) = manager.collect_context_files_with_limit(&os).await.unwrap();
 
@@ -442,7 +439,7 @@ mod tests {
             "no files should be returned for an empty profile when force is false"
         );
 
-        manager.add_paths(&ctx, vec!["test/*.md".to_string()], false).await?;
+        manager.add_paths(&os, vec!["test/*.md".to_string()], false).await?;
         let files = manager.get_context_files(&os).await?;
         assert!(files[0].0.ends_with("p1.md"));
         assert_eq!(files[0].1, "p1");
@@ -451,7 +448,7 @@ mod tests {
 
         assert!(
             manager
-                .add_paths(&os, vec!["test/*.txt".to_string()], false, false)
+                .add_paths(&os, vec!["test/*.txt".to_string()], false)
                 .await
                 .is_err(),
             "adding a glob with no matching and without force should fail"

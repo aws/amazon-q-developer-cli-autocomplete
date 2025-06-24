@@ -31,8 +31,6 @@ use clap::{
     Args,
     Parser,
 };
-use consts::DUMMY_TOOL_NAME;
-use context::ContextManager;
 pub use conversation::ConversationState;
 use conversation::TokenWarningLevel;
 use crossterm::style::{
@@ -189,7 +187,7 @@ impl ChatArgs {
         };
 
         let agents = {
-            let mut agents = AgentCollection::load(ctx, self.profile.as_deref(), &mut stderr).await;
+            let mut agents = AgentCollection::load(os, self.profile.as_deref(), &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
             if let Some(name) = self.profile.as_ref() {
@@ -2240,17 +2238,17 @@ mod tests {
     use crate::cli::agent::Agent;
     use crate::os::Env;
 
-    async fn get_test_agents(ctx: &Context) -> AgentCollection {
+    async fn get_test_agents(os: &Os) -> AgentCollection {
         const AGENT_PATH: &str = "/persona/TestAgent.json";
         let mut agents = AgentCollection::default();
         let agent = Agent {
             path: Some(PathBuf::from(AGENT_PATH)),
             ..Default::default()
         };
-        if let Ok(false) = ctx.fs.try_exists(AGENT_PATH).await {
+        if let Ok(false) = os.fs.try_exists(AGENT_PATH).await {
             let content = serde_json::to_string_pretty(&agent).expect("Failed to serialize test agent to file");
             let agent_path = PathBuf::from(AGENT_PATH);
-            ctx.fs
+            os.fs
                 .create_dir_all(
                     agent_path
                         .parent()
@@ -2258,7 +2256,7 @@ mod tests {
                 )
                 .await
                 .expect("Failed to create test agent dir");
-            ctx.fs
+            os.fs
                 .write(agent_path, &content)
                 .await
                 .expect("Failed to write test agent to file");
@@ -2292,7 +2290,7 @@ mod tests {
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
         let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
-        let agents = get_test_agents(&ctx).await;
+        let agents = get_test_agents(&os).await;
 
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
@@ -2426,7 +2424,7 @@ mod tests {
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
         let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
-        let agents = get_test_agents(&ctx).await;
+        let agents = get_test_agents(&os).await;
 
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
@@ -2470,10 +2468,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(ctx.fs.read_to_string("/file2.txt").await.unwrap(), "Hello, world!\n");
-        assert_eq!(ctx.fs.read_to_string("/file3.txt").await.unwrap(), "Hello, world!\n");
-        assert!(!ctx.fs.exists("/file4.txt"));
-        assert_eq!(ctx.fs.read_to_string("/file5.txt").await.unwrap(), "Hello, world!\n");
+        assert_eq!(os.fs.read_to_string("/file2.txt").await.unwrap(), "Hello, world!\n");
+        assert_eq!(os.fs.read_to_string("/file3.txt").await.unwrap(), "Hello, world!\n");
+        assert!(!os.fs.exists("/file4.txt"));
+        assert_eq!(os.fs.read_to_string("/file5.txt").await.unwrap(), "Hello, world!\n");
         // TODO: fix this with persona change (dingfeli)
         // assert!(!ctx.fs.exists("/file6.txt"));
     }
@@ -2536,7 +2534,7 @@ mod tests {
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
         let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
-        let agents = get_test_agents(&ctx).await;
+        let agents = get_test_agents(&os).await;
 
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
@@ -2617,7 +2615,7 @@ mod tests {
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
         let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
-        let agents = get_test_agents(&ctx).await;
+        let agents = get_test_agents(&os).await;
 
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
@@ -2676,7 +2674,7 @@ mod tests {
         let env = Env::new();
         let mut database = Database::new().await.unwrap();
         let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
-        let agents = get_test_agents(&ctx).await;
+        let agents = get_test_agents(&os).await;
 
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))

@@ -141,22 +141,6 @@ impl GhIssue {
         };
 
         os_str.push_str(&format!("current_profile={}\n", os_manager.current_profile));
-        match os_manager.list_profiles(os).await {
-            Ok(profiles) if !profiles.is_empty() => {
-                os_str.push_str(&format!("profiles=\n{}\n\n", profiles.join("\n")));
-            },
-            _ => os_str.push_str("profiles=none\n\n"),
-        }
-
-        // Context file categories
-        if os_manager.global_config.paths.is_empty() {
-            os_str.push_str("global_context=none\n\n");
-        } else {
-            os_str.push_str(&format!(
-                "global_context=\n{}\n\n",
-                &os_manager.global_config.paths.join("\n")
-            ));
-        }
 
         if os_manager.profile_config.paths.is_empty() {
             os_str.push_str("profile_context=none\n\n");

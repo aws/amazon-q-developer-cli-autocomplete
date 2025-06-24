@@ -8,10 +8,6 @@ pub mod thinking;
 pub mod use_aws;
 
 use std::borrow::Borrow;
-use std::collections::{
-    HashMap,
-    HashSet,
-};
 use std::io::Write;
 use std::path::{
     Path,
@@ -85,6 +81,7 @@ impl Tool {
             Tool::Custom(custom_tool) => agent.eval_perm(custom_tool),
             Tool::GhIssue(_) => PermissionEvalResult::Allow,
             Tool::Thinking(_) => PermissionEvalResult::Allow,
+            Tool::Knowledge(_) => PermissionEvalResult::Ask,
         }
     }
 

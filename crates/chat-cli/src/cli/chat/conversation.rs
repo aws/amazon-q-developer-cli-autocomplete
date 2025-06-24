@@ -1054,7 +1054,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
-        let mut os = Os::new();
+        let os = Os::new();
         let mut database = Database::new().await.unwrap();
         let agents = AgentCollection::default();
         let mut output = NullWriter;
@@ -1159,7 +1159,7 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_with_context_files() {
         let mut database = Database::new().await.unwrap();
-        let mut os = Os::new();
+        let os = Os::new();
         let agents = {
             let mut agents = AgentCollection::default();
             let mut agent = Agent::default();
@@ -1215,7 +1215,7 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_additional_context() {
         let mut database = Database::new().await.unwrap();
-        let mut os = Os::new();
+        let os = Os::new();
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
         let agents = {

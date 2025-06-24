@@ -33,7 +33,7 @@ use super::chat::tools::{
     DEFAULT_APPROVE,
     ToolOrigin,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::util::{
     MCP_SERVER_TOOL_DELIMITER,
     directories,
@@ -47,14 +47,14 @@ pub struct McpServerConfig {
 }
 
 impl McpServerConfig {
-    pub async fn load_from_file(ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let contents = ctx.fs.read_to_string(path.as_ref()).await?;
+    pub async fn load_from_file(os: &Os, path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let contents = os.fs.read_to_string(path.as_ref()).await?;
         Ok(serde_json::from_str(&contents)?)
     }
 
-    pub async fn save_to_file(&self, ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<()> {
+    pub async fn save_to_file(&self, os: &Os, path: impl AsRef<Path>) -> eyre::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        ctx.fs.write(path.as_ref(), json).await?;
+        os.fs.write(path.as_ref(), json).await?;
         Ok(())
     }
 
@@ -172,7 +172,7 @@ impl AgentCollection {
     /// This function assumes the relevant transformation to the tool names have been done:
     /// - model tool name -> host tool name
     /// - custom tool namespacing
-    pub fn untrust_tools(&mut self, tool_names: &Vec<String>) {
+    pub fn untrust_tools(&mut self, tool_names: &[String]) {
         if let Some(agent) = self.get_active_mut() {
             agent.allowed_tools.retain(|t| !tool_names.contains(t));
         }
@@ -205,9 +205,9 @@ impl AgentCollection {
         eyre::bail!("No active agent. Agent not published");
     }
 
-    pub async fn reload_personas(&mut self, ctx: &Context, output: &mut impl Write) -> eyre::Result<()> {
+    pub async fn reload_personas(&mut self, os: &Os, output: &mut impl Write) -> eyre::Result<()> {
         let persona_name = self.get_active().map(|a| a.name.as_str());
-        let mut new_self = Self::load(ctx, persona_name, output).await;
+        let mut new_self = Self::load(os, persona_name, output).await;
         std::mem::swap(self, &mut new_self);
         Ok(())
     }
@@ -216,11 +216,7 @@ impl AgentCollection {
         Ok(self.agents.keys().cloned().collect::<Vec<_>>())
     }
 
-    pub async fn save_persona(
-        &mut self,
-        ctx: &Context,
-        subcribers: Vec<&dyn AgentSubscriber>,
-    ) -> eyre::Result<PathBuf> {
+    pub async fn save_persona(&mut self, os: &Os, subcribers: Vec<&dyn AgentSubscriber>) -> eyre::Result<PathBuf> {
         let agent = self.get_active_mut().ok_or(eyre::eyre!("No active persona selected"))?;
         for sub in subcribers {
             sub.upload(agent).await;
@@ -232,7 +228,7 @@ impl AgentCollection {
             .ok_or(eyre::eyre!("Persona path associated not found"))?;
         let contents =
             serde_json::to_string_pretty(agent).map_err(|e| eyre::eyre!("Error serializing persona: {:?}", e))?;
-        ctx.fs
+        os.fs
             .write(path, &contents)
             .await
             .map_err(|e| eyre::eyre!("Error writing persona to file: {:?}", e))?;
@@ -242,10 +238,10 @@ impl AgentCollection {
 
     /// Migrated from [create_profile] from context.rs, which was creating profiles under the
     /// global directory. We shall preserve this implicit behavior for now until further notice.
-    pub async fn create_persona(&mut self, ctx: &Context, name: &str) -> eyre::Result<()> {
+    pub async fn create_persona(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
         validate_persona_name(name)?;
 
-        let persona_path = directories::chat_global_persona_path(ctx)?.join(format!("{name}.json"));
+        let persona_path = directories::chat_global_persona_path(os)?.join(format!("{name}.json"));
         if persona_path.exists() {
             return Err(eyre::eyre!("Persona '{}' already exists", name));
         }
@@ -259,16 +255,16 @@ impl AgentCollection {
             .map_err(|e| eyre::eyre!("Failed to serialize profile configuration: {}", e))?;
 
         if let Some(parent) = persona_path.parent() {
-            ctx.fs.create_dir_all(parent).await?;
+            os.fs.create_dir_all(parent).await?;
         }
-        ctx.fs.write(&persona_path, contents).await?;
+        os.fs.write(&persona_path, contents).await?;
 
         self.agents.insert(name.to_string(), agent);
 
         Ok(())
     }
 
-    pub async fn delete_persona(&mut self, ctx: &Context, name: &str) -> eyre::Result<()> {
+    pub async fn delete_persona(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
         if name == self.active_idx.as_str() {
             eyre::bail!("Cannot delete the active persona. Switch to another persona first");
         }
@@ -279,7 +275,7 @@ impl AgentCollection {
             .ok_or(eyre::eyre!("Persona '{name}' does not exist"))?;
         match to_delete.path.as_ref() {
             Some(path) if path.exists() => {
-                ctx.fs.remove_file(path).await?;
+                os.fs.remove_file(path).await?;
             },
             _ => eyre::bail!("Persona {name} does not have an associated path"),
         }
@@ -289,7 +285,7 @@ impl AgentCollection {
         Ok(())
     }
 
-    pub async fn load(ctx: &Context, persona_name: Option<&str>, output: &mut impl Write) -> Self {
+    pub async fn load(os: &Os, persona_name: Option<&str>, output: &mut impl Write) -> Self {
         let mut local_agents = 'local: {
             let Ok(path) = directories::chat_local_persona_dir() else {
                 break 'local Vec::<Agent>::new();
@@ -301,14 +297,14 @@ impl AgentCollection {
         };
 
         let mut global_agents = 'global: {
-            let Ok(path) = directories::chat_global_persona_path(ctx) else {
+            let Ok(path) = directories::chat_global_persona_path(os) else {
                 break 'global Vec::<Agent>::new();
             };
             let files = match tokio::fs::read_dir(&path).await {
                 Ok(files) => files,
                 Err(e) => {
                     if matches!(e.kind(), io::ErrorKind::NotFound) {
-                        if let Err(e) = ctx.fs.create_dir_all(&path).await {
+                        if let Err(e) = os.fs.create_dir_all(&path).await {
                             error!("Error creating global persona dir: {:?}", e);
                         }
                     }
@@ -346,7 +342,7 @@ impl AgentCollection {
         // Ensure that we always have a default persona under the global directory
         if !local_agents.iter().any(|a| a.name == "default") {
             let default_agent = Agent {
-                path: directories::chat_global_persona_path(ctx)
+                path: directories::chat_global_persona_path(os)
                     .ok()
                     .map(|p| p.join("default.json")),
                 ..Default::default()
@@ -354,7 +350,7 @@ impl AgentCollection {
 
             match serde_json::to_string_pretty(&default_agent) {
                 Ok(content) => {
-                    if let Ok(path) = directories::chat_global_persona_path(ctx) {
+                    if let Ok(path) = directories::chat_global_persona_path(os) {
                         let default_path = path.join("default.json");
                         if let Err(e) = tokio::fs::write(default_path, &content).await {
                             error!("Error writing default persona to file: {:?}", e);
@@ -642,7 +638,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_persona() {
-        let ctx = Context::new();
+        let ctx = Os::new();
         let mut output = NullWriter;
         let mut collection = AgentCollection::load(&ctx, None, &mut output).await;
 
@@ -688,7 +684,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_persona() {
         let mut collection = AgentCollection::default();
-        let ctx = Context::new();
+        let ctx = Os::new();
 
         let persona_name = "test_persona";
         let result = collection.create_persona(&ctx, persona_name).await;
@@ -719,7 +715,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_persona() {
         let mut collection = AgentCollection::default();
-        let ctx = Context::new();
+        let ctx = Os::new();
 
         let persona_name_one = "test_persona_one";
         collection

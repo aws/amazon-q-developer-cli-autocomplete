@@ -85,7 +85,7 @@ impl ProfileSubcommand {
                 // switch / create profile after a session has started.
                 // TODO: perhaps revive this after we have a decision on profile create /
                 // switch
-                let global_path = if let Ok(path) = chat_global_persona_path(ctx) {
+                let global_path = if let Ok(path) = chat_global_persona_path(os) {
                     path.to_str().unwrap_or("default global persona path").to_string()
                 } else {
                     "default global persona path".to_string()
