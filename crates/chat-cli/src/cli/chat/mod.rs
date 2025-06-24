@@ -1129,9 +1129,6 @@ impl ChatSession {
 
     /// Read input from the user.
     async fn prompt_user(&mut self, os: &Os, skip_printing_tools: bool) -> Result<ChatState, ChatError> {
-        #[cfg(windows)]
-        let _ = database;
-
         execute!(self.stderr, cursor::Show)?;
 
         // Check token usage and display warnings if needed
