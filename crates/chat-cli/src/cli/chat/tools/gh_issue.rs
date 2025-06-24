@@ -76,7 +76,7 @@ impl GhIssue {
             steps_to_reproduce: self.steps_to_reproduce.clone(),
             additional_environment: Some(additional_environment),
         }
-        .create_url()
+        .create_url(os)
         .await
         .wrap_err("failed to invoke gh issue tool");
 

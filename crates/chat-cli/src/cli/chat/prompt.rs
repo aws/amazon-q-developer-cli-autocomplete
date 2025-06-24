@@ -36,8 +36,8 @@ use winnow::stream::AsChar;
 
 pub use super::prompt_parser::generate_prompt;
 use super::prompt_parser::parse_prompt_components;
-use crate::database::Database;
 use crate::database::settings::Setting;
+use crate::os::Os;
 
 pub const COMMANDS: &[&str] = &[
     "/clear",
@@ -288,11 +288,11 @@ impl Highlighter for ChatHelper {
 }
 
 pub fn rl(
-    database: &Database,
+    os: &Os,
     sender: std::sync::mpsc::Sender<Option<String>>,
     receiver: std::sync::mpsc::Receiver<Vec<String>>,
 ) -> Result<Editor<ChatHelper, DefaultHistory>> {
-    let edit_mode = match database.settings.get_string(Setting::ChatEditMode).as_deref() {
+    let edit_mode = match os.database.settings.get_string(Setting::ChatEditMode).as_deref() {
         Some("vi" | "vim") => EditMode::Vi,
         _ => EditMode::Emacs,
     };

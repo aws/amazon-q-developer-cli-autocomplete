@@ -6,8 +6,12 @@ mod fs;
 mod sysinfo;
 
 pub use env::Env;
+use eyre::Result;
 pub use fs::Fs;
 pub use sysinfo::SysInfo;
+
+use crate::database::Database;
+use crate::telemetry::TelemetryThread;
 
 const WINDOWS_USER_HOME: &str = "C:\\Users\\testuser";
 const UNIX_USER_HOME: &str = "/home/testuser";
@@ -18,25 +22,35 @@ pub const ACTIVE_USER_HOME: &str = if cfg!(windows) {
     UNIX_USER_HOME
 };
 
+// TODO OS SHOULD NOT BE CLONE
+
 /// Struct that contains the interface to every system related IO operation.
 ///
 /// Every operation that accesses the file system, environment, or other related platform
 /// primitives should be done through a [Context] as this enables testing otherwise untestable
 /// code paths in unit tests.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct Os {
     pub fs: Fs,
     pub env: Env,
     pub sysinfo: SysInfo,
+    pub database: Database,
+    pub telemetry: TelemetryThread,
 }
 
 impl Os {
-    pub fn new() -> Self {
-        Self {
+    pub async fn new() -> Result<Self> {
+        let env = Env::new();
+        let mut database = crate::database::Database::new().await?;
+        let telemetry = crate::telemetry::TelemetryThread::new(&env, &mut database).await?;
+
+        Ok(Self {
             fs: Fs::new(),
-            env: Env::new(),
+            env,
             sysinfo: SysInfo::new(),
-        }
+            database,
+            telemetry,
+        })
     }
 
     /// TODO: delete this function
@@ -48,19 +62,13 @@ impl Os {
     }
 }
 
-impl Default for Os {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn test_context_builder_with_test_home() {
-        let os = Os::new().with_env_var("hello", "world");
+        let os = Os::new().await.unwrap().with_env_var("hello", "world");
 
         #[cfg(windows)]
         {

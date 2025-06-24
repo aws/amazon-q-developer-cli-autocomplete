@@ -745,7 +745,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_non_utf8_binary_file() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let binary_data = vec![0xff, 0xfe, 0xfd, 0xfc, 0xfb, 0xfa, 0xf9, 0xf8];
@@ -776,7 +776,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_latin1_encoded_file() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let latin1_data = vec![99, 97, 102, 233]; // "café" in Latin-1
@@ -807,7 +807,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_non_utf8_file() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let mut mixed_data = Vec::new();
@@ -866,7 +866,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_windows1252_encoded_file() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let mut windows1252_data = Vec::new();
@@ -902,7 +902,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_pattern_with_replacement_chars() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let mut data_with_invalid_utf8 = Vec::new();
@@ -939,7 +939,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_read_empty_file_with_invalid_utf8() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let invalid_only_data = vec![0xff, 0xfe, 0xfd];

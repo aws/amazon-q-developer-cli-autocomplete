@@ -813,7 +813,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_profile_ops() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
 
         assert_eq!(manager.current_profile, "default");
@@ -852,7 +852,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_exceeds_limit() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(Some(2)).await?;
 
         os.fs.create_dir_all("test").await?;
@@ -872,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_ops() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
 
         // Create some test files for matching.

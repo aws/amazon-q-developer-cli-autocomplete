@@ -19,7 +19,6 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::os::Os;
 use crate::util::knowledge_store::KnowledgeStore;
@@ -56,13 +55,8 @@ enum OperationResult {
 }
 
 impl KnowledgeSubcommand {
-    pub async fn execute(
-        self,
-        os: &Os,
-        database: &Database,
-        session: &mut ChatSession,
-    ) -> Result<ChatState, ChatError> {
-        if !Self::is_feature_enabled(database) {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+        if !Self::is_feature_enabled(os) {
             Self::write_feature_disabled_message(session)?;
             return Ok(Self::default_chat_state());
         }
@@ -74,8 +68,11 @@ impl KnowledgeSubcommand {
         Ok(Self::default_chat_state())
     }
 
-    fn is_feature_enabled(database: &Database) -> bool {
-        database.settings.get_bool(Setting::EnabledKnowledge).unwrap_or(false)
+    fn is_feature_enabled(os: &Os) -> bool {
+        os.database
+            .settings
+            .get_bool(Setting::EnabledKnowledge)
+            .unwrap_or(false)
     }
 
     fn write_feature_disabled_message(session: &mut ChatSession) -> Result<(), std::io::Error> {

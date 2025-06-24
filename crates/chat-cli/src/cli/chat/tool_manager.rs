@@ -86,7 +86,6 @@ use crate::cli::chat::tools::{
     ToolOrigin,
     ToolSpec,
 };
-use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::{
     JsonRpcResponse,
@@ -254,7 +253,7 @@ impl ToolManagerBuilder {
 
     pub async fn build(
         mut self,
-        telemetry: &TelemetryThread,
+        os: &mut Os,
         mut output: Box<dyn Write + Send + Sync + 'static>,
         interactive: bool,
     ) -> eyre::Result<ToolManager> {
@@ -415,7 +414,7 @@ impl ToolManagerBuilder {
         let pending = Arc::new(RwLock::new(HashSet::<String>::new()));
         let pending_clone = pending.clone();
         let (mut msg_rx, messenger_builder) = ServerMessengerBuilder::new(20);
-        let telemetry_clone = telemetry.clone();
+        let telemetry_clone = os.telemetry.clone();
         let notify = Arc::new(Notify::new());
         let notify_weak = Arc::downgrade(&notify);
         let load_record = Arc::new(Mutex::new(HashMap::<String, Vec<LoadingRecord>>::new()));
@@ -591,7 +590,7 @@ impl ToolManagerBuilder {
                 },
                 Err(e) => {
                     error!("Error initializing mcp client for server {}: {:?}", name, &e);
-                    telemetry
+                    os.telemetry
                         .send_mcp_server_init(conversation_id.clone(), Some(e.to_string()), 0)
                         .ok();
                     let _ = messenger.send_tools_list_result(Err(e)).await;
@@ -815,7 +814,7 @@ impl Clone for ToolManager {
 impl ToolManager {
     pub async fn load_tools(
         &mut self,
-        database: &Database,
+        os: &mut Os,
         stderr: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
@@ -823,10 +822,10 @@ impl ToolManager {
         self.schema = {
             let mut tool_specs =
                 serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))?;
-            if !crate::cli::chat::tools::thinking::Thinking::is_enabled(database) {
+            if !crate::cli::chat::tools::thinking::Thinking::is_enabled(os) {
                 tool_specs.remove("thinking");
             }
-            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(database) {
+            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(os) {
                 tool_specs.remove("knowledge");
             }
 
@@ -880,14 +879,16 @@ impl ToolManager {
             // If there is no server loaded, we want to resolve immediately
             Box::pin(future::ready(()))
         } else if self.is_interactive {
-            let init_timeout = database
+            let init_timeout = os
+                .database
                 .settings
                 .get_int(Setting::McpInitTimeout)
                 .map_or(5000_u64, |s| s as u64);
             Box::pin(tokio::time::sleep(std::time::Duration::from_millis(init_timeout)))
         } else {
             // if it is non-interactive we will want to use the "mcp.noInteractiveTimeout"
-            let init_timeout = database
+            let init_timeout = os
+                .database
                 .settings
                 .get_int(Setting::McpNoInteractiveTimeout)
                 .map_or(30_000_u64, |s| s as u64);

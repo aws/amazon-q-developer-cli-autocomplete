@@ -833,7 +833,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_write_tool_insert_when_no_newlines_in_file() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         let test_file_path = "/file.txt";
@@ -941,7 +941,7 @@ mod tests {
     #[tokio::test]
     async fn test_fs_write_with_tilde_paths() {
         // Create a test context
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut stdout = std::io::stdout();
 
         // Get the home directory from the context

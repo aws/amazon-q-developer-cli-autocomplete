@@ -70,7 +70,6 @@ use crate::cli::chat::cli::hooks::{
     Hook,
     HookTrigger,
 };
-use crate::database::Database;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
 
@@ -263,7 +262,7 @@ impl ConversationState {
     }
 
     /// Sets the response message according to the currently set [Self::next_message].
-    pub fn push_assistant_message(&mut self, message: AssistantMessage, database: &mut Database) {
+    pub fn push_assistant_message(&mut self, os: &mut Os, message: AssistantMessage) {
         debug_assert!(self.next_message.is_some(), "next_message should exist");
         let next_user_message = self.next_message.take().expect("next user message should exist");
 
@@ -271,7 +270,7 @@ impl ConversationState {
         self.history.push_back((next_user_message, message));
 
         if let Ok(cwd) = std::env::current_dir() {
-            database.set_conversation_by_path(cwd, self).ok();
+            os.database.set_conversation_by_path(cwd, self).ok();
         }
     }
 
@@ -987,7 +986,6 @@ mod tests {
         ToolResultStatus,
     };
     use crate::cli::chat::tool_manager::ToolManager;
-    use crate::database::Database;
 
     fn assert_conversation_state_invariants(state: FigConversationState, assertion_iteration: usize) {
         if let Some(Some(msg)) = state.history.as_ref().map(|h| h.first()) {
@@ -1079,19 +1077,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
-        let mut os = Os::new();
-        let mut database = Database::new().await.unwrap();
-
+        let mut os = Os::new().await.unwrap();
         let mut tool_manager = ToolManager::default();
-        let mut conversation = ConversationState::new(
-            &mut os,
-            "fake_conv_id",
-            tool_manager.load_tools(&database, &mut vec![]).await.unwrap(),
-            None,
-            tool_manager,
-            None,
-        )
-        .await;
+        let tools = tool_manager.load_tools(&mut os, &mut vec![]).await.unwrap();
+        let mut conversation = ConversationState::new(&mut os, "fake_conv_id", tools, None, tool_manager, None).await;
 
         // First, build a large conversation history. We need to ensure that the order is always
         // User -> Assistant -> User -> Assistant ...and so on.
@@ -1102,21 +1091,20 @@ mod tests {
                 .await
                 .unwrap();
             assert_conversation_state_invariants(s, i);
-            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
             conversation.set_next_user_message(i.to_string()).await;
         }
     }
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_with_tool_results() {
-        let os = Os::new();
-        let mut database = Database::new().await.unwrap();
+        let mut os = Os::new().await.unwrap();
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
-        let tool_config = tool_manager.load_tools(&database, &mut vec![]).await.unwrap();
+        let tool_config = tool_manager.load_tools(&mut os, &mut vec![]).await.unwrap();
         let mut conversation = ConversationState::new(
-            &mut Os::new(),
+            &mut os,
             "fake_conv_id",
             tool_config.clone(),
             None,
@@ -1133,13 +1121,13 @@ mod tests {
             assert_conversation_state_invariants(s, i);
 
             conversation.push_assistant_message(
+                &mut os,
                 AssistantMessage::new_tool_use(None, i.to_string(), vec![AssistantToolUse {
                     id: "tool_id".to_string(),
                     name: "tool name".to_string(),
                     args: serde_json::Value::Null,
                     ..Default::default()
                 }]),
-                &mut database,
             );
             conversation.add_tool_results(vec![ToolUseResult {
                 tool_use_id: "tool_id".to_string(),
@@ -1150,7 +1138,7 @@ mod tests {
 
         // Build a long conversation history of user messages mixed in with tool results.
         let mut conversation = ConversationState::new(
-            &mut Os::new(),
+            &mut os,
             "fake_conv_id",
             tool_config.clone(),
             None,
@@ -1167,13 +1155,13 @@ mod tests {
             assert_conversation_state_invariants(s, i);
             if i % 3 == 0 {
                 conversation.push_assistant_message(
+                    &mut os,
                     AssistantMessage::new_tool_use(None, i.to_string(), vec![AssistantToolUse {
                         id: "tool_id".to_string(),
                         name: "tool name".to_string(),
                         args: serde_json::Value::Null,
                         ..Default::default()
                     }]),
-                    &mut database,
                 );
                 conversation.add_tool_results(vec![ToolUseResult {
                     tool_use_id: "tool_id".to_string(),
@@ -1181,7 +1169,7 @@ mod tests {
                     status: ToolResultStatus::Success,
                 }]);
             } else {
-                conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+                conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
                 conversation.set_next_user_message(i.to_string()).await;
             }
         }
@@ -1189,20 +1177,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_with_context_files() {
-        let mut database = Database::new().await.unwrap();
-        let mut os = Os::new();
+        let mut os = Os::new().await.unwrap();
         os.fs.write(AMAZONQ_FILENAME, "test context").await.unwrap();
 
         let mut tool_manager = ToolManager::default();
-        let mut conversation = ConversationState::new(
-            &mut os,
-            "fake_conv_id",
-            tool_manager.load_tools(&database, &mut vec![]).await.unwrap(),
-            None,
-            tool_manager,
-            None,
-        )
-        .await;
+        let tools = tool_manager.load_tools(&mut os, &mut vec![]).await.unwrap();
+        let mut conversation = ConversationState::new(&mut os, "fake_conv_id", tools, None, tool_manager, None).await;
 
         // First, build a large conversation history. We need to ensure that the order is always
         // User -> Assistant -> User -> Assistant ...and so on.
@@ -1230,16 +1210,15 @@ mod tests {
 
             assert_conversation_state_invariants(s, i);
 
-            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
             conversation.set_next_user_message(i.to_string()).await;
         }
     }
 
     #[tokio::test]
     async fn test_conversation_state_additional_context() {
-        let mut database = Database::new().await.unwrap();
+        let mut os = Os::new().await.unwrap();
         let mut tool_manager = ToolManager::default();
-        let mut os = Os::new();
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
         let config = serde_json::json!({
@@ -1262,15 +1241,8 @@ mod tests {
             .write(&config_path, serde_json::to_string(&config).unwrap())
             .await
             .unwrap();
-        let mut conversation = ConversationState::new(
-            &mut os,
-            "fake_conv_id",
-            tool_manager.load_tools(&database, &mut vec![]).await.unwrap(),
-            None,
-            tool_manager,
-            None,
-        )
-        .await;
+        let tools = tool_manager.load_tools(&mut os, &mut vec![]).await.unwrap();
+        let mut conversation = ConversationState::new(&mut os, "fake_conv_id", tools, None, tool_manager, None).await;
 
         // Simulate conversation flow
         conversation.set_next_user_message("start".to_string()).await;
@@ -1297,7 +1269,7 @@ mod tests {
                 s.user_input_message.content
             );
 
-            conversation.push_assistant_message(AssistantMessage::new_response(None, i.to_string()), &mut database);
+            conversation.push_assistant_message(&mut os, AssistantMessage::new_response(None, i.to_string()));
             conversation.set_next_user_message(i.to_string()).await;
         }
     }

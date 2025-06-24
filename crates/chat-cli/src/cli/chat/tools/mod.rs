@@ -424,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
 
         let actual = sanitize_path_tool_arg(&os, "~");
         let expected_home = os.env.home().unwrap_or_default();
@@ -446,7 +446,7 @@ mod tests {
     #[tokio::test]
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
-            let os = Os::new();
+            let os = Os::new().await.unwrap();
             let cwd = sanitize_path_tool_arg(&os, cwd);
             let path = sanitize_path_tool_arg(&os, path);
             let fs = os.fs;

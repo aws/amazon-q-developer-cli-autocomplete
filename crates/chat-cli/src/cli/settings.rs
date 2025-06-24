@@ -15,7 +15,6 @@ use globset::Glob;
 use serde_json::json;
 
 use super::OutputFormat;
-use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::os::Os;
 use crate::util::directories;
@@ -55,7 +54,7 @@ pub struct SettingsArgs {
 }
 
 impl SettingsArgs {
-    pub async fn execute(&self, os: &Os, database: &mut Database) -> Result<ExitCode> {
+    pub async fn execute(&self, os: &mut Os) -> Result<ExitCode> {
         match self.cmd {
             Some(SettingsSubcommands::Open) => {
                 let file = directories::settings_path().context("Could not get settings path")?;
@@ -68,8 +67,8 @@ impl SettingsArgs {
             },
             Some(SettingsSubcommands::All { format, state }) => {
                 let settings = match state {
-                    true => database.get_all_entries()?,
-                    false => database.settings.map().clone(),
+                    true => os.database.get_all_entries()?,
+                    false => os.database.settings.map().clone(),
                 };
 
                 match format {
@@ -93,7 +92,7 @@ impl SettingsArgs {
 
                 let key = Setting::try_from(key.as_str())?;
                 match (&self.value, self.delete) {
-                    (None, false) => match database.settings.get(key) {
+                    (None, false) => match os.database.settings.get(key) {
                         Some(value) => {
                             match self.format {
                                 OutputFormat::Plain => match value.as_str() {
@@ -115,14 +114,14 @@ impl SettingsArgs {
                     },
                     (Some(value_str), false) => {
                         let value = serde_json::from_str(value_str).unwrap_or_else(|_| json!(value_str));
-                        database.settings.set(key, value).await?;
+                        os.database.settings.set(key, value).await?;
                         Ok(ExitCode::SUCCESS)
                     },
                     (None, true) => {
                         let glob = Glob::new(key.as_ref())
                             .context("Could not create glob")?
                             .compile_matcher();
-                        let map = database.settings.map();
+                        let map = os.database.settings.map();
                         let keys_to_remove = map.keys().filter(|key| glob.is_match(key)).cloned().collect::<Vec<_>>();
 
                         match keys_to_remove.len() {
@@ -131,7 +130,7 @@ impl SettingsArgs {
                             },
                             1 => {
                                 println!("Removing {:?}", keys_to_remove[0]);
-                                database
+                                os.database
                                     .settings
                                     .remove(Setting::try_from(keys_to_remove[0].as_str())?)
                                     .await?;
@@ -140,7 +139,7 @@ impl SettingsArgs {
                                 for key in &keys_to_remove {
                                     if let Ok(key) = Setting::try_from(key.as_str()) {
                                         println!("Removing `{key}`");
-                                        database.settings.remove(key).await?;
+                                        os.database.settings.remove(key).await?;
                                     }
                                 }
                             },

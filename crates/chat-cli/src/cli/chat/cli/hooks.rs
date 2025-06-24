@@ -782,7 +782,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_hook() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
@@ -811,7 +811,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_hook() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
@@ -829,7 +829,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_hook_disabled() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
         let hook = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
 
@@ -856,7 +856,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_all_hooks_disabled() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
@@ -877,7 +877,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_run_hooks() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
@@ -894,7 +894,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hooks_across_profiles() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).await?;
         let hook1 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());
         let hook2 = Hook::new_inline_hook(HookTrigger::ConversationStart, "echo test".to_string());

@@ -259,7 +259,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "not in ci"]
     async fn test_aws_read_only() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
 
         let v = serde_json::json!({
             "service_name": "s3",
@@ -284,7 +284,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "not in ci"]
     async fn test_aws_output() {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
 
         let v = serde_json::json!({
             "service_name": "s3",
