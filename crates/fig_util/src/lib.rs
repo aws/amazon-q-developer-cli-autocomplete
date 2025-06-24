@@ -145,7 +145,7 @@ pub fn partitioned_compare(lhs: &str, rhs: &str, by: char) -> Ordering {
             // perform a lexical comparison
             lhs.cmp(rhs)
         } {
-            Ordering::Equal => continue,
+            Ordering::Equal => (),
             s => return s,
         }
     }

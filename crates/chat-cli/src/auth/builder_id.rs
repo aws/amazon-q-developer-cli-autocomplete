@@ -53,7 +53,7 @@ use tracing::{
     warn,
 };
 
-use crate::api_client::clients::shared::stalled_stream_protection_config;
+use crate::api_client::stalled_stream_protection_config;
 use crate::auth::AuthError;
 use crate::auth::consts::*;
 use crate::auth::scope::is_scopes;

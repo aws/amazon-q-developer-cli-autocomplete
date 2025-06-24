@@ -9,7 +9,7 @@ pub mod cli;
 pub mod database;
 pub mod logging;
 pub mod mcp_client;
-pub mod platform;
+pub mod os;
 pub mod request;
 pub mod telemetry;
 pub mod util;

@@ -30,7 +30,7 @@ use crate::mcp_client::{
     StdioTransport,
     ToolCallResult,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 // TODO: support http transport type
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -172,7 +172,7 @@ pub struct CustomTool {
 }
 
 impl CustomTool {
-    pub async fn invoke(&self, _ctx: &Context, _updates: impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, _os: &Os, _updates: impl Write) -> Result<InvokeOutput> {
         // Assuming a response shape as per https://spec.modelcontextprotocol.io/specification/2024-11-05/server/tools/#calling-tools
         let resp = self.client.request(self.method.as_str(), self.params.clone()).await?;
         let result = match resp.result {
@@ -234,7 +234,7 @@ impl CustomTool {
         Ok(())
     }
 
-    pub async fn validate(&mut self, _ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, _os: &Os) -> Result<()> {
         Ok(())
     }
 

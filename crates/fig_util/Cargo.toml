@@ -61,6 +61,5 @@ sysinfo.workspace = true
 nix.workspace = true
 
 [dev-dependencies]
-fig_test = { path = "../fig_test" }
 insta.workspace = true
 uuid.workspace = true
