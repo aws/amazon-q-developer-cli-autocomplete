@@ -205,6 +205,7 @@ pub enum PromptsSubcommand {
     /// List available prompts from a tool or show all available prompt
     List { search_word: Option<String> },
     Get {
+        #[arg(long)]
         orig_input: Option<String>,
         name: String,
         arguments: Option<Vec<String>>,
@@ -221,6 +222,7 @@ impl PromptsSubcommand {
         else {
             unreachable!("List has already been parsed out at this point");
         };
+        println!("Calling get_prompt with name: {:?}, arguments: {:?}", name, arguments);
 
         let prompts = match session.conversation.tool_manager.get_prompt(name, arguments).await {
             Ok(resp) => resp,
