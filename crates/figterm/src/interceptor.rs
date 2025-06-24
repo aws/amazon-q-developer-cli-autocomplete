@@ -214,7 +214,7 @@ impl KeyInterceptor {
                 if self.window_visible {
                     match self.mappings.get(key_event) {
                         Some(action) if action.value() == IGNORE_ACTION => None,
-                        Some(action) => Some(action.value().to_string()),
+                        Some(action) => Some(action.value().clone()),
                         None => None,
                     }
                 } else {

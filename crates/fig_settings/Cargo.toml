@@ -26,5 +26,4 @@ url.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-fig_test = { path = "../fig_test" }
 tempfile.workspace = true

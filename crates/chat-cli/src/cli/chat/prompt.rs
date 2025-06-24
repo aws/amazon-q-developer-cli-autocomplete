@@ -36,8 +36,8 @@ use winnow::stream::AsChar;
 
 pub use super::prompt_parser::generate_prompt;
 use super::prompt_parser::parse_prompt_components;
-use crate::database::Database;
 use crate::database::settings::Setting;
+use crate::os::Os;
 
 pub const COMMANDS: &[&str] = &[
     "/clear",
@@ -115,10 +115,10 @@ impl PathCompleter {
         &self,
         line: &str,
         pos: usize,
-        ctx: &Context<'_>,
+        os: &Context<'_>,
     ) -> Result<(usize, Vec<String>), ReadlineError> {
         // Use the filename completer to get path completions
-        match self.filename_completer.complete(line, pos, ctx) {
+        match self.filename_completer.complete(line, pos, os) {
             Ok((pos, completions)) => {
                 // Convert the filename completer's pairs to strings
                 let file_completions: Vec<String> = completions.iter().map(|pair| pair.replacement.clone()).collect();
@@ -146,10 +146,10 @@ impl PromptCompleter {
         let receiver = &self.receiver;
         sender
             .send(if !word.is_empty() { Some(word.to_string()) } else { None })
-            .map_err(|e| ReadlineError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+            .map_err(|e| ReadlineError::Io(std::io::Error::other(e.to_string())))?;
         let prompt_info = receiver
             .recv()
-            .map_err(|e| ReadlineError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?
+            .map_err(|e| ReadlineError::Io(std::io::Error::other(e.to_string())))?
             .iter()
             .map(|n| format!("@{n}"))
             .collect::<Vec<_>>();
@@ -179,7 +179,7 @@ impl Completer for ChatCompleter {
         &self,
         line: &str,
         pos: usize,
-        _ctx: &Context<'_>,
+        _os: &Context<'_>,
     ) -> Result<(usize, Vec<Self::Candidate>), ReadlineError> {
         let (start, word) = extract_word(line, pos, None, |c| c.is_space());
 
@@ -198,7 +198,7 @@ impl Completer for ChatCompleter {
         }
 
         // Handle file path completion as fallback
-        if let Ok((pos, completions)) = self.path_completer.complete_path(line, pos, _ctx) {
+        if let Ok((pos, completions)) = self.path_completer.complete_path(line, pos, _os) {
             if !completions.is_empty() {
                 return Ok((pos, completions));
             }
@@ -213,8 +213,8 @@ impl Completer for ChatCompleter {
 pub struct MultiLineValidator;
 
 impl Validator for MultiLineValidator {
-    fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
-        let input = ctx.input();
+    fn validate(&self, os: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
+        let input = os.input();
 
         // Check for explicit multi-line markers
         if input.starts_with("```") && !input.ends_with("```") {
@@ -240,8 +240,8 @@ pub struct ChatHelper {
 }
 
 impl Validator for ChatHelper {
-    fn validate(&self, ctx: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
-        self.validator.validate(ctx)
+    fn validate(&self, os: &mut ValidationContext<'_>) -> rustyline::Result<ValidationResult> {
+        self.validator.validate(os)
     }
 }
 
@@ -288,11 +288,11 @@ impl Highlighter for ChatHelper {
 }
 
 pub fn rl(
-    database: &Database,
+    os: &Os,
     sender: std::sync::mpsc::Sender<Option<String>>,
     receiver: std::sync::mpsc::Receiver<Vec<String>>,
 ) -> Result<Editor<ChatHelper, DefaultHistory>> {
-    let edit_mode = match database.settings.get_string(Setting::ChatEditMode).as_deref() {
+    let edit_mode = match os.database.settings.get_string(Setting::ChatEditMode).as_deref() {
         Some("vi" | "vim") => EditMode::Vi,
         _ => EditMode::Emacs,
     };
@@ -340,10 +340,10 @@ mod tests {
 
         // Create a mock context with empty history
         let empty_history = DefaultHistory::new();
-        let ctx = Context::new(&empty_history);
+        let os = Context::new(&empty_history);
 
         // Get completions
-        let (start, completions) = completer.complete(line, pos, &ctx).unwrap();
+        let (start, completions) = completer.complete(line, pos, &os).unwrap();
 
         // Verify start position
         assert_eq!(start, 0);
@@ -362,10 +362,10 @@ mod tests {
 
         // Create a mock context with empty history
         let empty_history = DefaultHistory::new();
-        let ctx = Context::new(&empty_history);
+        let os = Context::new(&empty_history);
 
         // Get completions
-        let (_, completions) = completer.complete(line, pos, &ctx).unwrap();
+        let (_, completions) = completer.complete(line, pos, &os).unwrap();
 
         // Verify no completions are returned for regular text
         assert!(completions.is_empty());

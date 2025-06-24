@@ -3,6 +3,7 @@ pub mod compact;
 pub mod context;
 pub mod editor;
 pub mod hooks;
+pub mod knowledge;
 pub mod mcp;
 pub mod model;
 pub mod persist;
@@ -18,6 +19,7 @@ use compact::CompactArgs;
 use context::ContextSubcommand;
 use editor::EditorArgs;
 use hooks::HooksArgs;
+use knowledge::KnowledgeSubcommand;
 use mcp::McpArgs;
 use model::ModelArgs;
 use persist::PersistSubcommand;
@@ -33,9 +35,7 @@ use crate::cli::chat::{
     ChatState,
 };
 use crate::cli::issue;
-use crate::database::Database;
-use crate::platform::Context;
-use crate::telemetry::TelemetryThread;
+use crate::os::Os;
 
 /// q (Amazon Q Chat)
 #[derive(Debug, PartialEq, Parser)]
@@ -52,6 +52,9 @@ pub enum SlashCommand {
     /// Manage context files and hooks for the chat session
     #[command(subcommand)]
     Context(ContextSubcommand),
+    /// Manage knowledge base for persistent context storage
+    #[command(subcommand)]
+    Knowledge(KnowledgeSubcommand),
     /// Open $EDITOR (defaults to vi) to compose a prompt
     #[command(name = "editor")]
     PromptEditor(EditorArgs),
@@ -80,23 +83,18 @@ pub enum SlashCommand {
 }
 
 impl SlashCommand {
-    pub async fn execute(
-        self,
-        ctx: &mut Context,
-        database: &mut Database,
-        telemetry: &TelemetryThread,
-        session: &mut ChatSession,
-    ) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &mut Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         match self {
             Self::Quit => Ok(ChatState::Exit),
             Self::Clear(args) => args.execute(session).await,
-            Self::Profile(subcommand) => subcommand.execute(ctx, session).await,
-            Self::Context(args) => args.execute(ctx, session).await,
+            Self::Profile(subcommand) => subcommand.execute(os, session).await,
+            Self::Context(args) => args.execute(os, session).await,
+            Self::Knowledge(subcommand) => subcommand.execute(os, session).await,
             Self::PromptEditor(args) => args.execute(session).await,
-            Self::Compact(args) => args.execute(ctx, database, telemetry, session).await,
+            Self::Compact(args) => args.execute(os, session).await,
             Self::Tools(args) => args.execute(session).await,
             Self::Issue(args) => {
-                if let Err(err) = args.execute().await {
+                if let Err(err) = args.execute(os).await {
                     return Err(ChatError::Custom(err.to_string().into()));
                 }
 
@@ -105,14 +103,14 @@ impl SlashCommand {
                 })
             },
             Self::Prompts(args) => args.execute(session).await,
-            Self::Hooks(args) => args.execute(ctx, session).await,
-            Self::Usage(args) => args.execute(ctx, session).await,
+            Self::Hooks(args) => args.execute(os, session).await,
+            Self::Usage(args) => args.execute(os, session).await,
             Self::Mcp(args) => args.execute(session).await,
             Self::Model(args) => args.execute(session).await,
-            Self::Subscribe(args) => args.execute(database, session).await,
-            Self::Persist(subcommand) => subcommand.execute(ctx, session).await,
+            Self::Subscribe(args) => args.execute(os, session).await,
+            Self::Persist(subcommand) => subcommand.execute(os, session).await,
             // Self::Root(subcommand) => {
-            //     if let Err(err) = subcommand.execute(ctx, database, telemetry).await {
+            //     if let Err(err) = subcommand.execute(os, database, telemetry).await {
             //         return Err(ChatError::Custom(err.to_string().into()));
             //     }
             //

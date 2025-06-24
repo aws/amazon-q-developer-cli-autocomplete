@@ -86,7 +86,7 @@ impl_TCFType!(TISInputSource, TISInputSourceRef, TISInputSourceGetTypeID);
 
 // https://github.com/phracker/MacOSX-SDKs/blob/master/MacOSX10.6.sdk/System/Library/Frameworks/Carbon.framework/Versions/A/Frameworks/HIToolbox.framework/Versions/A/Headers/TextInputSources.h
 #[link(name = "Carbon", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     pub static kTISPropertyBundleID: CFStringRef;
     pub static kTISPropertyInputSourceCategory: CFStringRef;
     pub static kTISPropertyInputSourceType: CFStringRef;
@@ -317,7 +317,7 @@ impl InputMethod {
     }
 }
 
-extern "C" {
+unsafe extern "C" {
     pub fn CFBundleGetIdentifier(bundle: CFBundleRef) -> CFStringRef;
     pub fn CFPreferencesSynchronize(
         application_id: CFStringRef,
@@ -329,7 +329,7 @@ extern "C" {
 }
 
 #[link(name = "AppKit", kind = "framework")]
-extern "C" {}
+unsafe extern "C" {}
 
 impl InputMethod {
     pub fn input_source(&self) -> Result<TISInputSource, InputMethodError> {
@@ -372,7 +372,7 @@ impl InputMethod {
     }
 
     pub fn target_bundle_path(&self) -> Result<PathBuf, InputMethodError> {
-        let input_method_name = match self.bundle_path.components().last() {
+        let input_method_name = match self.bundle_path.components().next_back() {
             Some(name) => name.as_os_str(),
             None => {
                 return Err(InputMethodError::InvalidBundle {

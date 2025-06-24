@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::platform::Context;
+use crate::os::Os;
 
 #[derive(Debug, Error)]
 pub enum DirectoryError {
@@ -32,10 +32,10 @@ type Result<T, E = DirectoryError> = std::result::Result<T, E>;
 /// - Linux: /home/Alice
 /// - MacOS: /Users/Alice
 /// - Windows: C:\Users\Alice
-pub fn home_dir(#[cfg_attr(windows, allow(unused_variables))] ctx: &Context) -> Result<PathBuf> {
+pub fn home_dir(#[cfg_attr(windows, allow(unused_variables))] os: &Os) -> Result<PathBuf> {
     #[cfg(unix)]
     match cfg!(test) {
-        true => ctx
+        true => os
             .env
             .get("HOME")
             .map_err(|_err| DirectoryError::NoHomeDirectory)
@@ -47,13 +47,13 @@ pub fn home_dir(#[cfg_attr(windows, allow(unused_variables))] ctx: &Context) -> 
                 }
             })
             .map(PathBuf::from)
-            .map(|p| ctx.fs.chroot_path(p)),
+            .map(|p| os.fs.chroot_path(p)),
         false => dirs::home_dir().ok_or(DirectoryError::NoHomeDirectory),
     }
 
     #[cfg(windows)]
     match cfg!(test) {
-        true => ctx
+        true => os
             .env
             .get("USERPROFILE")
             .map_err(|_err| DirectoryError::NoHomeDirectory)
@@ -65,7 +65,7 @@ pub fn home_dir(#[cfg_attr(windows, allow(unused_variables))] ctx: &Context) -> 
                 }
             })
             .map(PathBuf::from)
-            .map(|p| ctx.fs.chroot_path(p)),
+            .map(|p| os.fs.chroot_path(p)),
         false => dirs::home_dir().ok_or(DirectoryError::NoHomeDirectory),
     }
 }
@@ -130,13 +130,13 @@ pub fn logs_dir() -> Result<PathBuf> {
 }
 
 /// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_global_context_path(ctx: &Context) -> Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("global_context.json"))
+pub fn chat_global_context_path(os: &Os) -> Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("global_context.json"))
 }
 
 /// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_profiles_dir(ctx: &Context) -> Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("profiles"))
+pub fn chat_profiles_dir(os: &Os) -> Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("profiles"))
 }
 
 /// The path to the fig settings file

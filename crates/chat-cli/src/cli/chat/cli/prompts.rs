@@ -19,6 +19,7 @@ use crossterm::{
 use thiserror::Error;
 use unicode_width::UnicodeWidthStr;
 
+use crate::cli::chat::error_formatter::format_mcp_error;
 use crate::cli::chat::tool_manager::PromptBundle;
 use crate::cli::chat::{
     ChatError,
@@ -278,9 +279,7 @@ impl PromptsSubcommand {
                 style::SetAttribute(Attribute::Reset),
                 style::Print("\n"),
                 style::SetForegroundColor(Color::Red),
-                style::Print(
-                    serde_json::to_string_pretty(&to_display).unwrap_or_else(|_| format!("{:?}", &to_display))
-                ),
+                style::Print(format_mcp_error(&to_display)),
                 style::SetForegroundColor(Color::Reset),
                 style::Print("\n"),
             )?;
