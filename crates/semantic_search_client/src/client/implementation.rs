@@ -459,7 +459,7 @@ impl SemanticSearchClient {
         F: Fn(ProgressStatus) + Send + 'static,
     {
         // Notify progress: Starting indexing
-        if let Some(ref callback) = progress_callback {
+        if let Some(callback) = progress_callback {
             callback(ProgressStatus::StartingIndexing(file_count));
         }
 
@@ -493,7 +493,7 @@ impl SemanticSearchClient {
             processed_files += 1;
 
             // Update progress
-            if let Some(ref callback) = progress_callback {
+            if let Some(callback) = progress_callback {
                 callback(ProgressStatus::Indexing(processed_files, file_count));
             }
         }
@@ -512,7 +512,7 @@ impl SemanticSearchClient {
         F: Fn(ProgressStatus) + Send + 'static,
     {
         // Notify progress: Creating semantic context
-        if let Some(ref callback) = progress_callback {
+        if let Some(callback) = progress_callback {
             callback(ProgressStatus::CreatingSemanticContext);
         }
 
@@ -523,7 +523,7 @@ impl SemanticSearchClient {
         let data_points = self.process_items_to_data_points(items, progress_callback)?;
 
         // Notify progress: Building index
-        if let Some(ref callback) = progress_callback {
+        if let Some(callback) = progress_callback {
             callback(ProgressStatus::BuildingIndex);
         }
 
@@ -543,7 +543,7 @@ impl SemanticSearchClient {
         // Process items with progress updates for embedding generation
         for (i, item) in items.iter().enumerate() {
             // Update progress for embedding generation
-            if let Some(ref callback) = progress_callback {
+            if let Some(callback) = progress_callback {
                 if i % 10 == 0 {
                     callback(ProgressStatus::GeneratingEmbeddings(i, total_items));
                 }
@@ -779,7 +779,6 @@ impl SemanticSearchClient {
                 },
                 Err(e) => {
                     tracing::warn!("Failed to search context {}: {}", context_id, e);
-                    continue; // Skip contexts that fail to search
                 },
             }
         }

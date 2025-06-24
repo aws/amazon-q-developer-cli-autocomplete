@@ -271,7 +271,6 @@ impl AsyncSemanticSearchClient {
                     },
                     Err(e) => {
                         tracing::warn!("Failed to search context {}: {}", context_id, e);
-                        continue;
                     },
                 }
             }

@@ -471,7 +471,7 @@ impl WindowServerHandler for WindowServerInner {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe extern "C" fn application_ax_callback(
     _observer: AXObserverRef,
     element: AXUIElementRef,

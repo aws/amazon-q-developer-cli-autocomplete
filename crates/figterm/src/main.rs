@@ -463,11 +463,13 @@ fn launch_shell(command: Option<&[String]>) -> Result<()> {
         .map(|arg| CString::new(arg.to_string_lossy().as_ref()).expect("Failed to convert arg to CString"))
         .collect();
     for (key, val) in cmd.get_envs() {
-        match val {
-            Some(value) => env::set_var(key, value),
-            None => {
-                env::remove_var(key);
-            },
+        unsafe {
+            match val {
+                Some(value) => env::set_var(key, value),
+                None => {
+                    env::remove_var(key);
+                },
+            }
         }
     }
 
@@ -485,7 +487,10 @@ fn figterm_main(command: Option<&[String]>) -> Result<()> {
         Ok(id) => id,
         Err(_) => uuid::Uuid::new_v4().simple().to_string(),
     };
-    std::env::set_var(QTERM_SESSION_ID, &session_id);
+
+    unsafe {
+        std::env::set_var(QTERM_SESSION_ID, &session_id);
+    }
 
     let parent_id = std::env::var(Q_PARENT).ok();
 

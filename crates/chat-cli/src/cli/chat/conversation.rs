@@ -332,7 +332,7 @@ impl ConversationState {
 
         // If the last message from the assistant contains tool uses AND next_message is set, we need to
         // ensure that next_message contains tool results.
-        if let (Some((_, AssistantMessage::ToolUse { ref mut tool_uses, .. })), Some(user_msg)) = (
+        if let (Some((_, AssistantMessage::ToolUse { tool_uses, .. })), Some(user_msg)) = (
             self.history
                 .range_mut(self.valid_history_range.0..self.valid_history_range.1)
                 .last(),
@@ -377,7 +377,7 @@ impl ConversationState {
             .collect();
 
         for (_, assistant) in &mut self.history {
-            if let AssistantMessage::ToolUse { ref mut tool_uses, .. } = assistant {
+            if let AssistantMessage::ToolUse { tool_uses, .. } = assistant {
                 for tool_use in tool_uses {
                     if tool_names.contains(tool_use.name.as_str()) {
                         continue;

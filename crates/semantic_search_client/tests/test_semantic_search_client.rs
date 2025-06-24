@@ -9,7 +9,6 @@ use semantic_search_client::SemanticSearchClient;
 fn test_client_initialization() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test
@@ -36,7 +35,6 @@ fn test_client_initialization() {
 fn test_add_context_from_text() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test
@@ -76,7 +74,6 @@ fn test_add_context_from_text() {
 fn test_search_all_contexts() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test
@@ -122,7 +119,6 @@ fn test_search_all_contexts() {
 fn test_persistent_context() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test
@@ -167,7 +163,6 @@ fn test_persistent_context() {
 fn test_remove_context() {
     if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
         println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-        assert!(true);
         return;
     }
     // Create a temporary directory for the test

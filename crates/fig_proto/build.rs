@@ -93,7 +93,9 @@ fn download_protoc_unix(protoc_version: &str, tmp_folder: &tempfile::TempDir) {
     mv.arg(tmp_folder.path().join("bin/protoc")).arg(&out_bin);
     assert!(mv.spawn().unwrap().wait().unwrap().success());
 
-    std::env::set_var("PROTOC", out_bin);
+    unsafe {
+        std::env::set_var("PROTOC", out_bin);
+    }
 }
 
 #[cfg(windows)]
