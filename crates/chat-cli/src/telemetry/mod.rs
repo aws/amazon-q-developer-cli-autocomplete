@@ -44,7 +44,7 @@ use uuid::{
     uuid,
 };
 
-use crate::api_client::Client as CodewhispererClient;
+use crate::api_client::ApiClient;
 use crate::auth::builder_id::get_start_url_and_region;
 use crate::aws_common::app_name;
 use crate::cli::RootSubcommand;
@@ -53,7 +53,10 @@ use crate::database::{
     Database,
     DatabaseError,
 };
-use crate::os::Env;
+use crate::os::{
+    Env,
+    Fs,
+};
 use crate::telemetry::core::Event;
 pub use crate::telemetry::core::{
     EventType,
@@ -69,7 +72,7 @@ pub enum TelemetryError {
     #[error(transparent)]
     Send(Box<mpsc::error::SendError<Event>>),
     #[error(transparent)]
-    Auth(#[from] crate::auth::AuthError),
+    ApiClient(#[from] crate::api_client::ApiClientError),
     #[error(transparent)]
     Join(#[from] tokio::task::JoinError),
     #[error(transparent)]
@@ -175,8 +178,8 @@ impl Clone for TelemetryThread {
 }
 
 impl TelemetryThread {
-    pub async fn new(env: &Env, database: &mut Database) -> Result<Self, TelemetryError> {
-        let telemetry_client = TelemetryClient::new(env, database).await?;
+    pub async fn new(env: &Env, fs: &Fs, database: &mut Database) -> Result<Self, TelemetryError> {
+        let telemetry_client = TelemetryClient::new(env, fs, database).await?;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let tx = TelemetrySender::Strong(tx);
         let handle = tokio::spawn(async move {
@@ -348,16 +351,16 @@ async fn set_start_url_and_region(database: &Database, event: &mut Event) {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct TelemetryClient {
     client_id: Uuid,
     telemetry_enabled: bool,
-    codewhisperer_client: CodewhispererClient,
+    codewhisperer_client: ApiClient,
     toolkit_telemetry_client: Option<ToolkitTelemetryClient>,
 }
 
 impl TelemetryClient {
-    async fn new(env: &Env, database: &mut Database) -> Result<Self, TelemetryError> {
+    async fn new(env: &Env, fs: &Fs, database: &mut Database) -> Result<Self, TelemetryError> {
         let telemetry_enabled = !cfg!(test)
             && env.get_os("Q_DISABLE_TELEMETRY").is_none()
             && database.settings.get_bool(Setting::TelemetryEnabled).unwrap_or(true);
@@ -413,7 +416,7 @@ impl TelemetryClient {
             client_id: client_id(env, database, telemetry_enabled)?,
             telemetry_enabled,
             toolkit_telemetry_client,
-            codewhisperer_client: CodewhispererClient::new(database, None).await?,
+            codewhisperer_client: ApiClient::new(env, fs, database, None).await?,
         })
     }
 
@@ -556,7 +559,9 @@ mod test {
     #[tokio::test]
     async fn client_context() {
         let mut database = Database::new().await.unwrap();
-        let client = TelemetryClient::new(&Env::new(), &mut database).await.unwrap();
+        let client = TelemetryClient::new(&Env::new(), &Fs::new(), &mut database)
+            .await
+            .unwrap();
         let context = client.user_context().unwrap();
 
         assert_eq!(context.ide_category, IdeCategory::Cli);
@@ -577,7 +582,9 @@ mod test {
     #[ignore = "needs auth which is not in CI"]
     async fn test_send() {
         let mut database = Database::new().await.unwrap();
-        let thread = TelemetryThread::new(&Env::new(), &mut database).await.unwrap();
+        let thread = TelemetryThread::new(&Env::new(), &Fs::new(), &mut database)
+            .await
+            .unwrap();
         thread.send_user_logged_in().ok();
         drop(thread);
 
@@ -593,7 +600,9 @@ mod test {
     #[ignore = "needs auth which is not in CI"]
     async fn test_all_telemetry() {
         let mut database = Database::new().await.unwrap();
-        let thread = TelemetryThread::new(&Env::new(), &mut database).await.unwrap();
+        let thread = TelemetryThread::new(&Env::new(), &Fs::new(), &mut database)
+            .await
+            .unwrap();
 
         thread.send_user_logged_in().ok();
         thread
@@ -628,7 +637,9 @@ mod test {
     #[ignore = "needs auth which is not in CI"]
     async fn test_without_optout() {
         let mut database = Database::new().await.unwrap();
-        let client = TelemetryClient::new(&Env::new(), &mut database).await.unwrap();
+        let client = TelemetryClient::new(&Env::new(), &Fs::new(), &mut database)
+            .await
+            .unwrap();
         client
             .codewhisperer_client
             .send_telemetry_event(

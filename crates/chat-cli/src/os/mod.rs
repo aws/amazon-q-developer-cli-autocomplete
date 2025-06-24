@@ -10,6 +10,7 @@ use eyre::Result;
 pub use fs::Fs;
 pub use sysinfo::SysInfo;
 
+use crate::api_client::ApiClient;
 use crate::database::Database;
 use crate::telemetry::TelemetryThread;
 
@@ -31,34 +32,30 @@ pub const ACTIVE_USER_HOME: &str = if cfg!(windows) {
 /// code paths in unit tests.
 #[derive(Clone, Debug)]
 pub struct Os {
-    pub fs: Fs,
     pub env: Env,
+    pub fs: Fs,
     pub sysinfo: SysInfo,
     pub database: Database,
+    pub client: ApiClient,
     pub telemetry: TelemetryThread,
 }
 
 impl Os {
     pub async fn new() -> Result<Self> {
         let env = Env::new();
-        let mut database = crate::database::Database::new().await?;
-        let telemetry = crate::telemetry::TelemetryThread::new(&env, &mut database).await?;
+        let fs = Fs::new();
+        let mut database = Database::new().await?;
+        let client = ApiClient::new(&env, &fs, &mut database, None).await?;
+        let telemetry = TelemetryThread::new(&env, &fs, &mut database).await?;
 
         Ok(Self {
-            fs: Fs::new(),
             env,
+            fs,
             sysinfo: SysInfo::new(),
             database,
+            client,
             telemetry,
         })
-    }
-
-    /// TODO: delete this function
-    #[cfg(test)]
-    #[must_use]
-    pub fn with_env_var(self, key: &str, value: &str) -> Self {
-        unsafe { self.env.set_var(key, value) }
-        self
     }
 }
 
@@ -68,7 +65,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_builder_with_test_home() {
-        let os = Os::new().await.unwrap().with_env_var("hello", "world");
+        let os = Os::new().await.unwrap();
+        unsafe {
+            os.env.set_var("hello", "world");
+        }
 
         #[cfg(windows)]
         {

@@ -10,7 +10,6 @@ use crossterm::{
     style,
 };
 
-use crate::api_client::Client;
 use crate::auth::builder_id::is_idc_user;
 use crate::cli::chat::{
     ActualSubscriptionStatus,
@@ -167,10 +166,7 @@ async fn upgrade_to_pro(os: &mut Os, session: &mut ChatSession) -> Result<(), Ch
     }
 
     // Create a subscription token and open the webpage
-    let r = Client::new(&mut os.database, None)
-        .await?
-        .create_subscription_token()
-        .await?;
+    let r = os.client.create_subscription_token().await?;
 
     let url = with_spinner(&mut session.stderr, "Preparing to upgrade...", || async move {
         Ok::<String, ChatError>(r.encoded_verification_url().to_string())

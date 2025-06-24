@@ -337,7 +337,7 @@ async fn select_profile_interactive(os: &mut Os, whoami: bool) -> Result<()> {
         SpinnerComponent::Spinner,
         SpinnerComponent::Text(" Fetching profiles...".into()),
     ]);
-    let profiles = list_available_profiles(&mut os.database).await?;
+    let profiles = list_available_profiles(&os.env, &os.fs, &mut os.database).await?;
     if profiles.is_empty() {
         info!("Available profiles was empty");
         return Ok(());
