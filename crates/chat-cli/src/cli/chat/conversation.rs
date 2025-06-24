@@ -1052,8 +1052,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
-        let os = Os::new();
-        let mut database = Database::new().await.unwrap();
+        let mut os = Os::new().await.unwrap();
         let agents = AgentCollection::default();
         let mut output = NullWriter;
 
@@ -1061,7 +1060,7 @@ mod tests {
         let mut conversation = ConversationState::new(
             "fake_conv_id",
             agents,
-            tool_manager.load_tools(&database, &mut output).await.unwrap(),
+            tool_manager.load_tools(&mut os, &mut output).await.unwrap(),
             tool_manager,
             None,
         )
@@ -1083,8 +1082,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_history_handling_with_tool_results() {
-        let os = Os::new();
-        let mut database = Database::new().await.unwrap();
+        let mut os = Os::new().await.unwrap();
         let agents = AgentCollection::default();
 
         // Build a long conversation history of tool use results.
@@ -1156,8 +1154,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_with_context_files() {
-        let mut database = Database::new().await.unwrap();
-        let os = Os::new();
+        let mut os = Os::new().await.unwrap();
         let agents = {
             let mut agents = AgentCollection::default();
             let mut agent = Agent::default();
@@ -1173,7 +1170,7 @@ mod tests {
         let mut conversation = ConversationState::new(
             "fake_conv_id",
             agents,
-            tool_manager.load_tools(&database, &mut output).await.unwrap(),
+            tool_manager.load_tools(&mut os, &mut output).await.unwrap(),
             tool_manager,
             None,
         )
@@ -1212,8 +1209,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_conversation_state_additional_context() {
-        let mut database = Database::new().await.unwrap();
-        let os = Os::new();
+        let mut os = Os::new().await.unwrap();
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
         let agents = {
@@ -1247,7 +1243,7 @@ mod tests {
         let mut conversation = ConversationState::new(
             "fake_conv_id",
             agents,
-            tool_manager.load_tools(&database, &mut output).await.unwrap(),
+            tool_manager.load_tools(&mut os, &mut output).await.unwrap(),
             tool_manager,
             None,
         )

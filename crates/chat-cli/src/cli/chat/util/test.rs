@@ -18,14 +18,8 @@ pub const TEST_HIDDEN_FILE_PATH: &str = "/aaaa2/.hidden";
 // Helper function to create a test ContextManager with Context
 pub fn create_test_context_manager(context_file_size: Option<usize>) -> Result<ContextManager> {
     let context_file_size = context_file_size.unwrap_or(CONTEXT_FILES_MAX_SIZE);
-<<<<<<< HEAD
     let agent = Agent::default();
     ContextManager::from_agent(&agent, Some(context_file_size))
-=======
-    let os = Os::new().await.unwrap();
-    let manager = ContextManager::new(&os, Some(context_file_size)).await?;
-    Ok(manager)
->>>>>>> main
 }
 
 /// Sets up the following filesystem structure:

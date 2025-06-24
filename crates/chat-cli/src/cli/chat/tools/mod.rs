@@ -18,7 +18,6 @@ use crossterm::queue;
 use crossterm::style::{
     self,
     Color,
-    Stylize,
 };
 use custom_tool::CustomTool;
 use execute::ExecuteCommand;

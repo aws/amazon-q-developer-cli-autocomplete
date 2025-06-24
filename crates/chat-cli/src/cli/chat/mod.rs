@@ -103,17 +103,8 @@ use winnow::Partial;
 use winnow::stream::Offset;
 
 use super::agent::PermissionEvalResult;
-use crate::api_client::clients::{
-    SendMessageOutput,
-    StreamingClient,
-};
-use crate::api_client::model::{
-    ChatResponseStream,
 use crate::api_client::ApiClientError;
-use crate::api_client::model::{
-    Tool as FigTool,
-    ToolResultStatus,
-};
+use crate::api_client::model::ToolResultStatus;
 use crate::api_client::send_message_output::SendMessageOutput;
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
@@ -165,18 +156,13 @@ pub struct ChatArgs {
 }
 
 impl ChatArgs {
-    pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
+    pub async fn execute(mut self, os: &mut Os) -> Result<ExitCode> {
         if self.non_interactive && self.input.is_none() {
             bail!("Input must be supplied when --non-interactive is set");
         }
 
         let stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
-
-        let client = match os.env.get("Q_MOCK_CHAT_RESPONSE") {
-            Ok(json) => create_stream(serde_json::from_str(std::fs::read_to_string(json)?.as_str())?),
-            _ => StreamingClient::new(database).await?,
-        };
 
         let agents = {
             let mut agents = AgentCollection::load(os, self.profile.as_deref(), &mut stderr).await;
@@ -186,7 +172,7 @@ impl ChatArgs {
                 match agents.switch(name) {
                     Ok(agent) if !agent.mcp_servers.mcp_servers.is_empty() => {
                         if !self.non_interactive
-                            && !database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false)
+                            && !os.database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false)
                         {
                             execute!(
                                 stderr,
@@ -195,7 +181,7 @@ impl ChatArgs {
                                 )
                             )?;
                         }
-                        database.settings.set(Setting::McpLoadedBefore, true).await?;
+                        os.database.settings.set(Setting::McpLoadedBefore, true).await?;
                     },
                     Err(e) => {
                         let _ = execute!(stderr, style::Print(format!("Error switching profile: {}", e)));
@@ -240,12 +226,12 @@ impl ChatArgs {
             .prompt_list_receiver(prompt_request_receiver)
             .conversation_id(&conversation_id)
             .agent(agents.get_active().cloned().unwrap_or_default())
-            .build(telemetry, Box::new(std::io::stderr()), !self.non_interactive)
+            .build(os, Box::new(std::io::stderr()), !self.non_interactive)
             .await?;
-        let tool_config = tool_manager.load_tools(database, &mut stderr).await?;
+        let tool_config = tool_manager.load_tools(os, &mut stderr).await?;
 
         ChatSession::new(
-            database,
+            os,
             stdout,
             stderr,
             &conversation_id,
@@ -2134,7 +2120,6 @@ mod tests {
 
     use super::*;
     use crate::cli::agent::Agent;
-    use crate::os::Env;
 
     async fn get_test_agents(os: &Os) -> AgentCollection {
         const AGENT_PATH: &str = "/persona/TestAgent.json";
@@ -2185,15 +2170,12 @@ mod tests {
             ],
         ]));
 
-        let env = Env::new();
-        let mut database = Database::new().await.unwrap();
-        let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
         let agents = get_test_agents(&os).await;
-
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
+            &mut os,
             std::io::stdout(),
             std::io::stderr(),
             "fake_conv_id",
@@ -2316,15 +2298,12 @@ mod tests {
             ],
         ]));
 
-        let env = Env::new();
-        let mut database = Database::new().await.unwrap();
-        let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
         let agents = get_test_agents(&os).await;
-
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
+            &mut os,
             std::io::stdout(),
             std::io::stderr(),
             "fake_conv_id",
@@ -2424,15 +2403,12 @@ mod tests {
             ],
         ]));
 
-        let env = Env::new();
-        let mut database = Database::new().await.unwrap();
-        let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
         let agents = get_test_agents(&os).await;
-
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
+            &mut os,
             std::io::stdout(),
             std::io::stderr(),
             "fake_conv_id",
@@ -2503,15 +2479,12 @@ mod tests {
             ],
         ]));
 
-        let env = Env::new();
-        let mut database = Database::new().await.unwrap();
-        let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
         let agents = get_test_agents(&os).await;
-
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
+            &mut os,
             std::io::stdout(),
             std::io::stderr(),
             "fake_conv_id",
@@ -2560,15 +2533,13 @@ mod tests {
     async fn test_subscribe_flow() {
         let mut os = Os::new().await.unwrap();
         os.client.set_mock_output(serde_json::Value::Array(vec![]));
-        let env = Env::new();
-        let mut database = Database::new().await.unwrap();
-        let telemetry = TelemetryThread::new(&env, &mut database).await.unwrap();
         let agents = get_test_agents(&os).await;
 
         let tool_manager = ToolManager::default();
         let tool_config = serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))
             .expect("Tools failed to load");
         ChatSession::new(
+            &mut os,
             std::io::stdout(),
             std::io::stderr(),
             "fake_conv_id",

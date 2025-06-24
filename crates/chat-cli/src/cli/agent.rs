@@ -639,7 +639,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_save_persona() {
-        let ctx = Os::new();
+        let ctx = Os::new().await.unwrap();
         let mut output = NullWriter;
         let mut collection = AgentCollection::load(&ctx, None, &mut output).await;
 
@@ -685,7 +685,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_persona() {
         let mut collection = AgentCollection::default();
-        let ctx = Os::new();
+        let ctx = Os::new().await.unwrap();
 
         let persona_name = "test_persona";
         let result = collection.create_persona(&ctx, persona_name).await;
@@ -716,7 +716,7 @@ mod tests {
     #[tokio::test]
     async fn test_delete_persona() {
         let mut collection = AgentCollection::default();
-        let ctx = Os::new();
+        let ctx = Os::new().await.unwrap();
 
         let persona_name_one = "test_persona_one";
         collection

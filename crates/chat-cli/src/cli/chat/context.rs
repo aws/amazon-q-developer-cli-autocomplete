@@ -408,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_collect_exceeds_limit() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(Some(2)).expect("Failed to create test context manager");
 
         os.fs.create_dir_all("test").await?;
@@ -426,7 +426,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_ops() -> Result<()> {
-        let os = Os::new();
+        let os = Os::new().await.unwrap();
         let mut manager = create_test_context_manager(None).expect("Failed to create test context manager");
 
         // Create some test files for matching.
