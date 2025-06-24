@@ -266,7 +266,7 @@ impl ContextSubcommand {
                 execute!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
-                    style::Print(format!("\nCleared context\n\n")),
+                    style::Print("\nCleared context\n\n"),
                     style::SetForegroundColor(Color::Reset)
                 )?;
             },

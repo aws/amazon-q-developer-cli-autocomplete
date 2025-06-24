@@ -455,7 +455,6 @@ async fn load_agents_from_entries(mut files: ReadDir) -> Vec<Agent> {
             } else {
                 let file_path = file_path.to_string_lossy();
                 tracing::error!("Unable to determine persona name from config file at {file_path}, skipping");
-                continue;
             }
         }
     }

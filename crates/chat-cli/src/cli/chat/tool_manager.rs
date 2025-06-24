@@ -425,7 +425,7 @@ impl ToolManagerBuilder {
                                         if let Some((_, host_tool_name)) =
                                             full_path.split_once(MCP_SERVER_TOOL_DELIMITER)
                                         {
-                                            acc.insert(host_tool_name.to_string(), model_tool_name.to_string());
+                                            acc.insert(host_tool_name.to_string(), model_tool_name.clone());
                                         }
                                     }
                                     acc
@@ -1360,7 +1360,7 @@ fn process_tool_specs(
     let mut number_of_tools = 0_usize;
 
     for spec in specs.iter_mut() {
-        let model_tool_name = alias_list.get(&spec.name).map(|name| name.to_string()).unwrap_or({
+        let model_tool_name = alias_list.get(&spec.name).cloned().unwrap_or({
             if !regex.is_match(&spec.name) {
                 let mut sn = sanitize_name(spec.name.clone(), regex, &mut hasher);
                 while tn_map.contains_key(&sn) {
