@@ -7,7 +7,10 @@ pub mod knowledge;
 pub mod thinking;
 pub mod use_aws;
 
-use std::collections::HashMap;
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use std::io::Write;
 use std::path::{
     Path,
@@ -136,6 +139,8 @@ pub struct ToolPermissions {
     // We need this field for any stragglers
     pub trust_all: bool,
     pub permissions: HashMap<String, ToolPermission>,
+    // Store pending trust-tool patterns for MCP tools that may be loaded later
+    pub pending_trusted_tools: HashSet<String>,
 }
 
 impl ToolPermissions {
@@ -143,23 +148,29 @@ impl ToolPermissions {
         Self {
             trust_all: false,
             permissions: HashMap::with_capacity(capacity),
+            pending_trusted_tools: HashSet::new(),
         }
     }
 
-    pub fn is_trusted(&self, tool_name: &str) -> bool {
+    pub fn is_trusted(&mut self, tool_name: &str) -> bool {
+        // Check if we should trust from pending patterns first
+        if self.should_trust_from_pending(tool_name) {
+            self.trust_tool(tool_name);
+            self.pending_trusted_tools.remove(tool_name);
+        }
+
         self.trust_all || self.permissions.get(tool_name).is_some_and(|perm| perm.trusted)
     }
 
     /// Returns a label to describe the permission status for a given tool.
-    pub fn display_label(&self, tool_name: &str) -> String {
-        if self.has(tool_name) || self.trust_all {
-            if self.is_trusted(tool_name) {
-                format!("  {}", "trusted".dark_green().bold())
-            } else {
-                format!("  {}", "not trusted".dark_grey())
-            }
-        } else {
-            self.default_permission_label(tool_name)
+    pub fn display_label(&mut self, tool_name: &str) -> String {
+        let is_trusted = self.is_trusted(tool_name);
+        let has_setting = self.has(tool_name) || self.trust_all;
+
+        match (has_setting, is_trusted) {
+            (true, true) => format!("  {}", "trusted".dark_green().bold()),
+            (true, false) => format!("  {}", "not trusted".dark_grey()),
+            _ => self.default_permission_label(tool_name),
         }
     }
 
@@ -170,6 +181,7 @@ impl ToolPermissions {
 
     pub fn untrust_tool(&mut self, tool_name: &str) {
         self.trust_all = false;
+        self.pending_trusted_tools.remove(tool_name);
         self.permissions
             .insert(tool_name.to_string(), ToolPermission { trusted: false });
     }
@@ -177,14 +189,33 @@ impl ToolPermissions {
     pub fn reset(&mut self) {
         self.trust_all = false;
         self.permissions.clear();
+        self.pending_trusted_tools.clear();
     }
 
     pub fn reset_tool(&mut self, tool_name: &str) {
         self.trust_all = false;
         self.permissions.remove(tool_name);
+        self.pending_trusted_tools.remove(tool_name);
     }
 
-    pub fn has(&self, tool_name: &str) -> bool {
+    /// Add a pending trust pattern for tools that may be loaded later
+    pub fn add_pending_trust_tool(&mut self, pattern: String) {
+        self.pending_trusted_tools.insert(pattern);
+    }
+
+    /// Check if a tool should be trusted based on preceding trust declarations
+    pub fn should_trust_from_pending(&self, tool_name: &str) -> bool {
+        // Check for exact match
+        self.pending_trusted_tools.contains(tool_name)
+    }
+
+    pub fn has(&mut self, tool_name: &str) -> bool {
+        // Check if we should trust from pending tools first
+        if self.should_trust_from_pending(tool_name) {
+            self.trust_tool(tool_name);
+            self.pending_trusted_tools.remove(tool_name);
+        }
+
         self.permissions.contains_key(tool_name)
     }
 
