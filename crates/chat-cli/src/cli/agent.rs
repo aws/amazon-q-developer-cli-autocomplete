@@ -136,6 +136,7 @@ impl Default for Agent {
     }
 }
 
+#[derive(Debug)]
 pub enum PermissionEvalResult {
     Allow,
     Ask,
