@@ -126,7 +126,10 @@ use crate::cli::chat::cli::model::{
     MODEL_OPTIONS,
     default_model_id,
 };
-use crate::cli::chat::cli::prompts::GetPromptError;
+use crate::cli::chat::cli::prompts::{
+    GetPromptError,
+    PromptsSubcommand,
+};
 use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::Prompt;
@@ -1259,6 +1262,24 @@ impl ChatSession {
             Ok(ChatState::PromptUser {
                 skip_printing_tools: false,
             })
+        } else if let Some(command) = input.strip_prefix("@") {
+            let input_parts =
+                shlex::split(command).ok_or(ChatError::Custom("Error splitting prompt command".into()))?;
+
+            let mut iter = input_parts.into_iter();
+            let prompt_name = iter
+                .next()
+                .ok_or(ChatError::Custom("Prompt name needs to be specified".into()))?;
+
+            let args: Vec<String> = iter.collect();
+            let arguments = if args.is_empty() { None } else { Some(args) };
+
+            let subcommand = PromptsSubcommand::Get {
+                orig_input: Some(command.to_string()),
+                name: prompt_name,
+                arguments,
+            };
+            return subcommand.execute(self).await;
         } else if let Some(command) = input.strip_prefix("!") {
             // Use platform-appropriate shell
             let result = if cfg!(target_os = "windows") {

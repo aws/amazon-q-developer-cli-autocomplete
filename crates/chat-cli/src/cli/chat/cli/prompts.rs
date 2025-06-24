@@ -222,7 +222,6 @@ impl PromptsSubcommand {
         else {
             unreachable!("List has already been parsed out at this point");
         };
-        println!("Calling get_prompt with name: {:?}, arguments: {:?}", name, arguments);
 
         let prompts = match session.conversation.tool_manager.get_prompt(name, arguments).await {
             Ok(resp) => resp,
