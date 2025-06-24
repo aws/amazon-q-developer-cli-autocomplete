@@ -94,7 +94,7 @@ impl ProfileSubcommand {
                     session.stderr,
                     style::SetForegroundColor(Color::Yellow),
                     style::Print(format!(
-                        "Persona / Profile persistence has been disabled. To perform any CRUD on persona / profile, use the default persona under {} as example",
+                        "Persona / Profile persistence has been disabled. To persist any changes on persona / profile, use the default persona under {} as example",
                         global_path
                     )),
                     style::SetAttribute(Attribute::Reset)

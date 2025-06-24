@@ -18,7 +18,6 @@ use tracing::warn;
 use super::InvokeOutput;
 use crate::cli::agent::{
     Agent,
-    PermissionCandidate,
     PermissionEvalResult,
 };
 use crate::cli::chat::CONTINUATION_LINE;
@@ -248,10 +247,8 @@ impl CustomTool {
         TokenCounter::count_tokens(self.method.as_str())
             + TokenCounter::count_tokens(self.params.as_ref().map_or("", |p| p.as_str().unwrap_or_default()))
     }
-}
 
-impl PermissionCandidate for CustomTool {
-    fn eval(&self, agent: &Agent) -> PermissionEvalResult {
+    pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         use crate::util::MCP_SERVER_TOOL_DELIMITER;
         let Self {
             name: tool_name,

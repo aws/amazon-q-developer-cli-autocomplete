@@ -25,7 +25,6 @@ use super::{
 };
 use crate::cli::agent::{
     Agent,
-    PermissionCandidate,
     PermissionEvalResult,
 };
 use crate::os::Os;
@@ -194,10 +193,8 @@ impl UseAws {
             None
         }
     }
-}
 
-impl PermissionCandidate for UseAws {
-    fn eval(&self, agent: &Agent) -> PermissionEvalResult {
+    pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
         struct Settings {
             allowed_services: Vec<String>,

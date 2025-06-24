@@ -65,7 +65,7 @@ use crate::api_client::model::{
     UserInputMessage,
     UserInputMessageContext,
 };
-use crate::cli::agent::AgentCollection;
+use crate::cli::agent::Agents;
 use crate::cli::chat::ChatError;
 use crate::cli::chat::cli::hooks::{
     Hook,
@@ -104,7 +104,7 @@ pub struct ConversationState {
     /// Stores the latest conversation summary created by /compact
     latest_summary: Option<String>,
     #[serde(skip)]
-    pub agents: AgentCollection,
+    pub agents: Agents,
     /// Model explicitly selected by the user in this conversation state via `/model`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -113,7 +113,7 @@ pub struct ConversationState {
 impl ConversationState {
     pub async fn new(
         conversation_id: &str,
-        agents: AgentCollection,
+        agents: Agents,
         tool_config: HashMap<String, ToolSpec>,
         tool_manager: ToolManager,
         current_model_id: Option<String>,
@@ -945,7 +945,10 @@ mod tests {
         AssistantResponseMessage,
         ToolResultStatus,
     };
-    use crate::cli::agent::Agent;
+    use crate::cli::agent::{
+        Agent,
+        Agents,
+    };
     use crate::cli::chat::tool_manager::ToolManager;
 
     const AMAZONQ_FILENAME: &str = "AmazonQ.md";
@@ -1053,7 +1056,7 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_history_handling_truncation() {
         let mut os = Os::new().await.unwrap();
-        let agents = AgentCollection::default();
+        let agents = Agents::default();
         let mut output = NullWriter;
 
         let mut tool_manager = ToolManager::default();
@@ -1083,7 +1086,7 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_state_history_handling_with_tool_results() {
         let mut os = Os::new().await.unwrap();
-        let agents = AgentCollection::default();
+        let agents = Agents::default();
 
         // Build a long conversation history of tool use results.
         let mut tool_manager = ToolManager::default();
@@ -1156,7 +1159,7 @@ mod tests {
     async fn test_conversation_state_with_context_files() {
         let mut os = Os::new().await.unwrap();
         let agents = {
-            let mut agents = AgentCollection::default();
+            let mut agents = Agents::default();
             let mut agent = Agent::default();
             agent.included_files.push(AMAZONQ_FILENAME.to_string());
             agents.agents.insert("TestAgent".to_string(), agent);
@@ -1213,7 +1216,7 @@ mod tests {
         let conversation_start_context = "conversation start context";
         let prompt_context = "prompt context";
         let agents = {
-            let mut agents = AgentCollection::default();
+            let mut agents = Agents::default();
             let create_hooks = serde_json::json!({
                 "test_conversation_start": {
                     "trigger": "conversation_start",

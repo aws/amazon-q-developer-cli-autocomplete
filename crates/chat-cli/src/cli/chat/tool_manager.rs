@@ -60,7 +60,6 @@ use crate::api_client::model::{
 };
 use crate::cli::agent::{
     Agent,
-    AgentSubscriber,
     McpServerConfig,
 };
 use crate::cli::chat::cli::prompts::GetPromptError;
@@ -836,20 +835,6 @@ pub struct ToolManager {
     /// A collection of preferences that pertains to the conversation.
     /// As far as tool manager goes, this is relevant for tool and server filters
     pub agent: Arc<Mutex<Agent>>,
-}
-
-// TODO:
-// - Unload / load servers as needed
-// - If servers list are the same, check to see if the tool list are the same. If they are not,
-// reload the tools
-#[async_trait::async_trait]
-impl AgentSubscriber for ToolManager {
-    async fn receive(&self, agent: Agent) {
-        let mut self_agent = self.agent.lock().await;
-        *self_agent = agent;
-    }
-
-    async fn upload(&self, _agent: &mut Agent) {}
 }
 
 impl Clone for ToolManager {

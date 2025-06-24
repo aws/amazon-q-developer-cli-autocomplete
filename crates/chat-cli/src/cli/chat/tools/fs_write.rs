@@ -39,7 +39,6 @@ use super::{
 };
 use crate::cli::agent::{
     Agent,
-    PermissionCandidate,
     PermissionEvalResult,
 };
 use crate::os::Os;
@@ -346,10 +345,8 @@ impl FsWrite {
             FsWrite::Append { summary, .. } => summary.as_ref(),
         }
     }
-}
 
-impl PermissionCandidate for FsWrite {
-    fn eval(&self, agent: &Agent) -> PermissionEvalResult {
+    pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
         struct Settings {
             #[serde(default)]

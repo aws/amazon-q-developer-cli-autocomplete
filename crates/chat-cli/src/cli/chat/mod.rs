@@ -108,7 +108,7 @@ use crate::api_client::model::ToolResultStatus;
 use crate::api_client::send_message_output::SendMessageOutput;
 use crate::auth::AuthError;
 use crate::auth::builder_id::is_idc_user;
-use crate::cli::agent::AgentCollection;
+use crate::cli::agent::Agents;
 use crate::cli::chat::cli::SlashCommand;
 use crate::cli::chat::cli::model::{
     MODEL_OPTIONS,
@@ -165,7 +165,7 @@ impl ChatArgs {
         let mut stderr = std::io::stderr();
 
         let agents = {
-            let mut agents = AgentCollection::load(os, self.profile.as_deref(), &mut stderr).await;
+            let mut agents = Agents::load(os, self.profile.as_deref(), &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
             if let Some(name) = self.profile.as_ref() {
@@ -429,7 +429,7 @@ impl ChatSession {
         stdout: std::io::Stdout,
         mut stderr: std::io::Stderr,
         conversation_id: &str,
-        mut agents: AgentCollection,
+        mut agents: Agents,
         mut input: Option<String>,
         input_source: InputSource,
         resume_conversation: bool,
@@ -2130,9 +2130,9 @@ mod tests {
     use super::*;
     use crate::cli::agent::Agent;
 
-    async fn get_test_agents(os: &Os) -> AgentCollection {
+    async fn get_test_agents(os: &Os) -> Agents {
         const AGENT_PATH: &str = "/persona/TestAgent.json";
-        let mut agents = AgentCollection::default();
+        let mut agents = Agents::default();
         let agent = Agent {
             path: Some(PathBuf::from(AGENT_PATH)),
             ..Default::default()

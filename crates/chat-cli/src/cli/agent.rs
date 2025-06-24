@@ -31,6 +31,7 @@ use tracing::error;
 use super::chat::tools::custom_tool::CustomToolConfig;
 use super::chat::tools::{
     DEFAULT_APPROVE,
+    NATIVE_TOOLS,
     ToolOrigin,
 };
 use crate::os::Os;
@@ -77,7 +78,9 @@ impl McpServerConfig {
     }
 }
 
-/// Externally this is known as "Persona"
+/// An [Agent] is a declarative way of configuring a given instance of q chat. Currently, it is
+/// impacting q chat in via influenicng [ContextManager] and [ToolManager].
+/// Changes made to [ContextManager] and [ToolManager] do not persist across sessions.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
@@ -113,10 +116,10 @@ impl Default for Agent {
     fn default() -> Self {
         Self {
             name: "default".to_string(),
-            description: Some("Default persona".to_string()),
+            description: Some("Default agent".to_string()),
             prompt: Default::default(),
             mcp_servers: Default::default(),
-            tools: vec!["*".to_string()],
+            tools: NATIVE_TOOLS.iter().copied().map(str::to_string).collect::<Vec<_>>(),
             alias: Default::default(),
             allowed_tools: {
                 let mut set = HashSet::<String>::new();
@@ -143,24 +146,14 @@ pub enum PermissionEvalResult {
     Deny,
 }
 
-impl Agent {
-    pub fn eval_perm(&self, candidate: &impl PermissionCandidate) -> PermissionEvalResult {
-        if self.allowed_tools.len() == 1 && self.allowed_tools.contains("*") {
-            return PermissionEvalResult::Allow;
-        }
-
-        candidate.eval(self)
-    }
-}
-
 #[derive(Clone, Default, Debug)]
-pub struct AgentCollection {
+pub struct Agents {
     pub agents: HashMap<String, Agent>,
     pub active_idx: String,
     pub trust_all_tools: bool,
 }
 
-impl AgentCollection {
+impl Agents {
     /// This function assumes the relevant transformation to the tool names have been done:
     /// - model tool name -> host tool name
     /// - custom tool namespacing
@@ -197,15 +190,8 @@ impl AgentCollection {
             .ok_or(eyre::eyre!("No agent with name {name} found"))
     }
 
-    pub async fn publish(&self, subscriber: &impl AgentSubscriber) -> eyre::Result<()> {
-        if let Some(agent) = self.get_active() {
-            subscriber.receive(agent.clone()).await;
-            return Ok(());
-        }
-
-        eyre::bail!("No active agent. Agent not published");
-    }
-
+    /// Migrated from [reload_profiles] from context.rs. It loads the active persona from disk and
+    /// replaces its in-memory counterpart with it.
     pub async fn reload_personas(&mut self, os: &Os, output: &mut impl Write) -> eyre::Result<()> {
         let persona_name = self.get_active().map(|a| a.name.as_str());
         let mut new_self = Self::load(os, persona_name, output).await;
@@ -215,26 +201,6 @@ impl AgentCollection {
 
     pub fn list_personas(&self) -> eyre::Result<Vec<String>> {
         Ok(self.agents.keys().cloned().collect::<Vec<_>>())
-    }
-
-    pub async fn save_persona(&mut self, os: &Os, subcribers: Vec<&dyn AgentSubscriber>) -> eyre::Result<PathBuf> {
-        let agent = self.get_active_mut().ok_or(eyre::eyre!("No active persona selected"))?;
-        for sub in subcribers {
-            sub.upload(agent).await;
-        }
-
-        let path = agent
-            .path
-            .as_ref()
-            .ok_or(eyre::eyre!("Persona path associated not found"))?;
-        let contents =
-            serde_json::to_string_pretty(agent).map_err(|e| eyre::eyre!("Error serializing persona: {:?}", e))?;
-        os.fs
-            .write(path, &contents)
-            .await
-            .map_err(|e| eyre::eyre!("Error writing persona to file: {:?}", e))?;
-
-        Ok(path.clone())
     }
 
     /// Migrated from [create_profile] from context.rs, which was creating profiles under the
@@ -265,6 +231,8 @@ impl AgentCollection {
         Ok(())
     }
 
+    /// Migrated from [delete_profile] from context.rs, which was deleting profiles under the
+    /// global directory. We shall preserve this implicit behavior for now until further notice.
     pub async fn delete_persona(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
         if name == self.active_idx.as_str() {
             eyre::bail!("Cannot delete the active persona. Switch to another persona first");
@@ -286,6 +254,9 @@ impl AgentCollection {
         Ok(())
     }
 
+    /// Migrated from [load] from context.rs, which was loading profiles under the
+    /// local and global directory. We shall preserve this implicit behavior for now until further
+    /// notice.
     pub async fn load(os: &Os, persona_name: Option<&str>, output: &mut impl Write) -> Self {
         let mut local_agents = 'local: {
             let Ok(path) = directories::chat_local_persona_dir() else {
@@ -478,22 +449,6 @@ fn validate_persona_name(name: &str) -> eyre::Result<()> {
     Ok(())
 }
 
-/// To be implemented by tools
-/// The intended workflow here is to utilize to the visitor pattern
-/// - [Agent] accepts a PermissionCandidate
-/// - it then passes a reference of itself to [PermissionCandidate::eval]
-/// - it is then expected to look through the permissions hashmap to conclude
-pub trait PermissionCandidate {
-    fn eval(&self, agent: &Agent) -> PermissionEvalResult;
-}
-
-/// To be implemented by constructs that depend on agent configurations
-#[async_trait::async_trait]
-pub trait AgentSubscriber {
-    async fn receive(&self, agent: Agent);
-    async fn upload(&self, agent: &mut Agent);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -556,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_get_active() {
-        let mut collection = AgentCollection::default();
+        let mut collection = Agents::default();
         assert!(collection.get_active().is_none());
 
         let agent = Agent::default();
@@ -569,7 +524,7 @@ mod tests {
 
     #[test]
     fn test_get_active_mut() {
-        let mut collection = AgentCollection::default();
+        let mut collection = Agents::default();
         assert!(collection.get_active_mut().is_none());
 
         let agent = Agent::default();
@@ -588,7 +543,7 @@ mod tests {
 
     #[test]
     fn test_switch() {
-        let mut collection = AgentCollection::default();
+        let mut collection = Agents::default();
 
         let default_agent = Agent::default();
         let dev_agent = Agent {
@@ -614,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_personas() {
-        let mut collection = AgentCollection::default();
+        let mut collection = Agents::default();
 
         // Add two agents
         let default_agent = Agent::default();
@@ -637,53 +592,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_save_persona() {
-        let ctx = Os::new().await.unwrap();
-        let mut output = NullWriter;
-        let mut collection = AgentCollection::load(&ctx, None, &mut output).await;
-
-        struct ToolManager;
-        struct ContextManager;
-
-        #[async_trait::async_trait]
-        impl AgentSubscriber for ToolManager {
-            async fn receive(&self, _agent: Agent) {}
-
-            async fn upload(&self, agent: &mut Agent) {
-                // This is because default tools has "*" in the list to include all
-                agent.tools.clear();
-                agent.tools.push("tool".to_string());
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl AgentSubscriber for ContextManager {
-            async fn receive(&self, _agent: Agent) {}
-
-            async fn upload(&self, agent: &mut Agent) {
-                agent.prompt_hooks = serde_json::to_value(vec!["prompt"]).expect("Failed to convert vector to value");
-            }
-        }
-
-        let tm = ToolManager;
-        let cm = ContextManager;
-
-        let result = collection.save_persona(&ctx, vec![&tm, &cm]).await;
-        assert!(result.is_ok());
-
-        let active = collection.get_active().expect("Active agent should exist");
-        assert_eq!(active.tools.len(), 1);
-        assert_eq!(active.tools[0], "tool");
-
-        let mut empty_collection = AgentCollection::default();
-        let result = empty_collection.save_persona(&ctx, vec![&tm, &cm]).await;
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "No active persona selected");
-    }
-
-    #[tokio::test]
     async fn test_create_persona() {
-        let mut collection = AgentCollection::default();
+        let mut collection = Agents::default();
         let ctx = Os::new().await.unwrap();
 
         let persona_name = "test_persona";
@@ -714,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_persona() {
-        let mut collection = AgentCollection::default();
+        let mut collection = Agents::default();
         let ctx = Os::new().await.unwrap();
 
         let persona_name_one = "test_persona_one";
@@ -776,31 +686,5 @@ mod tests {
         assert!(validate_persona_name("_invalid").is_err());
         assert!(validate_persona_name("invalid!").is_err());
         assert!(validate_persona_name("invalid space").is_err());
-    }
-
-    #[test]
-    fn test_agent_eval_perm() {
-        const NAME: &str = "test_tool";
-
-        struct TestTool;
-
-        impl PermissionCandidate for TestTool {
-            fn eval(&self, agent: &Agent) -> PermissionEvalResult {
-                if agent.allowed_tools.contains(NAME) {
-                    PermissionEvalResult::Allow
-                } else {
-                    PermissionEvalResult::Ask
-                }
-            }
-        }
-        let mut agent = Agent::default();
-        let tool = TestTool;
-
-        // Test with specific permissions
-        assert!(matches!(agent.eval_perm(&tool), PermissionEvalResult::Ask));
-
-        // Test with tool added
-        agent.allowed_tools.insert(NAME.to_string());
-        assert!(matches!(agent.eval_perm(&tool), PermissionEvalResult::Allow));
     }
 }

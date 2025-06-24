@@ -42,6 +42,18 @@ use crate::cli::agent::{
 use crate::os::Os;
 
 pub const DEFAULT_APPROVE: [&str; 1] = ["fs_read"];
+pub const NATIVE_TOOLS: [&str; 7] = [
+    "fs_read",
+    "fs_write",
+    #[cfg(windows)]
+    "execute_cmd",
+    #[cfg(not(windows))]
+    "execute_bash",
+    "use_aws",
+    "gh_issue",
+    "knowledge",
+    "thinking",
+];
 
 /// Represents an executable tool use.
 #[allow(clippy::large_enum_variant)]
@@ -79,11 +91,11 @@ impl Tool {
     /// Whether or not the tool should prompt the user to accept before [Self::invoke] is called.
     pub fn requires_acceptance(&self, agent: &Agent) -> PermissionEvalResult {
         match self {
-            Tool::FsRead(fs_read) => agent.eval_perm(fs_read),
-            Tool::FsWrite(fs_write) => agent.eval_perm(fs_write),
-            Tool::ExecuteCommand(execute_command) => agent.eval_perm(execute_command),
-            Tool::UseAws(use_aws) => agent.eval_perm(use_aws),
-            Tool::Custom(custom_tool) => agent.eval_perm(custom_tool),
+            Tool::FsRead(fs_read) => fs_read.eval_perm(agent),
+            Tool::FsWrite(fs_write) => fs_write.eval_perm(agent),
+            Tool::ExecuteCommand(execute_command) => execute_command.eval_perm(agent),
+            Tool::UseAws(use_aws) => use_aws.eval_perm(agent),
+            Tool::Custom(custom_tool) => custom_tool.eval_perm(agent),
             Tool::GhIssue(_) => PermissionEvalResult::Allow,
             Tool::Thinking(_) => PermissionEvalResult::Allow,
             Tool::Knowledge(_) => PermissionEvalResult::Ask,

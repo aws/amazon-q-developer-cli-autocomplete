@@ -11,7 +11,6 @@ use tracing::error;
 
 use crate::cli::agent::{
     Agent,
-    PermissionCandidate,
     PermissionEvalResult,
 };
 use crate::cli::chat::tools::{
@@ -154,10 +153,8 @@ impl ExecuteCommand {
         // TODO: probably some small amount of PATH checking
         Ok(())
     }
-}
 
-impl PermissionCandidate for ExecuteCommand {
-    fn eval(&self, agent: &Agent) -> PermissionEvalResult {
+    pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
         struct Settings {
             #[serde(default)]

@@ -36,7 +36,6 @@ use super::{
 };
 use crate::cli::agent::{
     Agent,
-    PermissionCandidate,
     PermissionEvalResult,
 };
 use crate::cli::chat::CONTINUATION_LINE;
@@ -86,10 +85,8 @@ impl FsRead {
             FsRead::Image(fs_image) => fs_image.invoke(updates).await,
         }
     }
-}
 
-impl PermissionCandidate for FsRead {
-    fn eval(&self, agent: &Agent) -> PermissionEvalResult {
+    pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
         struct Settings {
             #[serde(default)]
