@@ -1,9 +1,9 @@
-pub(crate) mod credentials;
+mod credentials;
 pub mod customization;
 mod endpoints;
 mod error;
-pub(crate) mod interceptor;
 pub mod model;
+mod opt_out;
 pub mod profile;
 pub mod send_message_output;
 
@@ -38,11 +38,11 @@ use tracing::{
 };
 
 use crate::api_client::credentials::CredentialsChain;
-use crate::api_client::interceptor::opt_out::OptOutInterceptor;
 use crate::api_client::model::{
     ChatResponseStream,
     ConversationState,
 };
+use crate::api_client::opt_out::OptOutInterceptor;
 use crate::api_client::send_message_output::SendMessageOutput;
 use crate::auth::builder_id::BearerResolver;
 use crate::aws_common::{
