@@ -31,7 +31,6 @@ use std::time::Duration;
 use amzn_codewhisperer_client::types::SubscriptionStatus;
 use clap::{
     Args,
-    CommandFactory,
     Parser,
 };
 use context::ContextManager;
@@ -135,6 +134,18 @@ use crate::telemetry::{
 const LIMIT_REACHED_TEXT: &str = color_print::cstr! { "You've used all your free requests for this month. You have two options:
 1. Upgrade to a paid subscription for increased limits. See our Pricing page for what's included> <blue!>https://aws.amazon.com/q/developer/pricing/</blue!>
 2. Wait until next month when your limit automatically resets." };
+
+pub const EXTRA_HELP: &str = color_print::cstr! {"
+<cyan,em>MCP:</cyan,em>
+<black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
+
+<cyan,em>Tips:</cyan,em>
+<em>!{command}</em>            <black!>Quickly execute a command in your current session</black!>
+<em>Ctrl(^) + j</em>           <black!>Insert new-line to provide multi-line prompt. Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
+<em>Ctrl(^) + s</em>           <black!>Fuzzy search commands and context files. Use Tab to select multiple items.</black!>
+                      <black!>Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)</black!>
+<em>chat.editMode</em>         <black!>Set editing mode (vim or emacs) using: q settings chat.editMode vi/emacs</black!>
+"};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
 pub struct ChatArgs {
@@ -1210,60 +1221,6 @@ impl ChatSession {
 
         let input = user_input.trim();
 
-        if input.starts_with("/help") {
-            writeln!(self.stderr, "{}\n", SlashCommand::command().render_long_help())?;
-
-            queue!(
-                self.stderr,
-                style::SetForegroundColor(Color::Cyan),
-                style::SetAttribute(Attribute::Bold),
-                style::Print("MCP:\n"),
-                style::SetAttribute(Attribute::Reset),
-                style::SetForegroundColor(Color::Black),
-                style::Print("You can now configure the Amazon Q CLI to use MCP servers.\n"),
-                style::Print(
-                    "Learn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html\n\n"
-                ),
-                style::SetForegroundColor(Color::Cyan),
-                style::SetAttribute(Attribute::Bold),
-                style::Print("Tips:\n"),
-                style::SetAttribute(Attribute::Reset),
-                style::SetForegroundColor(Color::Black),
-            )?;
-
-            const TIPS: &[(&str, &str)] = &[
-                ("!{command}", "Quickly execute a command in your current session"),
-                ("Ctrl(^) + j", "Insert new-line for multi-line prompt (Alt+⏎ works too)"),
-                ("Ctrl(^) + s", "Fuzzy-search commands/context files; Tab = multi-select"),
-                ("chat.editMode", "Set vim/emacs mode: q settings chat.editMode vi|emacs"),
-            ];
-
-            for (label, desc) in TIPS {
-                queue!(
-                    self.stderr,
-                    style::SetAttribute(Attribute::Bold),
-                    style::Print(*label),
-                    style::SetAttribute(Attribute::Reset),
-                    style::Print("    "),
-                    style::Print(*desc),
-                    style::Print("\n")
-                )?;
-            }
-
-            queue!(
-                self.stderr,
-                style::Print(
-                    "                Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)\n"
-                ),
-                style::SetForegroundColor(Color::Reset)
-            )?;
-
-            self.stderr.flush()?;
-            return Ok(ChatState::PromptUser {
-                skip_printing_tools: false,
-            });
-        }
-
         // handle image path
         if input.starts_with('/') {
             if let Some(after_slash) = input.strip_prefix('/') {
@@ -1299,7 +1256,7 @@ impl ChatSession {
                     writeln!(self.stderr)?;
                 },
                 Err(err) => {
-                    writeln!(self.stderr, "{}", err)?;
+                    writeln!(self.stderr, "{}", err.render().ansi())?;
                 },
             }
 
