@@ -291,7 +291,7 @@ pub fn dialoguer_theme() -> ColorfulTheme {
 }
 
 pub async fn assert_logged_in() -> Result<(), Error> {
-    if !fig_util::system_info::in_cloudshell() && !fig_auth::is_logged_in().await {
+    if !(std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty()) || fig_auth::is_logged_in().await) {
         bail!(
             "You are not logged in, please log in with {}",
             format!("{CLI_BINARY_NAME} login",).bold()
