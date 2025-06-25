@@ -462,7 +462,7 @@ mod tests {
             ],
             env: vec![],
             timeout: None,
-            scope: None,
+            agent: None,
             disabled: false,
             force: false,
         }
@@ -478,7 +478,7 @@ mod tests {
         // 2. remove
         RemoveArgs {
             name: "local".into(),
-            scope: None,
+            agent: None,
         }
         .execute(&os, &mut vec![])
         .await
@@ -511,7 +511,7 @@ mod tests {
                     "--allow-write".to_string(),
                     "--allow-sensitive-data-access".to_string(),
                 ],
-                scope: None,
+                agent: None,
                 env: vec![
                     [
                         ("key1".to_string(), "value1".to_string()),
@@ -533,7 +533,7 @@ mod tests {
             ["mcp", "remove", "--name", "old"],
             RootSubcommand::Mcp(McpSubcommand::Remove(RemoveArgs {
                 name: "old".into(),
-                scope: None,
+                agent: None,
             }))
         );
     }
