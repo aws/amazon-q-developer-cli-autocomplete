@@ -30,6 +30,7 @@ use std::time::Duration;
 use amzn_codewhisperer_client::types::SubscriptionStatus;
 use clap::{
     Args,
+    CommandFactory,
     Parser,
 };
 use context::ContextManager;
@@ -1207,6 +1208,61 @@ impl ChatSession {
         queue!(self.stderr, style::Print('\n'))?;
 
         let input = user_input.trim();
+
+        if input.starts_with("/help") {
+            writeln!(self.stderr, "{}\n", SlashCommand::command().render_long_help())?;
+
+            queue!(
+                self.stderr,
+                style::SetForegroundColor(Color::Cyan),
+                style::SetAttribute(Attribute::Bold),
+                style::Print("MCP:\n"),
+                style::SetAttribute(Attribute::Reset),
+                style::SetForegroundColor(Color::Black),
+                style::Print("You can now configure the Amazon Q CLI to use MCP servers.\n"),
+                style::Print(
+                    "Learn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html\n\n"
+                ),
+                style::SetForegroundColor(Color::Cyan),
+                style::SetAttribute(Attribute::Bold),
+                style::Print("Tips:\n"),
+                style::SetAttribute(Attribute::Reset),
+                style::SetForegroundColor(Color::Black),
+            )?;
+
+            const TIPS: &[(&str, &str)] = &[
+                ("!{command}", "Quickly execute a command in your current session"),
+                ("Ctrl(^) + j", "Insert new-line for multi-line prompt (Alt+⏎ works too)"),
+                ("Ctrl(^) + s", "Fuzzy-search commands/context files; Tab = multi-select"),
+                ("chat.editMode", "Set vim/emacs mode: q settings chat.editMode vi|emacs"),
+            ];
+
+            for (label, desc) in TIPS {
+                queue!(
+                    self.stderr,
+                    style::SetAttribute(Attribute::Bold),
+                    style::Print(*label),
+                    style::SetAttribute(Attribute::Reset),
+                    style::Print("    "),
+                    style::Print(*desc),
+                    style::Print("\n")
+                )?;
+            }
+
+            queue!(
+                self.stderr,
+                style::Print(
+                    "                Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)\n"
+                ),
+                style::SetForegroundColor(Color::Reset)
+            )?;
+
+            self.stderr.flush()?;
+            return Ok(ChatState::PromptUser {
+                skip_printing_tools: false,
+            });
+        }
+
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
             args.insert(0, "q".to_owned());
             match SlashCommand::try_parse_from(args) {
