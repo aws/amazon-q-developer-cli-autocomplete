@@ -206,6 +206,7 @@ pub enum PromptsSubcommand {
     /// List available prompts from a tool or show all available prompt
     List { search_word: Option<String> },
     Get {
+        #[arg(long, hide = true)]
         orig_input: Option<String>,
         name: String,
         arguments: Option<Vec<String>>,
