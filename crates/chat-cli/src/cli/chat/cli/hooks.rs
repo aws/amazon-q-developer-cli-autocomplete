@@ -461,7 +461,7 @@ impl HooksArgs {
             session.stderr,
             style::Print(format!(
                 "\nUse {} to manage hooks.\n\n",
-                "hooks help".to_string().dark_green()
+                "/hooks help".to_string().dark_green()
             )),
         )?;
 
