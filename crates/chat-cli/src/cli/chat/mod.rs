@@ -6,6 +6,7 @@ mod error_formatter;
 mod input_source;
 mod message;
 mod parse;
+use std::path::MAIN_SEPARATOR;
 mod parser;
 mod prompt;
 mod prompt_parser;
@@ -1263,6 +1264,21 @@ impl ChatSession {
             });
         }
 
+        // handle image path
+        if input.starts_with('/') {
+            if let Some(after_slash) = input.strip_prefix('/') {
+                let looks_like_path = after_slash.contains(MAIN_SEPARATOR)
+                    || after_slash.contains('/')
+                    || after_slash.contains('\\')
+                    || after_slash.contains('.');
+
+                if looks_like_path {
+                    return Ok(ChatState::HandleInput {
+                        input: after_slash.to_string(),
+                    });
+                }
+            }
+        }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
             args.insert(0, "q".to_owned());
             match SlashCommand::try_parse_from(args) {
