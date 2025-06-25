@@ -31,6 +31,7 @@ use std::time::Duration;
 use amzn_codewhisperer_client::types::SubscriptionStatus;
 use clap::{
     Args,
+    CommandFactory,
     Parser,
 };
 use context::ContextManager;
@@ -1240,7 +1241,13 @@ impl ChatSession {
             }
         }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
-            args.insert(0, "q".to_owned());
+            // Knowing the first argument is required for error handling.
+            let first_arg = args.first().cloned();
+
+            // We set the binary name as a dummy name "slash_command" which we
+            // replace anytime we error out and print a usage statement.
+            args.insert(0, "slash_command".to_owned());
+
             match SlashCommand::try_parse_from(args) {
                 Ok(command) => {
                     match command.execute(os, self).await {
@@ -1259,7 +1266,35 @@ impl ChatSession {
                     writeln!(self.stderr)?;
                 },
                 Err(err) => {
-                    writeln!(self.stderr, "{}", err.render().ansi())?;
+                    // Replace the dummy name with a slash. Also have to check for an ansi sequence
+                    // for invalid slash commands (e.g. on a "/doesntexist" input).
+                    let ansi_output = err
+                        .render()
+                        .ansi()
+                        .to_string()
+                        .replace("slash_command ", "/")
+                        .replace("slash_command\u{1b}[0m ", "/");
+
+                    writeln!(self.stderr, "{}", ansi_output)?;
+
+                    // Print the subcommand help, if available. Required since by default we won't
+                    // show what the actual arguments are, requiring an unnecessary --help call.
+                    if let (
+                        clap::error::ErrorKind::InvalidValue
+                        | clap::error::ErrorKind::UnknownArgument
+                        | clap::error::ErrorKind::InvalidSubcommand
+                        | clap::error::ErrorKind::MissingRequiredArgument,
+                        Some(first_arg),
+                    ) = (err.kind(), first_arg)
+                    {
+                        let mut cmd = SlashCommand::command();
+                        let help = if let Some(subcmd) = cmd.find_subcommand_mut(first_arg) {
+                            subcmd.to_owned().help_template("{all-args}").render_help()
+                        } else {
+                            cmd.help_template("{all-args}").render_help()
+                        };
+                        writeln!(self.stderr, "{}", help.ansi())?;
+                    }
                 },
             }
 
