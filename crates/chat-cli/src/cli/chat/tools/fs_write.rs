@@ -348,6 +348,7 @@ impl FsWrite {
 
     pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Settings {
             #[serde(default)]
             allowed_paths: Vec<String>,

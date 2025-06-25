@@ -156,6 +156,7 @@ impl ExecuteCommand {
 
     pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Settings {
             #[serde(default)]
             allowed_commands: Vec<String>,
@@ -170,8 +171,9 @@ impl ExecuteCommand {
         }
 
         let Self { command, .. } = self;
+        let tool_name = if cfg!(windows) { "execute_cmd" } else { "execute_bash" };
         let is_in_allowlist = agent.allowed_tools.contains("execute_bash");
-        match agent.tools_settings.get("execute_bash") {
+        match agent.tools_settings.get(tool_name) {
             Some(settings) if is_in_allowlist => {
                 let Settings {
                     allowed_commands,

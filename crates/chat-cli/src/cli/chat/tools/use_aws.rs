@@ -196,6 +196,7 @@ impl UseAws {
 
     pub fn eval_perm(&self, agent: &Agent) -> PermissionEvalResult {
         #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Settings {
             allowed_services: Vec<String>,
             denied_services: Vec<String>,
