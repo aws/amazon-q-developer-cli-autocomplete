@@ -6972,6 +6972,7 @@ dependencies = [
  "bitflags 2.9.1",
  "bytes",
  "cfg-if",
+ "chat_cli",
  "clap",
  "clap_complete",
  "clap_complete_fig",

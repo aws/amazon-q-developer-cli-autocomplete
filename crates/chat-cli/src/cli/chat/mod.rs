@@ -18,59 +18,164 @@ pub mod tools;
 pub mod util;
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::io::{IsTerminal, Read, Write};
+use std::collections::{
+    HashMap,
+    HashSet,
+    VecDeque,
+};
+use std::io::{
+    IsTerminal,
+    Read,
+    Write,
+};
 use std::os::unix::fs::PermissionsExt;
-use std::process::{Command as ProcessCommand, ExitCode};
+use std::process::{
+    Command as ProcessCommand,
+    ExitCode,
+};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use std::{env, fs, io};
+use std::time::{
+    Duration,
+    Instant,
+};
+use std::{
+    env,
+    fs,
+    io,
+};
 
 use clap::Args;
-use command::{Command, PromptsSubcommand, ToolsSubcommand};
-use consts::{CONTEXT_FILES_MAX_SIZE, CONTEXT_WINDOW_SIZE, DUMMY_TOOL_NAME};
+use command::{
+    Command,
+    PromptsSubcommand,
+    ToolsSubcommand,
+};
+use consts::{
+    CONTEXT_FILES_MAX_SIZE,
+    CONTEXT_WINDOW_SIZE,
+    DUMMY_TOOL_NAME,
+};
 use context::ContextManager;
 pub use conversation_state::ConversationState;
 use conversation_state::TokenWarningLevel;
-use crossterm::style::{Attribute, Color, Stylize};
-use crossterm::{cursor, execute, queue, style, terminal};
-use dialoguer::{Error as DError, Select};
-use eyre::{ErrReport, Result, bail};
-use hooks::{Hook, HookTrigger};
+use crossterm::style::{
+    Attribute,
+    Color,
+    Stylize,
+};
+use crossterm::{
+    cursor,
+    execute,
+    queue,
+    style,
+    terminal,
+};
+use dialoguer::{
+    Error as DError,
+    Select,
+};
+use eyre::{
+    ErrReport,
+    Result,
+    bail,
+};
+use hooks::{
+    Hook,
+    HookTrigger,
+};
 use input_source::InputSource;
-use message::{AssistantMessage, AssistantToolUse, ToolUseResult, ToolUseResultBlock};
-use parse::{ParseState, interpret_markdown};
-use parser::{RecvErrorKind, ResponseParser};
+use message::{
+    AssistantMessage,
+    AssistantToolUse,
+    ToolUseResult,
+    ToolUseResultBlock,
+};
+use parse::{
+    ParseState,
+    interpret_markdown,
+};
+use parser::{
+    RecvErrorKind,
+    ResponseParser,
+};
 use regex::Regex;
 use serde_json::Map;
-use spinners::{Spinner, Spinners};
+use spinners::{
+    Spinner,
+    Spinners,
+};
 use thiserror::Error;
-use token_counter::{TokenCount, TokenCounter};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use token_counter::{
+    TokenCount,
+    TokenCounter,
+};
+use tokio::io::{
+    AsyncReadExt,
+    AsyncWriteExt,
+};
 use tokio::net::UnixListener;
 use tokio::signal::ctrl_c;
-use tool_manager::{GetPromptError, LoadingRecord, McpServerConfig, PromptBundle, ToolManager, ToolManagerBuilder};
+use tool_manager::{
+    GetPromptError,
+    LoadingRecord,
+    McpServerConfig,
+    PromptBundle,
+    ToolManager,
+    ToolManagerBuilder,
+};
 use tools::gh_issue::GhIssueContext;
-use tools::{OutputKind, QueuedTool, Tool, ToolOrigin, ToolPermissions, ToolSpec};
-use tracing::{debug, error, info, trace, warn};
+use tools::{
+    OutputKind,
+    QueuedTool,
+    Tool,
+    ToolOrigin,
+    ToolPermissions,
+    ToolSpec,
+};
+use tracing::{
+    debug,
+    error,
+    info,
+    trace,
+    warn,
+};
 use unicode_width::UnicodeWidthStr;
 use util::images::RichImageBlock;
-use util::shared_writer::{NullWriter, SharedWriter};
+use util::shared_writer::{
+    NullWriter,
+    SharedWriter,
+};
 use util::ui::draw_box;
-use util::{animate_output, drop_matched_context_files, play_notification_bell};
+use util::{
+    animate_output,
+    drop_matched_context_files,
+    play_notification_bell,
+};
 use uuid::Uuid;
 use winnow::Partial;
 use winnow::stream::Offset;
 
 use crate::api_client::StreamingClient;
 use crate::api_client::clients::SendMessageOutput;
-use crate::api_client::model::{ChatResponseStream, Tool as FigTool, ToolResultStatus};
+use crate::api_client::model::{
+    ChatResponseStream,
+    Tool as FigTool,
+    ToolResultStatus,
+};
 use crate::database::Database;
 use crate::database::settings::Setting;
-use crate::mcp_client::{Prompt, PromptGetResult};
+use crate::mcp_client::{
+    Prompt,
+    PromptGetResult,
+};
 use crate::platform::Context;
 use crate::telemetry::core::ToolUseEventBuilder;
-use crate::telemetry::{ReasonCode, TelemetryResult, TelemetryThread, get_error_reason};
+use crate::telemetry::{
+    ReasonCode,
+    TelemetryResult,
+    TelemetryThread,
+    get_error_reason,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
 pub struct ChatArgs {
@@ -669,12 +774,6 @@ enum ChatState {
         /// Whether or not to show the /compact help text.
         help: bool,
     },
-    WaitingOnAgents {
-        /// Tool uses to continue with after agents complete
-        tool_uses: Option<Vec<QueuedTool>>,
-        /// Pending tool index
-        pending_tool_index: Option<usize>,
-    },
     /// Exit the chat.
     Exit,
 }
@@ -778,23 +877,19 @@ impl ChatContext {
         let tokens_used = Arc::new(tokio::sync::Mutex::new(0));
         let context_window_percent = Arc::new(tokio::sync::Mutex::new(0.0));
         let status = Arc::new(tokio::sync::Mutex::new(String::from("waiting for user input")));
-        let summaries = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-        let expected_summaries = Arc::new(tokio::sync::Mutex::new(0usize));
 
         // Create clones for the async task
         let profile_clone = profile.clone();
         let tokens_used_clone: Arc<tokio::sync::Mutex<usize>> = tokens_used.clone();
         let context_window_percent_clone = context_window_percent.clone();
         let status_clone = status.clone();
-        let summaries_clone = summaries.clone();
-        let expected_summaries_clone = expected_summaries.clone();
 
         // Create UDS for list agent
         let socket_dir = "/tmp/qchat";
         let _ = std::fs::create_dir_all(socket_dir);
         let _ = std::fs::set_permissions(socket_dir, std::fs::Permissions::from_mode(0o777));
         let socket_path = format!("/tmp/qchat/{}", std::process::id());
-
+        eprintln!("Created socket at {}", socket_path);
         // Remove existing socket if it exists
         let _ = std::fs::remove_file(&socket_path);
         let start = Instant::now();
@@ -834,7 +929,8 @@ impl ChatContext {
                                         if let Err(e) = stream.write_all(response.as_bytes()).await {
                                             eprintln!("Failed to write response: {}", e);
                                         }
-                                    // TODO: add an atomic boolean: indicates whether theres something in the mpsc or not.
+                                    // TODO: add an atomic boolean: indicates whether theres
+                                    // something in the mpsc or not.
                                     } else if command.starts_with("PROMPT ") {
                                         let message_content = command.strip_prefix("PROMPT ").unwrap_or(command).trim();
                                         // pass prompt to main chat loop through mpsc
@@ -874,53 +970,6 @@ impl ChatContext {
             status,
             Some(message_receiver),
         )
-    }
-
-    async fn handle_waiting_on_agents(
-        &mut self,
-        tool_uses: Option<Vec<QueuedTool>>,
-        pending_tool_index: Option<usize>,
-    ) -> Result<ChatState, ChatError> {
-        // Check if we have a message receiver
-        if let Some(receiver) = &mut self.message_receiver {
-            match receiver.recv().await {
-                Some(message) => {
-                    execute!(
-                        self.output,
-                        style::SetForegroundColor(Color::Green),
-                        style::Print("Agent summaries received:\n\n"),
-                        style::SetForegroundColor(Color::Reset),
-                        style::Print(format!("{}\n\n", message))
-                    )?;
-
-                    // Set the message as the next user message
-                    // self.conversation_state.append_user_transcript(&message);
-                    self.conversation_state.reset_next_user_message();
-                    self.conversation_state.set_next_user_message(message).await;
-
-                    // Send the message to the model
-                    return Ok(ChatState::HandleResponseStream(
-                        self.client
-                            .send_message(self.conversation_state.as_sendable_conversation_state(false).await)
-                            .await?,
-                    ));
-                },
-                None => {
-                    // Channel closed
-                    eprintln!("Agent communication channel closed");
-                },
-            }
-        } else {
-            // No message receiver available
-            eprintln!("Agent communication channel closed");
-        }
-
-        // Return to prompt user state
-        Ok(ChatState::PromptUser {
-            tool_uses,
-            pending_tool_index,
-            skip_printing_tools: false,
-        })
     }
 
     async fn try_chat(&mut self, database: &mut Database, telemetry: &TelemetryThread) -> Result<()> {
@@ -1046,16 +1095,6 @@ impl ChatContext {
             std::mem::drop(percent_guard);
 
             let result = match chat_state {
-                ChatState::WaitingOnAgents {
-                    tool_uses,
-                    pending_tool_index,
-                } => {
-                    let tool_uses_clone = tool_uses.clone();
-                    tokio::select! {
-                        res = self.handle_waiting_on_agents(tool_uses, pending_tool_index) => res,
-                        Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: tool_uses_clone })
-                    }
-                },
                 ChatState::PromptUser {
                     tool_uses,
                     pending_tool_index,
@@ -3445,18 +3484,11 @@ impl ChatContext {
         let mut tool_results = vec![];
         let mut image_blocks: Vec<RichImageBlock> = Vec::new();
 
-        // change chat state to waitingOnAgents
-        let mut sub_agent_context = false;
-
         for tool in tool_uses {
             let mut tool_telemetry = self.tool_use_telemetry_events.entry(tool.id.clone());
             tool_telemetry = tool_telemetry.and_modify(|ev| ev.is_accepted = true);
 
             let tool_start = std::time::Instant::now();
-            if tool.name == "launch_agent" {
-                sub_agent_context = true;
-            }
-
             let invoke_result = tool.tool.invoke(&self.ctx, &mut self.output).await;
 
             if self.interactive && self.spinner.is_some() {
@@ -3564,25 +3596,6 @@ impl ChatContext {
         } else {
             self.conversation_state.add_tool_results(tool_results);
         }
-
-        // New code for subagents state
-        // At this point we are returning tool use result of launch_agents back to main chat loop
-        // Model must understand synthesis of all summaries
-        // if sub_agent_context {
-        //     self.send_tool_use_telemetry(telemetry).await;
-        //     if self.interactive {
-        //         execute!(self.output, cursor::Hide)?;
-        //         execute!(self.output, style::Print("\n"), style::SetAttribute(Attribute::Reset))?;
-        //         self.spinner = Some(Spinner::new(
-        //             Spinners::Dots,
-        //             "Understanding subagents summary...".to_string(),
-        //         ));
-        //     }
-        //     return Ok(ChatState::WaitingOnAgents {
-        //         tool_uses: None,
-        //         pending_tool_index: None,
-        //     });
-        // }
 
         if self.interactive {
             execute!(self.output, cursor::Hide)?;

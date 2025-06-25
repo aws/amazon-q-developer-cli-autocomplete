@@ -1,29 +1,81 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use std::future::Future;
-use std::hash::{DefaultHasher, Hasher};
-use std::io::{BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::hash::{
+    DefaultHasher,
+    Hasher,
+};
+use std::io::{
+    BufWriter,
+    Write,
+};
+use std::path::{
+    Path,
+    PathBuf,
+};
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock as SyncRwLock};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{
+    AtomicBool,
+    Ordering,
+};
+use std::sync::{
+    Arc,
+    RwLock as SyncRwLock,
+};
+use std::time::{
+    Duration,
+    Instant,
+};
 
 use convert_case::Casing;
-use crossterm::{cursor, execute, queue, style, terminal};
-use futures::{StreamExt, future, stream};
+use crossterm::{
+    cursor,
+    execute,
+    queue,
+    style,
+    terminal,
+};
+use futures::{
+    StreamExt,
+    future,
+    stream,
+};
 use regex::Regex;
-use serde::{Deserialize, Serialize};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use thiserror::Error;
 use tokio::signal::ctrl_c;
-use tokio::sync::{Mutex, Notify, RwLock};
-use tracing::{error, warn};
+use tokio::sync::{
+    Mutex,
+    Notify,
+    RwLock,
+};
+use tracing::{
+    error,
+    warn,
+};
 
 use super::util::shared_writer::SharedWriter;
-use crate::api_client::model::{ToolResult, ToolResultContentBlock, ToolResultStatus};
+use crate::api_client::model::{
+    ToolResult,
+    ToolResultContentBlock,
+    ToolResultStatus,
+};
 use crate::cli::chat::command::PromptsGetCommand;
 use crate::cli::chat::message::AssistantToolUse;
-use crate::cli::chat::server_messenger::{ServerMessengerBuilder, UpdateEventMessage};
-use crate::cli::chat::tools::custom_tool::{CustomTool, CustomToolClient, CustomToolConfig};
+use crate::cli::chat::server_messenger::{
+    ServerMessengerBuilder,
+    UpdateEventMessage,
+};
+use crate::cli::chat::tools::custom_tool::{
+    CustomTool,
+    CustomToolClient,
+    CustomToolConfig,
+};
 use crate::cli::chat::tools::execute::ExecuteCommand;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
@@ -31,10 +83,18 @@ use crate::cli::chat::tools::gh_issue::GhIssue;
 use crate::cli::chat::tools::launch_agent::SubAgentWrapper;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
-use crate::cli::chat::tools::{Tool, ToolOrigin, ToolSpec};
+use crate::cli::chat::tools::{
+    Tool,
+    ToolOrigin,
+    ToolSpec,
+};
 use crate::database::Database;
 use crate::database::settings::Setting;
-use crate::mcp_client::{JsonRpcResponse, Messenger, PromptGet};
+use crate::mcp_client::{
+    JsonRpcResponse,
+    Messenger,
+    PromptGet,
+};
 use crate::platform::Context;
 use crate::telemetry::TelemetryThread;
 use crate::util::directories::home_dir;

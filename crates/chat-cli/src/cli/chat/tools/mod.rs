@@ -9,7 +9,10 @@ pub mod use_aws;
 
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crossterm::style::Stylize;
 use custom_tool::CustomTool;
@@ -18,15 +21,20 @@ use eyre::Result;
 use fs_read::FsRead;
 use fs_write::FsWrite;
 use gh_issue::GhIssue;
-use serde::{Deserialize, Serialize};
+use launch_agent::{
+    SubAgent,
+    SubAgentWrapper,
+};
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use thinking::Thinking;
 use use_aws::UseAws;
 
 use super::consts::MAX_TOOL_RESPONSE_SIZE;
 use super::util::images::RichImageBlocks;
 use crate::platform::Context;
-use launch_agent::SubAgent;
-use launch_agent::SubAgentWrapper;
 
 /// Represents an executable tool use.
 #[allow(clippy::large_enum_variant)]

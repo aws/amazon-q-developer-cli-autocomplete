@@ -192,7 +192,7 @@
   },
   "launch_agent": {
   "name": "launch_agent",
-  "description": "Launches one or more Q chat subagent instances to perform tasks in parallel. Each subagent runs as a separate process with its own context and capabilities, allowing for concurrent execution of different tasks. Subagents can perform research, generate content, analyze data, or solve problems independently, and will report back their findings as summaries to the parent agent. Use this tool when you need to divide complex work into separate, parallel tasks.",
+  "description": "Launches one or more Q chat subagent instances to perform tasks in parallel. Each subagent runs as a separate process with its own context and capabilities, allowing for concurrent execution of different tasks. Subagents can perform research, generate content, analyze data, or solve problems independently, and will report back their findings as summaries to the parent agent. Use this tool when you need to divide complex work into separate, parallel tasks that preserve your context window. CAUTION: Only use for complex tasks that benefit from parallelization - using subagents for simple tasks creates unnecessary overhead and inefficiency.",
     "input_schema": {
       "type": "object",
       "properties": {

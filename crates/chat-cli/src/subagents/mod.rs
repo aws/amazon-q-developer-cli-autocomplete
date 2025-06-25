@@ -1,20 +1,36 @@
 use std::env;
 // Import the submodules
-use std::process::{Command, ExitCode};
+use std::process::{
+    Command,
+    ExitCode,
+};
 
-use crate::cli::OutputFormat;
-use crate::cli::chat::util::shared_writer::SharedWriter;
-use crate::util::choose;
-use clap::{Args, Subcommand};
-use crossterm::style::{Attribute, Color};
-use crossterm::{execute, style};
+use clap::{
+    Args,
+    Subcommand,
+};
+use crossterm::style::{
+    Attribute,
+    Color,
+};
+use crossterm::{
+    execute,
+    style,
+};
 use eyre::Result;
 use libproc::libproc::proc_pid;
 use libproc::processes;
 use serde::Serialize;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{
+    AsyncReadExt,
+    AsyncWriteExt,
+};
 use tokio::net::UnixStream;
 use tokio::signal::ctrl_c;
+
+use crate::cli::OutputFormat;
+use crate::cli::chat::util::shared_writer::SharedWriter;
+use crate::util::choose;
 
 // Arguments for agent command
 #[derive(Debug, Args, PartialEq, Eq)]
@@ -75,7 +91,7 @@ pub struct SendArgs {
 
 #[derive(Debug, Serialize)]
 pub struct AgentInfo {
-    pub pid: i32,
+    pub pid: u32,
     pub profile: String,
     pub tokens_used: u64,
     pub context_window_percent: f32,
@@ -137,7 +153,6 @@ pub async fn list_agents(args: ListArgs) -> Result<ExitCode> {
         for curr_process in all_procs {
             let curr_pid = curr_process.try_into().unwrap();
             let curr_process_name = proc_pid::name(curr_pid).unwrap_or("Unknown process".to_string());
-            eprintln!("{}", curr_process_name);
             let is_qcli_process = curr_process_name.contains("chat_cli")
                 || curr_process_name.contains("qchat")
                 || curr_process_name.contains("q_cli")
@@ -180,7 +195,7 @@ pub async fn list_agents(args: ListArgs) -> Result<ExitCode> {
 
                                 // Create AgentInfo
                                 let info = AgentInfo {
-                                    pid: curr_pid,
+                                    pid: curr_process,
                                     profile: profile.to_string(),
                                     tokens_used,
                                     context_window_percent: context_window,
@@ -259,7 +274,8 @@ pub async fn list_agents(args: ListArgs) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/* Summon multiple models to do the same task and compare results amongst the different git worktrees */
+// Summon multiple models to do the same task and compare results amongst the different git
+// worktrees
 pub async fn compare_agents(args: CompareArgs) -> Result<ExitCode> {
     // Check if we're in a git repo
     if !is_in_git_repo() {
@@ -444,7 +460,7 @@ fn handle_model_choice(model_number: usize, args: CompareArgs, main_pid: u32) ->
     Ok("Success".to_string())
 }
 
-/* Send messages to subagents with pid specified */
+// Send messages to subagents with pid specified
 pub async fn send_agent_message(args: SendArgs) -> Result<ExitCode> {
     // ensure socket path exists
     let agent_args = args.clone();
