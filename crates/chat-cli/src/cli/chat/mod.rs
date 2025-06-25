@@ -663,6 +663,8 @@ impl ChatSession {
                 }
 
                 self.conversation.reset_next_user_message();
+                self.tool_uses.clear();
+                self.pending_tool_index = None;
                 self.inner = Some(ChatState::PromptUser {
                     skip_printing_tools: false,
                 });
