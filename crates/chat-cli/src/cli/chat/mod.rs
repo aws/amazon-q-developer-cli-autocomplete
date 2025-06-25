@@ -662,7 +662,11 @@ impl ChatSession {
                     _ => (),
                 }
 
-                ("Tool use was interrupted", Report::from(err))
+                self.conversation.reset_next_user_message();
+                self.inner = Some(ChatState::PromptUser {
+                    skip_printing_tools: false,
+                });
+                return Ok(());
             },
             ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
