@@ -52,6 +52,7 @@ pub const COMMANDS: &[&str] = &[
     "/tools untrust",
     "/tools trustall",
     "/tools reset",
+    "/mcp",
     "/model",
     "/profile",
     "/profile help",

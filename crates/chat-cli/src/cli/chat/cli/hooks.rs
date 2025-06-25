@@ -461,7 +461,7 @@ impl HooksArgs {
             session.stderr,
             style::Print(format!(
                 "\nUse {} to manage hooks.\n\n",
-                "/context hooks help".to_string().dark_green()
+                "hooks help".to_string().dark_green()
             )),
         )?;
 
@@ -671,19 +671,12 @@ impl HooksSubcommand {
                     style::SetAttribute(Attribute::Reset),
                 )?;
 
-                queue!(
-                    session.stderr,
-                    style::SetAttribute(Attribute::Bold),
-                    style::SetForegroundColor(Color::DarkYellow),
-                    style::Print("\n    🔧 Hooks:\n")
-                )?;
                 print_hook_section(
                     &mut session.stderr,
                     &context_manager.global_config.hooks,
                     HookTrigger::ConversationStart,
                 )
                 .map_err(map_chat_error)?;
-
                 print_hook_section(
                     &mut session.stderr,
                     &context_manager.global_config.hooks,
@@ -700,12 +693,6 @@ impl HooksSubcommand {
                     style::SetAttribute(Attribute::Reset),
                 )?;
 
-                queue!(
-                    session.stderr,
-                    style::SetAttribute(Attribute::Bold),
-                    style::SetForegroundColor(Color::DarkYellow),
-                    style::Print("    🔧 Hooks:\n")
-                )?;
                 print_hook_section(
                     &mut session.stderr,
                     &context_manager.profile_config.hooks,
