@@ -20,6 +20,7 @@ use crossterm::{
     queue,
     style,
 };
+use eyre::bail;
 use regex::Regex;
 use serde::{
     Deserialize,
@@ -135,6 +136,51 @@ impl Default for Agent {
             prompt_hooks: Default::default(),
             tools_settings: Default::default(),
             path: None,
+        }
+    }
+}
+
+impl Agent {
+    /// Retrieves an agent by name. It does so via first seeking the given agent under local dir,
+    /// and falling back to global dir if it does not exist in local.
+    pub async fn get_agent_by_name(os: &Os, agent_name: &str) -> eyre::Result<(Agent, PathBuf)> {
+        let config_path: Result<PathBuf, PathBuf> = 'config: {
+            // local first, and then fall back to looking at global
+            let local_config_dir = directories::chat_local_persona_dir()?.join(agent_name);
+            if os.fs.exists(&local_config_dir) {
+                break 'config Ok::<PathBuf, PathBuf>(local_config_dir);
+            }
+
+            let global_config_dir = directories::chat_global_persona_path(os)?.join(format!("{agent_name}.json"));
+            if os.fs.exists(&global_config_dir) {
+                break 'config Ok(global_config_dir);
+            }
+
+            Err(global_config_dir)
+        };
+
+        match config_path {
+            Ok(config_path) => {
+                let content = os.fs.read(&config_path).await?;
+                Ok((serde_json::from_slice::<Agent>(&content)?, config_path))
+            },
+            Err(global_config_dir) if agent_name == "default" => {
+                os.fs
+                    .create_dir_all(
+                        global_config_dir
+                            .parent()
+                            .ok_or(eyre::eyre!("Failed to retrieve global agent config parent path"))?,
+                    )
+                    .await?;
+                os.fs.create_new(&global_config_dir).await?;
+
+                let default_agent = Agent::default();
+                let content = serde_json::to_string_pretty(&default_agent)?;
+                os.fs.write(&global_config_dir, content.as_bytes()).await?;
+
+                Ok((default_agent, global_config_dir))
+            },
+            _ => bail!("Agent {agent_name} does not exist"),
         }
     }
 }
@@ -257,7 +303,7 @@ impl Agents {
     /// Migrated from [load] from context.rs, which was loading profiles under the
     /// local and global directory. We shall preserve this implicit behavior for now until further
     /// notice.
-    pub async fn load(os: &Os, persona_name: Option<&str>, output: &mut impl Write) -> Self {
+    pub async fn load(os: &Os, agent_name: Option<&str>, output: &mut impl Write) -> Self {
         let mut local_agents = 'local: {
             let Ok(path) = directories::chat_local_persona_dir() else {
                 break 'local Vec::<Agent>::new();
@@ -342,7 +388,7 @@ impl Agents {
                 .into_iter()
                 .map(|a| (a.name.clone(), a))
                 .collect::<HashMap<_, _>>(),
-            active_idx: persona_name.unwrap_or("default").to_string(),
+            active_idx: agent_name.unwrap_or("default").to_string(),
             ..Default::default()
         }
     }
