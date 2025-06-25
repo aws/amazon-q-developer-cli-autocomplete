@@ -234,8 +234,8 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
         Some(LicenseType::Free) => AuthMethod::BuilderId,
         Some(LicenseType::Pro) => AuthMethod::IdentityCenter,
         None => {
-            if args.identity_provider.is_some() && args.region.is_some() {
-                // If --identity-provider and --region are specified, the license is determined to be pro
+            if args.identity_provider.is_some() {
+                // If --identity-provider is specified, assume pro license
                 AuthMethod::IdentityCenter
             } else {
                 // --license is not specified, prompt the user to choose
@@ -254,20 +254,20 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
             let (start_url, region) = match login_method {
                 AuthMethod::BuilderId => (None, None),
                 AuthMethod::IdentityCenter => {
-                    let default_start_url = args
-                        .identity_provider
-                        .or_else(|| fig_settings::state::get_string("auth.idc.start-url").ok().flatten());
-                    let default_region = args
-                        .region
-                        .or_else(|| fig_settings::state::get_string("auth.idc.region").ok().flatten());
-
-                    let (start_url, region) = if default_start_url.is_some() && default_region.is_some() {
-                        // Non-interactive mode - all required arguments are provided
-                        let start_url = default_start_url.unwrap();
-                        let region = default_region.unwrap();
+                    let (start_url, region) = if args.identity_provider.is_some() && args.region.is_some() {
+                        // Non-interactive mode - user explicitly provided all required arguments
+                        let start_url = args.identity_provider.unwrap();
+                        let region = args.region.unwrap();
                         (start_url, region)
                     } else {
-                        // Interactive mode - prompt for missing values
+                        // Interactive mode - prompt for missing values, using DB values as defaults
+                        let default_start_url = args
+                            .identity_provider
+                            .or_else(|| fig_settings::state::get_string("auth.idc.start-url").ok().flatten());
+                        let default_region = args
+                            .region
+                            .or_else(|| fig_settings::state::get_string("auth.idc.region").ok().flatten());
+
                         let start_url = input("Enter Start URL", default_start_url.as_deref())?;
                         let region = input("Enter Region", default_region.as_deref())?;
                         (start_url, region)
