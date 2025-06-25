@@ -49,7 +49,7 @@ pub enum SlashCommand {
     /// Manage profiles
     #[command(subcommand)]
     Profile(ProfileSubcommand),
-    /// Manage context files and hooks for the chat session
+    /// Manage context files for the chat session
     #[command(subcommand)]
     Context(ContextSubcommand),
     /// Manage knowledge base for persistent context storage
@@ -62,7 +62,7 @@ pub enum SlashCommand {
     Compact(CompactArgs),
     /// View and manage tools and permissions
     Tools(ToolsArgs),
-    /// Create a new Github issue
+    /// Create a new Github issue or make a feature request
     Issue(issue::IssueArgs),
     /// View and retrieve prompts
     Prompts(PromptsArgs),
