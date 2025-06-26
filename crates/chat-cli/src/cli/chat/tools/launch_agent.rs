@@ -239,7 +239,7 @@ impl SubAgent {
                     if !first_print {
                         queue!(
                             updates,
-                            cursor::MoveUp(new_lines_printed + 1),
+                            cursor::MoveUp(new_lines_printed),
                             cursor::MoveToColumn(0),
                             Clear(ClearType::FromCursorDown),
                             style::Print(status_output)

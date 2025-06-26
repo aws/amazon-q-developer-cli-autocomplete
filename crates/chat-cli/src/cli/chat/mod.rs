@@ -840,25 +840,25 @@ impl ChatContext {
         Ok(content.trim().to_string())
     }
 
-    fn get_current_status(&self, current_state: &ChatState) -> &'static str {
+    fn get_current_status(&self, current_state: &ChatState) -> String {
         match current_state {
             ChatState::PromptUser {
                 pending_tool_index: Some(_),
                 ..
-            } => "waiting for tool approval",
-            ChatState::ExecuteTools(_) => "executing tools",
-            ChatState::ValidateTools(_) => "validating tools",
-            ChatState::HandleResponseStream(_) => "generating response",
-            ChatState::CompactHistory { .. } => "compacting history",
+            } => "waiting for tool approval".to_string(),
+            ChatState::ExecuteTools(queued_tool) => format!("executing tool: {}", queued_tool[0].name),
+            ChatState::ValidateTools(_) => "validating tools".to_string(),
+            ChatState::HandleResponseStream(_) => "generating response".to_string(),
+            ChatState::CompactHistory { .. } => "compacting history".to_string(),
             _ => match &self.tool_use_status {
-                ToolUseStatus::RetryInProgress(_) => "retrying tool use",
+                ToolUseStatus::RetryInProgress(_) => "retrying tool use".to_string(),
                 ToolUseStatus::Idle => {
                     if self.spinner.is_some() {
-                        "generating response"
+                        "generating response".to_string()
                     } else if self.conversation_state.next_user_message().is_some() {
-                        "processing request"
+                        "processing request".to_string()
                     } else {
-                        "waiting for user input"
+                        "waiting for user input".to_string()
                     }
                 },
             },
