@@ -814,6 +814,7 @@ impl ChatSession {
 
         self.conversation.enforce_conversation_invariants();
         self.conversation.reset_next_user_message();
+        self.pending_tool_index = None;
 
         self.inner = Some(ChatState::PromptUser {
             skip_printing_tools: false,
