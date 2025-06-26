@@ -400,6 +400,10 @@ pub enum ChatError {
     Interrupted { tool_uses: Option<Vec<QueuedTool>> },
     #[error(transparent)]
     GetPromptError(#[from] GetPromptError),
+    #[error(
+        "Tool approval required but --no-interactive was specified. Use --trust-all-tools to automatically approve tools."
+    )]
+    NonInteractiveToolApproval,
 }
 
 impl ChatError {
@@ -413,6 +417,7 @@ impl ChatError {
             ChatError::Custom(_) => None,
             ChatError::Interrupted { .. } => None,
             ChatError::GetPromptError(_) => None,
+            ChatError::NonInteractiveToolApproval => None,
         }
     }
 }
@@ -428,6 +433,7 @@ impl ReasonCode for ChatError {
             ChatError::Interrupted { .. } => "Interrupted".to_string(),
             ChatError::GetPromptError(_) => "GetPromptError".to_string(),
             ChatError::Auth(_) => "AuthError".to_string(),
+            ChatError::NonInteractiveToolApproval => "NonInteractiveToolApproval".to_string(),
         }
     }
 }
@@ -571,10 +577,16 @@ impl ChatSession {
         let ctrl_c_stream = ctrl_c();
         let result = match self.inner.take().expect("state must always be Some") {
             ChatState::PromptUser { skip_printing_tools } => {
-                if !self.interactive {
-                    self.inner = Some(ChatState::Exit);
-                    return Ok(());
-                }
+                match (self.interactive, self.tool_uses.is_empty()) {
+                    (false, true) => {
+                        self.inner = Some(ChatState::Exit);
+                        return Ok(());
+                    },
+                    (false, false) => {
+                        return Err(ChatError::NonInteractiveToolApproval);
+                    },
+                    _ => (),
+                };
 
                 self.prompt_user(os, skip_printing_tools).await
             },
@@ -860,6 +872,7 @@ impl Default for ChatState {
 impl ChatSession {
     async fn spawn(&mut self, os: &mut Os) -> Result<()> {
         let is_small_screen = self.terminal_width() < GREETING_BREAK_POINT;
+        let mut interactive_text: Vec<u8> = Vec::new();
         if os
             .database
             .settings
@@ -874,20 +887,20 @@ impl ChatSession {
                 },
             };
 
-            execute!(self.stderr, style::Print(welcome_text), style::Print("\n\n"),)?;
+            execute!(interactive_text, style::Print(welcome_text), style::Print("\n\n"),)?;
 
             let tip = ROTATING_TIPS[usize::try_from(rand::random::<u32>()).unwrap_or(0) % ROTATING_TIPS.len()];
             if is_small_screen {
                 // If the screen is small, print the tip in a single line
                 execute!(
-                    self.stderr,
+                    interactive_text,
                     style::Print("💡 ".to_string()),
                     style::Print(tip),
                     style::Print("\n")
                 )?;
             } else {
                 draw_box(
-                    &mut self.stderr,
+                    &mut interactive_text,
                     "Did you know?",
                     tip,
                     GREETING_BREAK_POINT,
@@ -896,7 +909,7 @@ impl ChatSession {
             }
 
             execute!(
-                self.stderr,
+                interactive_text,
                 style::Print("\n"),
                 style::Print(match is_small_screen {
                     true => SMALL_SCREEN_POPULAR_SHORTCUTS,
@@ -909,30 +922,38 @@ impl ChatSession {
                         .dark_grey()
                 )
             )?;
-            execute!(self.stderr, style::Print("\n"), style::SetForegroundColor(Color::Reset))?;
+            execute!(
+                interactive_text,
+                style::Print("\n"),
+                style::SetForegroundColor(Color::Reset)
+            )?;
         }
 
         if self.all_tools_trusted() {
             queue!(
-                self.stderr,
+                interactive_text,
                 style::Print(format!(
                     "{}{TRUST_ALL_TEXT}\n\n",
                     if !is_small_screen { "\n" } else { "" }
                 ))
             )?;
         }
-        self.stderr.flush()?;
 
         if let Some(ref id) = self.conversation.model {
             if let Some(model_option) = MODEL_OPTIONS.iter().find(|option| option.model_id == *id) {
                 execute!(
-                    self.stderr,
+                    interactive_text,
                     style::SetForegroundColor(Color::Cyan),
                     style::Print(format!("🤖 You are chatting with {}\n", model_option.name)),
                     style::SetForegroundColor(Color::Reset),
                     style::Print("\n")
                 )?;
             }
+        }
+
+        if self.interactive {
+            self.stderr.write_all(&interactive_text)?;
+            self.stderr.flush()?;
         }
 
         if let Some(user_input) = self.initial_input.take() {
@@ -1249,7 +1270,12 @@ impl ChatSession {
             match SlashCommand::try_parse_from(args) {
                 Ok(command) => {
                     match command.execute(os, self).await {
-                        Ok(chat_state) if matches!(chat_state, ChatState::Exit) => return Ok(chat_state),
+                        Ok(chat_state)
+                            if matches!(chat_state, ChatState::Exit)
+                                || matches!(chat_state, ChatState::HandleInput { input: _ }) =>
+                        {
+                            return Ok(chat_state);
+                        },
                         Err(err) => {
                             queue!(
                                 self.stderr,
@@ -1390,7 +1416,10 @@ impl ChatSession {
             queue!(self.stderr, style::SetForegroundColor(Color::Reset))?;
             queue!(self.stderr, cursor::Hide)?;
             execute!(self.stderr, style::Print("\n"))?;
-            self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
+
+            if self.interactive {
+                self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
+            }
 
             Ok(ChatState::HandleResponseStream(
                 os.client.send_message(conv_state).await?,
