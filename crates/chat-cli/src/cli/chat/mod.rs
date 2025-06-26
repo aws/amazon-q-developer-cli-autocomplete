@@ -1282,7 +1282,7 @@ impl ChatSession {
                             queue!(
                                 self.stderr,
                                 style::SetForegroundColor(Color::Red),
-                                style::Print(format!("Failed to execute command: {}\n", err)),
+                                style::Print(format!("\nFailed to execute command: {}\n", err)),
                                 style::SetForegroundColor(Color::Reset)
                             )?;
                         },
@@ -1369,7 +1369,7 @@ impl ChatSession {
                     queue!(
                         self.stderr,
                         style::SetForegroundColor(Color::Red),
-                        style::Print(format!("Failed to execute command: {}\n", e)),
+                        style::Print(format!("\nFailed to execute command: {}\n", e)),
                         style::SetForegroundColor(Color::Reset)
                     )?;
                 },
