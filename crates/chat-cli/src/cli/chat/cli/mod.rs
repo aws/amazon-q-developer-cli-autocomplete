@@ -29,7 +29,12 @@ use tools::ToolsArgs;
 
 use crate::cli::chat::cli::subscribe::SubscribeArgs;
 use crate::cli::chat::cli::usage::UsageArgs;
-use crate::cli::chat::{ChatError, ChatSession, ChatState, EXTRA_HELP};
+use crate::cli::chat::{
+    ChatError,
+    ChatSession,
+    ChatState,
+    EXTRA_HELP,
+};
 use crate::cli::issue;
 use crate::os::Os;
 
