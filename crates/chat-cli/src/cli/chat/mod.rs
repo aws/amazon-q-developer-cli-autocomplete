@@ -1262,8 +1262,8 @@ impl ChatSession {
             }
         }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
-            // Knowing the first argument is required for error handling.
-            let first_arg = args.first().cloned();
+            // Required for printing errors correctly.
+            let orig_args = args.clone();
 
             // We set the binary name as a dummy name "slash_command" which we
             // replace anytime we error out and print a usage statement.
@@ -1305,20 +1305,19 @@ impl ChatSession {
 
                     // Print the subcommand help, if available. Required since by default we won't
                     // show what the actual arguments are, requiring an unnecessary --help call.
-                    if let (
-                        clap::error::ErrorKind::InvalidValue
-                        | clap::error::ErrorKind::UnknownArgument
-                        | clap::error::ErrorKind::InvalidSubcommand
-                        | clap::error::ErrorKind::MissingRequiredArgument,
-                        Some(first_arg),
-                    ) = (err.kind(), first_arg)
+                    if let clap::error::ErrorKind::InvalidValue
+                    | clap::error::ErrorKind::UnknownArgument
+                    | clap::error::ErrorKind::InvalidSubcommand
+                    | clap::error::ErrorKind::MissingRequiredArgument = err.kind()
                     {
                         let mut cmd = SlashCommand::command();
-                        let help = if let Some(subcmd) = cmd.find_subcommand_mut(first_arg) {
-                            subcmd.to_owned().help_template("{all-args}").render_help()
-                        } else {
-                            cmd.help_template("{all-args}").render_help()
-                        };
+                        for arg in &orig_args {
+                            match cmd.find_subcommand(arg) {
+                                Some(subcmd) => cmd = subcmd.clone(),
+                                None => break,
+                            }
+                        }
+                        let help = cmd.help_template("{all-args}").render_help();
                         writeln!(self.stderr, "{}", help.ansi())?;
                     }
                 },
