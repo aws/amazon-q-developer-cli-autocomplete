@@ -50,6 +50,7 @@ pub enum ContextSubcommand {
         /// Include even if matched files exceed size limits
         #[arg(short, long)]
         force: bool,
+        #[arg(required = true)]
         paths: Vec<String>,
     },
     /// Remove specified rules from current profile
@@ -57,6 +58,7 @@ pub enum ContextSubcommand {
         /// Remove specified rules globally
         #[arg(short, long)]
         global: bool,
+        #[arg(required = true)]
         paths: Vec<String>,
     },
     /// Remove all rules from current profile
