@@ -90,7 +90,7 @@ impl ApiClient {
             .region(endpoint.region.clone())
             .credentials_provider(credentials)
             .timeout_config(timeout_config(database))
-            .retry_config(RetryConfig::adaptive())
+            .retry_config(retry_config())
             .load()
             .await;
 
@@ -137,7 +137,7 @@ impl ApiClient {
                             .region(endpoint.region.clone())
                             .credentials_provider(credentials_chain)
                             .timeout_config(timeout_config(database))
-                            .retry_config(RetryConfig::adaptive())
+                            .retry_config(retry_config())
                             .load()
                             .await,
                     )
@@ -461,6 +461,10 @@ fn timeout_config(database: &Database) -> TimeoutConfig {
         .operation_attempt_timeout(timeout)
         .connect_timeout(timeout)
         .build()
+}
+
+fn retry_config() -> RetryConfig {
+    RetryConfig::standard().with_max_attempts(1)
 }
 
 pub fn stalled_stream_protection_config() -> StalledStreamProtectionConfig {

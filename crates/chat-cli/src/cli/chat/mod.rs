@@ -874,7 +874,6 @@ impl Default for ChatState {
 impl ChatSession {
     async fn spawn(&mut self, os: &mut Os) -> Result<()> {
         let is_small_screen = self.terminal_width() < GREETING_BREAK_POINT;
-        let mut interactive_text: Vec<u8> = Vec::new();
         if os
             .database
             .settings
@@ -889,20 +888,20 @@ impl ChatSession {
                 },
             };
 
-            execute!(interactive_text, style::Print(welcome_text), style::Print("\n\n"),)?;
+            execute!(self.stderr, style::Print(welcome_text), style::Print("\n\n"),)?;
 
             let tip = ROTATING_TIPS[usize::try_from(rand::random::<u32>()).unwrap_or(0) % ROTATING_TIPS.len()];
             if is_small_screen {
                 // If the screen is small, print the tip in a single line
                 execute!(
-                    interactive_text,
+                    self.stderr,
                     style::Print("💡 ".to_string()),
                     style::Print(tip),
                     style::Print("\n")
                 )?;
             } else {
                 draw_box(
-                    &mut interactive_text,
+                    &mut self.stderr,
                     "Did you know?",
                     tip,
                     GREETING_BREAK_POINT,
@@ -911,7 +910,7 @@ impl ChatSession {
             }
 
             execute!(
-                interactive_text,
+                self.stderr,
                 style::Print("\n"),
                 style::Print(match is_small_screen {
                     true => SMALL_SCREEN_POPULAR_SHORTCUTS,
@@ -924,38 +923,30 @@ impl ChatSession {
                         .dark_grey()
                 )
             )?;
-            execute!(
-                interactive_text,
-                style::Print("\n"),
-                style::SetForegroundColor(Color::Reset)
-            )?;
+            execute!(self.stderr, style::Print("\n"), style::SetForegroundColor(Color::Reset))?;
         }
 
         if self.all_tools_trusted() {
             queue!(
-                interactive_text,
+                self.stderr,
                 style::Print(format!(
                     "{}{TRUST_ALL_TEXT}\n\n",
                     if !is_small_screen { "\n" } else { "" }
                 ))
             )?;
         }
+        self.stderr.flush()?;
 
         if let Some(ref id) = self.conversation.model {
             if let Some(model_option) = MODEL_OPTIONS.iter().find(|option| option.model_id == *id) {
                 execute!(
-                    interactive_text,
+                    self.stderr,
                     style::SetForegroundColor(Color::Cyan),
                     style::Print(format!("🤖 You are chatting with {}\n", model_option.name)),
                     style::SetForegroundColor(Color::Reset),
                     style::Print("\n")
                 )?;
             }
-        }
-
-        if self.interactive {
-            self.stderr.write_all(&interactive_text)?;
-            self.stderr.flush()?;
         }
 
         if let Some(user_input) = self.initial_input.take() {
