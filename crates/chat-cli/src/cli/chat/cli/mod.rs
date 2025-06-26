@@ -9,6 +9,7 @@ pub mod model;
 pub mod persist;
 pub mod profile;
 pub mod prompts;
+pub mod quit;
 pub mod subscribe;
 pub mod tools;
 pub mod usage;
@@ -25,16 +26,12 @@ use model::ModelArgs;
 use persist::PersistSubcommand;
 use profile::ProfileSubcommand;
 use prompts::PromptsArgs;
+use quit::QuitArgs;
 use tools::ToolsArgs;
 
 use crate::cli::chat::cli::subscribe::SubscribeArgs;
 use crate::cli::chat::cli::usage::UsageArgs;
-use crate::cli::chat::{
-    ChatError,
-    ChatSession,
-    ChatState,
-    EXTRA_HELP,
-};
+use crate::cli::chat::{ChatError, ChatSession, ChatState, EXTRA_HELP};
 use crate::cli::issue;
 use crate::os::Os;
 
@@ -44,7 +41,7 @@ use crate::os::Os;
 pub enum SlashCommand {
     /// Quit the application
     #[command(aliases = ["q", "exit"])]
-    Quit,
+    Quit(QuitArgs),
     /// Clear the conversation history
     Clear(ClearArgs),
     /// Manage profiles
@@ -86,7 +83,7 @@ pub enum SlashCommand {
 impl SlashCommand {
     pub async fn execute(self, os: &mut Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         match self {
-            Self::Quit => Ok(ChatState::Exit),
+            Self::Quit(args) => args.execute(os, session).await,
             Self::Clear(args) => args.execute(session).await,
             Self::Profile(subcommand) => subcommand.execute(os, session).await,
             Self::Context(args) => args.execute(os, session).await,
