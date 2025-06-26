@@ -169,7 +169,7 @@ pub struct ChatArgs {
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
     /// Whether the command should run without expecting user input
-    #[arg(long)]
+    #[arg(long, alias = "no-interactive")]
     pub non_interactive: bool,
     /// The first question to ask
     pub input: Option<String>,
@@ -178,7 +178,7 @@ pub struct ChatArgs {
 impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
         if self.non_interactive && self.input.is_none() {
-            bail!("Input must be supplied when --non-interactive is set");
+            bail!("Input must be supplied when running in non-interactive mode");
         }
 
         let stdout = std::io::stdout();
@@ -662,13 +662,7 @@ impl ChatSession {
                     _ => (),
                 }
 
-                self.conversation.reset_next_user_message();
-                self.tool_uses.clear();
-                self.pending_tool_index = None;
-                self.inner = Some(ChatState::PromptUser {
-                    skip_printing_tools: false,
-                });
-                return Ok(());
+                ("Tool use was interrupted", Report::from(err))
             },
             ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
