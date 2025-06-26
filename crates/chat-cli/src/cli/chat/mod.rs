@@ -477,6 +477,26 @@ pub struct ChatSession {
 }
 
 impl ChatSession {
+    /// Sanitizes user input for environment variable usage
+    fn sanitize_env_value(input: &str) -> String {
+        // Limit the size of input to first 4096 characters
+        let truncated = if input.len() > 4096 {
+            &input[0..4096]
+        } else {
+            input
+        };
+        
+        // Remove any potentially problematic characters
+        truncated.replace(|c: char| c.is_control() && c != '\n' && c != '\r' && c != '\t', "")
+    }
+    
+    /// Clears the USER_PROMPT environment variable
+    fn clear_user_prompt_env() {
+        unsafe { 
+            std::env::remove_var("USER_PROMPT") 
+        };
+    }
+    
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         os: &mut Os,
@@ -804,6 +824,9 @@ impl ChatSession {
 
 impl Drop for ChatSession {
     fn drop(&mut self) {
+        // Clear USER_PROMPT environment variable for security when session ends
+        Self::clear_user_prompt_env();
+        
         if let Some(spinner) = &mut self.spinner {
             spinner.stop();
         }
@@ -1146,6 +1169,9 @@ impl ChatSession {
 
     /// Read input from the user.
     async fn prompt_user(&mut self, os: &Os, skip_printing_tools: bool) -> Result<ChatState, ChatError> {
+        // Clear any previous USER_PROMPT environment variable
+        Self::clear_user_prompt_env();
+        
         execute!(self.stderr, cursor::Show)?;
 
         // Check token usage and display warnings if needed
@@ -1214,6 +1240,11 @@ impl ChatSession {
         let user_input = match self.read_user_input(&prompt, false) {
             Some(input) => input,
             None => return Ok(ChatState::Exit),
+        };
+
+        // Set sanitized user prompt as environment variable
+        unsafe {
+            std::env::set_var("USER_PROMPT", &Self::sanitize_env_value(&user_input))
         };
 
         self.conversation.append_user_transcript(&user_input);
