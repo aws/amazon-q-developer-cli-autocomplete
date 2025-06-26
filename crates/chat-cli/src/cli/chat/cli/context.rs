@@ -28,7 +28,7 @@ The files matched by these rules provide Amazon Q with additional information
 about your project or environment. Adding relevant files helps Q generate 
 more accurate and helpful responses.
 
-Notes
+Notes:
 • You can add specific files or use glob patterns (e.g., \"*.py\", \"src/**/*.js\")
 • Profile rules apply only to the current profile
 • Global rules apply across all profiles
@@ -65,6 +65,8 @@ pub enum ContextSubcommand {
         #[arg(short, long)]
         global: bool,
     },
+    #[command(hide = true)]
+    Hooks,
 }
 
 impl ContextSubcommand {
@@ -369,6 +371,18 @@ impl ContextSubcommand {
                         style::SetForegroundColor(Color::Reset)
                     )?;
                 },
+            },
+            Self::Hooks => {
+                execute!(
+                    session.stderr,
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print("The /context hooks command is deprecated. Use "),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("/hooks"),
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print(" instead.\n\n"),
+                    style::SetForegroundColor(Color::Reset)
+                )?;
             },
         }
 

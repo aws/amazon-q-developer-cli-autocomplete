@@ -393,7 +393,7 @@ impl HookExecutor {
 commands will be appended to the prompt to Amazon Q. Hooks can be defined 
 in global or local profiles.
 
-Notes
+Notes:
 • Hooks are executed in parallel
 • 'conversation_start' hooks run on the first user prompt and are attached once to the conversation history sent to Amazon Q
 • 'per_prompt' hooks run on each user prompt and are attached to the prompt, but are not stored in conversation history"
