@@ -53,7 +53,7 @@ pub enum SlashCommand {
     /// Manage context files for the chat session
     #[command(subcommand)]
     Context(ContextSubcommand),
-    /// `[BETA]` Manage knowledge base for persistent context storage. Requires `q settings
+    /// `(Beta)` Manage knowledge base for persistent context storage. Requires `q settings
     /// chat.enableKnowledge true`
     #[command(subcommand)]
     Knowledge(KnowledgeSubcommand),

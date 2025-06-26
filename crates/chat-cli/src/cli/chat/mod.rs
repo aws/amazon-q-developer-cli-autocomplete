@@ -1251,7 +1251,12 @@ impl ChatSession {
             match SlashCommand::try_parse_from(args) {
                 Ok(command) => {
                     match command.execute(os, self).await {
-                        Ok(chat_state) => return Ok(chat_state),
+                        Ok(chat_state)
+                            if matches!(chat_state, ChatState::Exit)
+                                || matches!(chat_state, ChatState::HandleInput { input: _ }) =>
+                        {
+                            return Ok(chat_state);
+                        },
                         Err(err) => {
                             queue!(
                                 self.stderr,
@@ -1260,6 +1265,7 @@ impl ChatSession {
                                 style::SetForegroundColor(Color::Reset)
                             )?;
                         },
+                        _ => {},
                     }
 
                     writeln!(self.stderr)?;
