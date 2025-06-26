@@ -53,10 +53,11 @@ pub enum SlashCommand {
     /// Manage context files for the chat session
     #[command(subcommand)]
     Context(ContextSubcommand),
-    /// Manage knowledge base for persistent context storage
+    /// `[BETA]` Manage knowledge base for persistent context storage. Requires `q settings
+    /// chat.enableKnowledge true`
     #[command(subcommand)]
     Knowledge(KnowledgeSubcommand),
-    /// Open $EDITOR (defaults to vi) to compose a prompt
+    /// Open $EDITOR (defaults to vi) to compose a prompt.
     #[command(name = "editor")]
     PromptEditor(EditorArgs),
     /// Summarize the conversation to free up context space

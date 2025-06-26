@@ -1260,7 +1260,6 @@ impl ChatSession {
                                 style::SetForegroundColor(Color::Reset)
                             )?;
                         },
-                        _ => {},
                     }
 
                     writeln!(self.stderr)?;
