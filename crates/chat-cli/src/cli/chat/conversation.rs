@@ -642,6 +642,103 @@ impl ConversationState {
         })
     }
 
+    /// Creates a completion request similar to create_summary_request
+    /// This generates appropriate responses to the last assistant message
+    pub async fn create_completion_request(
+        &mut self,
+        os: &Os,
+        custom_context: Option<impl AsRef<str>>,
+        completion_count: u8,
+    ) -> Result<FigConversationState, ChatError> {
+        // Ensure we have at least one assistant message to respond to
+        if self.history.is_empty() {
+            return Err(ChatError::Custom(
+                "No conversation history available for completion".into(),
+            ));
+        }
+
+        let completion_count = completion_count.clamp(1, 5);
+
+        let completion_prompt = match custom_context {
+            Some(context) => {
+                format!(
+                    "[SYSTEM NOTE: This is an automated completion generation request, not from the user]\n\n\
+                    TASK: Generate {} appropriate, concise response options to the assistant's last message.\n\n\
+                    CONTEXT: {}\n\n\
+                    REQUIREMENTS:\n\
+                    - Provide {} distinct response options\n\
+                    - Each response should be 1-2 sentences maximum\n\
+                    - Responses should be natural and conversational\n\
+                    - Consider the conversation context and the assistant's question/request\n\
+                    - Format as a numbered list (1. 2. 3. etc.)\n\
+                    - Do NOT include explanations or meta-commentary\n\
+                    - Focus on direct, actionable responses\n\n\
+                    Examples of good responses:\n\
+                    - \"Yes, continue with that approach\"\n\
+                    - \"Use PostgreSQL for the database\"\n\
+                    - \"That looks correct, proceed\"\n\
+                    - \"Let's go with option 2\"\n\n\
+                    Generate {} response options now:",
+                    completion_count,
+                    context.as_ref(),
+                    completion_count,
+                    completion_count
+                )
+            },
+            None => {
+                format!(
+                    "[SYSTEM NOTE: This is an automated completion generation request, not from the user]\n\n\
+                    TASK: Generate {} appropriate, concise response options to the assistant's last message.\n\n\
+                    REQUIREMENTS:\n\
+                    - Provide {} distinct response options\n\
+                    - Each response should be 1-2 sentences maximum\n\
+                    - Responses should be natural and conversational\n\
+                    - Consider the conversation context and the assistant's question/request\n\
+                    - Format as a numbered list (1. 2. 3. etc.)\n\
+                    - Do NOT include explanations or meta-commentary\n\
+                    - Focus on direct, actionable responses\n\n\
+                    Common response types to consider:\n\
+                    - Confirmations (\"Yes, continue\", \"That's correct\")\n\
+                    - Technology choices (\"Use React\", \"Go with PostgreSQL\")\n\
+                    - Preferences (\"Option 1 looks better\", \"I prefer the first approach\")\n\
+                    - Instructions (\"Add error handling\", \"Include unit tests\")\n\n\
+                    Generate {} response options now:",
+                    completion_count, completion_count, completion_count
+                )
+            },
+        };
+
+        let conv_state = self.backend_conversation_state(os, false, &mut vec![]).await?;
+
+        // Include the full conversation history for context
+        let history = flatten_history(conv_state.history);
+
+        let user_input_message_context = UserInputMessageContext {
+            env_state: Some(build_env_state()),
+            git_state: None,
+            tool_results: None,
+            tools: if self.tools.is_empty() {
+                None
+            } else {
+                Some(self.tools.values().flatten().cloned().collect::<Vec<Tool>>())
+            },
+        };
+
+        let completion_message = UserInputMessage {
+            content: completion_prompt,
+            user_input_message_context: Some(user_input_message_context),
+            user_intent: None,
+            images: None,
+            model_id: self.model.clone(),
+        };
+
+        Ok(FigConversationState {
+            conversation_id: Some(self.conversation_id.clone()),
+            user_input_message: completion_message,
+            history: Some(history),
+        })
+    }
+
     pub fn replace_history_with_summary(&mut self, summary: String) {
         self.history.drain(..(self.history.len().saturating_sub(1)));
         self.latest_summary = Some(summary);

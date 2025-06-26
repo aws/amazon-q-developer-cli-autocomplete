@@ -83,6 +83,10 @@ pub const COMMANDS: &[&str] = &[
     "/save",
     "/load",
     "/subscribe",
+    "/complete",
+    "/complete --preview",
+    "/complete --context",
+    "/complete --count",
 ];
 
 /// Complete commands that start with a slash
