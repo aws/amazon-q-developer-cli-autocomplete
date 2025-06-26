@@ -29,12 +29,7 @@ use tools::ToolsArgs;
 
 use crate::cli::chat::cli::subscribe::SubscribeArgs;
 use crate::cli::chat::cli::usage::UsageArgs;
-use crate::cli::chat::{
-    ChatError,
-    ChatSession,
-    ChatState,
-    EXTRA_HELP,
-};
+use crate::cli::chat::{ChatError, ChatSession, ChatState, EXTRA_HELP};
 use crate::cli::issue;
 use crate::os::Os;
 
@@ -57,7 +52,7 @@ pub enum SlashCommand {
     /// chat.enableKnowledge true`
     #[command(subcommand)]
     Knowledge(KnowledgeSubcommand),
-    /// Open $EDITOR (defaults to vi) to compose a prompt.
+    /// Open $EDITOR (defaults to vi) to compose a prompt
     #[command(name = "editor")]
     PromptEditor(EditorArgs),
     /// Summarize the conversation to free up context space
