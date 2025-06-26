@@ -18,6 +18,11 @@ use crate::cli::chat::{
     CONTINUATION_LINE,
     PURPOSE_ARROW,
 };
+use crate::cli::chat::context::ProcessedTrustedCommands;
+pub mod dangerous_patterns;
+mod trusted_commands;
+
+pub use dangerous_patterns::*;
 use crate::platform::Context;
 
 // Platform-specific modules
@@ -43,17 +48,21 @@ pub struct ExecuteCommand {
 }
 
 impl ExecuteCommand {
-    pub fn requires_acceptance(&self) -> bool {
+    pub fn requires_acceptance(&self, _ctx: &Context, trusted_commands: Option<&ProcessedTrustedCommands>) -> bool {
         let Some(args) = shlex::split(&self.command) else {
             return true;
         };
 
-        const DANGEROUS_PATTERNS: &[&str] = &["<(", "$(", "`", ">", "&&", "||", "&", ";"];
-        if args
-            .iter()
-            .any(|arg| DANGEROUS_PATTERNS.iter().any(|p| arg.contains(p)))
-        {
+        // 1. Check for dangerous patterns first (always require acceptance)
+        if check_all_dangerous_patterns(&self.command).is_some() {
             return true;
+        }
+
+        // 2. Check user-defined trusted commands
+        if let Some(trusted_commands) = trusted_commands {
+            if trusted_commands.is_trusted(&self.command) {
+                return false;
+            }
         }
 
         // Split commands by pipe and check each one
@@ -113,7 +122,7 @@ impl ExecuteCommand {
         })
     }
 
-    pub fn queue_description(&self, output: &mut impl Write) -> Result<()> {
+    pub fn queue_description(&self, output: &mut impl Write, trusted_commands: Option<&ProcessedTrustedCommands>) -> Result<()> {
         queue!(output, style::Print("I will run the following shell command: "),)?;
 
         // TODO: Could use graphemes for a better heuristic
@@ -128,6 +137,22 @@ impl ExecuteCommand {
             style::Print("\n"),
             style::ResetColor
         )?;
+        
+        // Indicate if command is trusted by user configuration
+        if let Some(trusted_commands) = trusted_commands {
+            if trusted_commands.is_trusted(&self.command) {
+                queue!(
+                    output,
+                    style::Print(CONTINUATION_LINE),
+                    style::Print("\n"),
+                    style::Print(PURPOSE_ARROW),
+                    style::SetForegroundColor(Color::Cyan),
+                    style::Print("Trusted by user configuration"),
+                    style::ResetColor,
+                    style::Print("\n"),
+                )?;
+            }
+        }
 
         // Add the summary if available
         if let Some(summary) = &self.summary {
@@ -176,8 +201,8 @@ pub fn format_output(output: &str, max_size: usize) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_requires_acceptance_for_windows_commands() {
+    #[tokio::test]
+    async fn test_requires_acceptance_for_windows_commands() {
         let cmds = &[
             // Safe Windows commands
             ("dir", false),
@@ -199,13 +224,63 @@ mod tests {
             ("type file.txt | del", true),
         ];
 
+        let ctx = Context::new();
+        
         for (cmd, expected) in cmds {
             let tool = serde_json::from_value::<ExecuteCommand>(serde_json::json!({
                 "command": cmd,
             }))
             .unwrap();
             assert_eq!(
-                tool.requires_acceptance(),
+                tool.requires_acceptance(&ctx, None),
+                *expected,
+                "expected command: `{}` to have requires_acceptance: `{}`",
+                cmd,
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_requires_acceptance_with_trusted_commands() {
+        use crate::cli::chat::context::{TrustedCommand, TrustedCommandsConfig, ProcessedTrustedCommands};
+        
+        let ctx = Context::new();
+        
+        // Create trusted commands configuration
+        let mut trusted_config = TrustedCommandsConfig::default();
+        trusted_config.trusted_commands.push(TrustedCommand {
+            command: "git*".to_string(),
+            description: Some("Trust all git commands".to_string()),
+        });
+        trusted_config.trusted_commands.push(TrustedCommand {
+            command: "npm run build".to_string(),
+            description: Some("Trust exact npm run build command".to_string()),
+        });
+        
+        let processed_trusted = ProcessedTrustedCommands::new(trusted_config);
+        
+        let test_cases = &[
+            // Commands that should be trusted by user config
+            ("git status", false), // matches "git*"
+            ("git commit -m 'test'", false), // matches "git*"
+            ("npm run build", false), // exact match
+            
+            // Commands that should still require acceptance
+            ("rm -rf /", true), // dangerous pattern
+            ("git status && rm file", true), // dangerous pattern overrides trust
+            ("npm run test", true), // doesn't match trusted patterns
+            ("docker build .", true), // not in trusted commands
+        ];
+        
+        for (cmd, expected) in test_cases {
+            let tool = ExecuteCommand {
+                command: cmd.to_string(),
+                summary: None,
+            };
+            
+            assert_eq!(
+                tool.requires_acceptance(&ctx, Some(&processed_trusted)),
                 *expected,
                 "expected command: `{}` to have requires_acceptance: `{}`",
                 cmd,

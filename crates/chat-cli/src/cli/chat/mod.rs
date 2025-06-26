@@ -1163,28 +1163,85 @@ impl ChatSession {
 
         let show_tool_use_confirmation_dialog = !skip_printing_tools && self.pending_tool_index.is_some();
         if show_tool_use_confirmation_dialog {
-            execute!(
-                self.stderr,
-                style::SetForegroundColor(Color::DarkGrey),
-                style::Print("\nAllow this action? Use '"),
-                style::SetForegroundColor(Color::Green),
-                style::Print("t"),
-                style::SetForegroundColor(Color::DarkGrey),
-                style::Print("' to trust (always allow) this tool for the session. ["),
-                style::SetForegroundColor(Color::Green),
-                style::Print("y"),
-                style::SetForegroundColor(Color::DarkGrey),
-                style::Print("/"),
-                style::SetForegroundColor(Color::Green),
-                style::Print("n"),
-                style::SetForegroundColor(Color::DarkGrey),
-                style::Print("/"),
-                style::SetForegroundColor(Color::Green),
-                style::Print("t"),
-                style::SetForegroundColor(Color::DarkGrey),
-                style::Print("]:\n\n"),
-                style::SetForegroundColor(Color::Reset),
-            )?;
+            // Check tool type and available options
+            let (show_configure_option, show_trust_option) = if let Some(index) = self.pending_tool_index {
+                let tool_use = &self.tool_uses[index];
+                let is_execute_tool = matches!(tool_use.tool, crate::cli::chat::tools::Tool::ExecuteCommand(_));
+                let has_context_manager = self.conversation.context_manager.is_some();
+                
+                let show_configure = is_execute_tool && has_context_manager;
+                let show_trust = !is_execute_tool; // 't' option for all tools except execute_bash/execute_cmd
+                
+                (show_configure, show_trust)
+            } else {
+                (false, false)
+            };
+
+            if show_configure_option {
+                // Execute tools with context manager: y/n/c
+                execute!(
+                    self.stderr,
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("\nAllow this action? Use '"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("c"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("' to configure a trusted command rule. ["),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("y"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("/"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("n"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("/"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("c"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("]:\n\n"),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+            } else if show_trust_option {
+                // Non-execute tools: y/n/t
+                execute!(
+                    self.stderr,
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("\nAllow this action? Use '"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("t"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("' to always trust this tool. ["),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("y"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("/"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("n"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("/"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("t"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("]:\n\n"),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+            } else {
+                // Execute tools without context manager: y/n only
+                execute!(
+                    self.stderr,
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("\nAllow this action? ["),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("y"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("/"),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("n"),
+                    style::SetForegroundColor(Color::DarkGrey),
+                    style::Print("]:\n\n"),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+            }
         }
 
         // Do this here so that the skim integration sees an updated view of the context *during the current
@@ -1296,14 +1353,23 @@ impl ChatSession {
             // Check for a pending tool approval
             if let Some(index) = self.pending_tool_index {
                 let is_trust = ["t", "T"].contains(&input);
+                let is_configure = ["c", "C"].contains(&input);
                 let tool_use = &mut self.tool_uses[index];
-                if ["y", "Y"].contains(&input) || is_trust {
-                    if is_trust {
-                        self.tool_permissions.trust_tool(&tool_use.name);
-                    }
+                
+                // Check if this is an execute_bash tool
+                let is_execute_bash = matches!(tool_use.tool, crate::cli::chat::tools::Tool::ExecuteCommand(_));
+                
+                if ["y", "Y"].contains(&input) {
                     tool_use.accepted = true;
-
                     return Ok(ChatState::ExecuteTools);
+                } else if is_trust && !is_execute_bash {
+                    // 't' option only works for non-execute_bash tools
+                    self.tool_permissions.trust_tool(&tool_use.name);
+                    tool_use.accepted = true;
+                    return Ok(ChatState::ExecuteTools);
+                } else if is_configure && is_execute_bash && self.conversation.context_manager.is_some() {
+                    // 'c' option only works for execute_bash tools when context manager is available
+                    return self.handle_configure_trusted_command(ctx, index).await;
                 }
             } else if !self.pending_prompts.is_empty() {
                 let prompts = self.pending_prompts.drain(0..).collect();
@@ -1356,9 +1422,14 @@ impl ChatSession {
             }
 
             // If there is an override, we will use it. Otherwise fall back to Tool's default.
+            // Get trusted commands from context manager if available
+            let trusted_commands = self.conversation.context_manager
+                .as_ref()
+                .map(|cm| cm.get_processed_trusted_commands());
+            
             let allowed = self.tool_permissions.trust_all
                 || (self.tool_permissions.has(&tool.name) && self.tool_permissions.is_trusted(&tool.name))
-                || !tool.tool.requires_acceptance(ctx);
+                || !tool.tool.requires_acceptance(ctx, trusted_commands.as_ref());
 
             if database
                 .settings
@@ -1913,7 +1984,25 @@ impl ChatSession {
             style::Print(format!(
                 "🛠️  Using tool: {}{}",
                 tool_use.tool.display_name(),
-                if trusted { " (trusted)".dark_green() } else { "".reset() }
+                if trusted {
+                    // Determine the type of trust for better user feedback
+                    let trust_text = if self.tool_permissions.trust_all {
+                        " (trusted - all tools)"
+                    } else if self.tool_permissions.has(&tool_use.name) && self.tool_permissions.is_trusted(&tool_use.name) {
+                        " (trusted - tool level)"
+                    } else {
+                        // Must be trusted by user configuration (command-level trust)
+                        // Check if this is an execute command to provide more specific feedback
+                        if matches!(tool_use.tool, crate::cli::chat::tools::Tool::ExecuteCommand(_)) {
+                            " (trusted by user configuration)"
+                        } else {
+                            " (trusted)"
+                        }
+                    };
+                    trust_text.dark_green().to_string()
+                } else {
+                    String::new()
+                }
             )),
             style::SetForegroundColor(Color::Reset)
         )?;
@@ -2078,6 +2167,206 @@ impl ChatSession {
             )
             .await
             .ok();
+    }
+
+    /// Handle interactive trusted command creation.
+    async fn handle_configure_trusted_command(
+        &mut self,
+        ctx: &mut Context,
+        tool_index: usize,
+    ) -> Result<ChatState, ChatError> {
+        use crate::cli::chat::tools::Tool;
+        
+        let tool_use = &self.tool_uses[tool_index];
+        
+        // Extract the command from the tool (clone to avoid borrowing issues)
+        let command = match &tool_use.tool {
+            Tool::ExecuteCommand(exec_cmd) => exec_cmd.command.clone(),
+            _ => {
+                // For non-execute tools, we can't create trusted command patterns
+                execute!(
+                    self.stderr,
+                    style::SetForegroundColor(Color::Red),
+                    style::Print("\nTrusted command rules can only be created for execute_bash commands.\n"),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+                return Ok(ChatState::PromptUser {
+                    skip_printing_tools: false,
+                });
+            }
+        };
+        
+        let tool_name = tool_use.name.clone();
+        
+        // Generate pattern options
+        let options = Self::generate_pattern_options(&command);
+        
+        // Display the menu
+        execute!(
+            self.stderr,
+            style::SetForegroundColor(Color::Yellow),
+            style::Print(format!("\nCreate rule for: {} (command={})\n", tool_name, command)),
+            style::SetForegroundColor(Color::DarkGrey),
+            style::Print("Trusted commands do not ask for confirmation before running.\n\n"),
+            style::SetForegroundColor(Color::Reset),
+        )?;
+
+        for (i, (_, description)) in options.iter().enumerate() {
+            execute!(
+                self.stderr,
+                style::SetForegroundColor(Color::Green),
+                style::Print(format!("{}. ", i + 1)),
+                style::SetForegroundColor(Color::Reset),
+                style::Print(format!("{description}\n")),
+            )?;
+        }
+
+        execute!(
+            self.stderr,
+            style::SetForegroundColor(Color::Green),
+            style::Print(format!("{}. ", options.len() + 1)),
+            style::SetForegroundColor(Color::Reset),
+            style::Print("Run the command without adding a rule\n\n"),
+            style::SetForegroundColor(Color::DarkGrey),
+            style::Print(format!("Enter your choice (1-{}): ", options.len() + 1)),
+            style::SetForegroundColor(Color::Reset),
+        )?;
+
+        // Read user choice
+        let choice_input = match self.read_user_input("", false) {
+            Some(input) => input.trim().to_string(),
+            None => return Ok(ChatState::Exit),
+        };
+
+        // Parse the choice
+        if let Ok(choice) = choice_input.parse::<usize>() {
+            if choice > 0 && choice <= options.len() {
+                // User selected a pattern option
+                let (pattern, _) = &options[choice - 1];
+                
+                // Create the trusted command
+                let trusted_command = crate::cli::chat::context::TrustedCommand {
+                    command: pattern.clone(),
+                    description: Some(format!("Auto-generated rule for {}", command)),
+                };
+                
+                // Save to context configuration
+                if let Err(e) = self.save_trusted_command(ctx, trusted_command.clone()).await {
+                    execute!(
+                        self.stderr,
+                        style::SetForegroundColor(Color::Red),
+                        style::Print(format!("\nFailed to save trusted command rule: {}\n", e)),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+                } else {
+                    execute!(
+                        self.stderr,
+                        style::SetForegroundColor(Color::Green),
+                        style::Print(format!("\nTrusted command rule added: '{}'\n", trusted_command.command)),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+                }
+                
+                // Execute the tool
+                self.tool_uses[tool_index].accepted = true;
+                return Ok(ChatState::ExecuteTools);
+            } else if choice == options.len() + 1 {
+                // User chose to run without adding a rule
+                self.tool_uses[tool_index].accepted = true;
+                return Ok(ChatState::ExecuteTools);
+            }
+        }
+        
+        // Invalid choice, prompt again
+        execute!(
+            self.stderr,
+            style::SetForegroundColor(Color::Red),
+            style::Print("\nInvalid choice. Please try again.\n"),
+            style::SetForegroundColor(Color::Reset),
+        )?;
+        
+        Ok(ChatState::PromptUser {
+            skip_printing_tools: false,
+        })
+    }
+    
+    /// Generate pattern options for a given command.
+    fn generate_pattern_options(command: &str) -> Vec<(String, String)> {
+        let mut base_patterns = Vec::new();
+        
+        // First pass: Generate base patterns without wildcards
+        
+        // Pattern 1: Exact command
+        base_patterns.push(command.to_string());
+
+        // Parse command to find meaningful boundaries
+        if let Some(args) = shlex::split(command) {
+            if args.len() > 1 {
+                // Pattern 2: Everything until first "-" (or just first two words if no "-")
+                let mut pattern_parts = vec![args[0].clone()];
+                let mut found_dash = false;
+                
+                for arg in &args[1..] {
+                    if arg.starts_with('-') {
+                        found_dash = true;
+                        break;
+                    }
+                    pattern_parts.push(arg.clone());
+                }
+                
+                // If no dash found and we have more than 2 words, take only first 2
+                if !found_dash && pattern_parts.len() > 2 {
+                    pattern_parts.truncate(2);
+                }
+                
+                let up_to_dash_pattern = pattern_parts.join(" ");
+                base_patterns.push(up_to_dash_pattern);
+                
+                // Pattern 3: First word only
+                base_patterns.push(args[0].clone());
+            }
+        }
+        
+        // Deduplicate base patterns
+        base_patterns.dedup();
+        
+        // Second pass: Convert to final options with descriptions and wildcards
+        let mut options = Vec::new();
+        
+        for (i, base_pattern) in base_patterns.iter().enumerate() {
+            if i == 0 {
+                // First pattern is always exact
+                options.push((
+                    base_pattern.clone(),
+                    "Trust this exact command only".to_string(),
+                ));
+            } else {
+                // Other patterns get wildcards
+                let pattern_with_wildcard = format!("{}*", base_pattern);
+                let description = if base_pattern.contains(' ') {
+                    format!("Trust all '{}' commands (up to first argument)", base_pattern)
+                } else {
+                    format!("Trust all '{}' commands (first word only)", base_pattern)
+                };
+                options.push((pattern_with_wildcard, description));
+            }
+        }
+
+        options
+    }
+    
+    /// Save a trusted command to the current profile's context configuration.
+    async fn save_trusted_command(
+        &mut self,
+        ctx: &mut Context,
+        trusted_command: crate::cli::chat::context::TrustedCommand,
+    ) -> Result<(), ChatError> {
+        if let Some(context_manager) = &mut self.conversation.context_manager {
+            context_manager.add_trusted_command(ctx, trusted_command, false).await
+                .map_err(|e| ChatError::Custom(format!("Failed to save trusted command: {}", e).into()))?;
+        }
+        
+        Ok(())
     }
 }
 

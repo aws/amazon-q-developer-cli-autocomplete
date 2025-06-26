@@ -18,6 +18,7 @@ use serde::{
 use tracing::debug;
 
 use super::consts::CONTEXT_FILES_MAX_SIZE;
+use super::tools::execute::dangerous_patterns;
 use super::util::drop_matched_context_files;
 use crate::cli::chat::ChatError;
 use crate::cli::chat::cli::hooks::{
@@ -29,6 +30,80 @@ use crate::util::directories;
 
 pub const AMAZONQ_FILENAME: &str = "AmazonQ.md";
 
+/// Represents a trusted command pattern that can be executed without user confirmation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TrustedCommand {
+    /// The command pattern using glob-style matching (with * wildcards).
+    /// Examples: "npm *", "git status", "git restore *"
+    pub command: String,
+    
+    /// Optional description for documentation purposes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Configuration for trusted commands that can be executed without user confirmation.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(default)]
+pub struct TrustedCommandsConfig {
+    /// List of trusted command patterns.
+    pub trusted_commands: Vec<TrustedCommand>,
+}
+
+/// Processed trusted commands for efficient pattern matching.
+#[derive(Debug, Clone)]
+pub struct ProcessedTrustedCommands {
+    /// List of command patterns with their descriptions.
+    patterns: Vec<(String, Option<String>)>,
+}
+
+impl ProcessedTrustedCommands {
+    /// Create a new ProcessedTrustedCommands from a TrustedCommandsConfig.
+    pub fn new(config: TrustedCommandsConfig) -> Self {
+        let patterns = config
+            .trusted_commands
+            .into_iter()
+            .map(|cmd| (cmd.command, cmd.description))
+            .collect();
+        
+        Self { patterns }
+    }
+    
+    /// Check if a command is trusted by matching against the patterns.
+    pub fn is_trusted(&self, command: &str) -> bool {
+        self.patterns
+            .iter()
+            .any(|(pattern, _)| Self::glob_match(pattern, command))
+    }
+    
+    /// Perform glob-style pattern matching with * wildcards.
+    /// Returns true if the pattern matches the command.
+    fn glob_match(pattern: &str, command: &str) -> bool {
+        // Handle exact match first
+        if pattern == command {
+            return true;
+        }
+        
+        // Convert glob pattern to regex
+        let regex_pattern = pattern
+            .replace("*", ".*") // Replace * with .*
+            .replace("?", "."); // Replace ? with . (single character)
+        
+        // Add anchors to match the entire string
+        let regex_pattern = format!("^{}$", regex_pattern);
+        
+        // Compile and match
+        if let Ok(regex) = Regex::new(&regex_pattern) {
+            regex.is_match(command)
+        } else {
+            // If regex compilation fails, fall back to exact match
+            pattern == command
+        }
+    }
+    
+
+}
+
 /// Configuration for context files, containing paths to include in the context.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
@@ -38,6 +113,10 @@ pub struct ContextConfig {
 
     /// Map of Hook Name to [`Hook`]. The hook name serves as the hook's ID.
     pub hooks: HashMap<String, Hook>,
+    
+    /// Trusted commands configuration.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trusted_commands: Option<TrustedCommandsConfig>,
 }
 
 /// Manager for context files and profiles.
@@ -104,28 +183,76 @@ impl ContextManager {
     async fn save_config(&self, ctx: &Context, global: bool) -> Result<()> {
         if global {
             let global_path = directories::chat_global_context_path(ctx)?;
-            let contents = serde_json::to_string_pretty(&self.global_config)
-                .map_err(|e| eyre!("Failed to serialize global configuration: {}", e))?;
-
-            ctx.fs.write(&global_path, contents).await?;
+            self.save_config_to_path(ctx, &global_path, &self.global_config, "global").await
         } else {
             let profile_path = profile_context_path(ctx, &self.current_profile)?;
-            if let Some(parent) = profile_path.parent() {
-                ctx.fs.create_dir_all(parent).await?;
-            }
-            let contents = serde_json::to_string_pretty(&self.profile_config)
-                .map_err(|e| eyre!("Failed to serialize profile configuration: {}", e))?;
-
-            ctx.fs.write(&profile_path, contents).await?;
+            self.save_config_to_path(ctx, &profile_path, &self.profile_config, &format!("profile '{}'", self.current_profile)).await
         }
-
+    }
+    
+    /// Save configuration to a specific path with comprehensive error handling.
+    ///
+    /// # Arguments
+    /// * `config_path` - Path to save the configuration to
+    /// * `config` - Configuration to save
+    /// * `config_type` - Type of configuration for error messages
+    ///
+    /// # Returns
+    /// A Result indicating success or an error
+    async fn save_config_to_path(
+        &self,
+        ctx: &Context,
+        config_path: &Path,
+        config: &ContextConfig,
+        config_type: &str,
+    ) -> Result<()> {
+        // Ensure parent directory exists
+        if let Some(parent) = config_path.parent() {
+            ctx.fs.create_dir_all(parent).await
+                .map_err(|e| eyre!("Failed to create directory '{}' for {} configuration: {}", 
+                                  parent.display(), config_type, e))?;
+        }
+        
+        // Serialize configuration with error handling
+        let contents = serde_json::to_string_pretty(config)
+            .map_err(|e| eyre!("Failed to serialize {} configuration: {}", config_type, e))?;
+        
+        // Write to file with error handling
+        ctx.fs.write(config_path, contents).await
+            .map_err(|e| eyre!("Failed to write {} configuration to '{}': {}", 
+                              config_type, config_path.display(), e))?;
+        
+        tracing::debug!("Successfully saved {} configuration to '{}'", config_type, config_path.display());
         Ok(())
     }
 
     /// Reloads the global and profile config from disk.
+    /// Handles errors gracefully by falling back to default configurations when files are corrupted.
     pub async fn reload_config(&mut self, ctx: &Context) -> Result<()> {
-        self.global_config = load_global_config(ctx).await?;
-        self.profile_config = load_profile_config(ctx, &self.current_profile).await?;
+        // Reload global config with error handling
+        match load_global_config(ctx).await {
+            Ok(config) => {
+                self.global_config = config;
+                tracing::debug!("Successfully reloaded global configuration");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to reload global configuration, keeping current: {}", e);
+                // Keep the current global config instead of failing
+            }
+        }
+        
+        // Reload profile config with error handling
+        match load_profile_config(ctx, &self.current_profile).await {
+            Ok(config) => {
+                self.profile_config = config;
+                tracing::debug!("Successfully reloaded profile '{}' configuration", self.current_profile);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to reload profile '{}' configuration, keeping current: {}", self.current_profile, e);
+                // Keep the current profile config instead of failing
+            }
+        }
+        
         Ok(())
     }
 
@@ -592,6 +719,204 @@ impl ContextManager {
 
         self.hook_executor.run_hooks(hooks, output).await
     }
+
+    /// Add a trusted command to the configuration.
+    ///
+    /// # Arguments
+    /// * `trusted_command` - The trusted command to add
+    /// * `global` - If true, add to global configuration; otherwise, add to current profile
+    ///   configuration
+    ///
+    /// # Returns
+    /// A Result indicating success or an error
+    pub async fn add_trusted_command(
+        &mut self,
+        ctx: &Context,
+        trusted_command: TrustedCommand,
+        global: bool,
+    ) -> Result<()> {
+        // Validate the trusted command before adding
+        self.validate_trusted_command(&trusted_command)?;
+        
+        let config = self.get_config_mut(global);
+        
+        // Initialize trusted_commands if it doesn't exist
+        if config.trusted_commands.is_none() {
+            config.trusted_commands = Some(TrustedCommandsConfig::default());
+        }
+        
+        // Check for existing command and update description if it exists
+        if let Some(ref mut trusted_commands_config) = config.trusted_commands {
+            if let Some(existing_cmd) = trusted_commands_config.trusted_commands.iter_mut().find(|cmd| cmd.command == trusted_command.command) {
+                // Update the description of the existing command
+                existing_cmd.description = trusted_command.description.clone();
+                
+                // Save the updated configuration
+                self.save_config(ctx, global).await
+                    .map_err(|e| eyre!("Failed to update trusted command '{}': {}", trusted_command.command, e))?;
+                
+                tracing::info!("Updated description for trusted command pattern '{}' in {} configuration", 
+                              trusted_command.command, if global { "global" } else { "profile" });
+                return Ok(());
+            }
+        }
+        
+        // Add the new trusted command if it doesn't exist
+        config.trusted_commands.as_mut().unwrap().trusted_commands.push(trusted_command.clone());
+        
+        // Save the updated configuration with error handling
+        self.save_config(ctx, global).await
+            .map_err(|e| eyre!("Failed to save trusted command '{}': {}", trusted_command.command, e))?;
+        
+        tracing::info!("Added new trusted command pattern '{}' to {} configuration", 
+                      trusted_command.command, if global { "global" } else { "profile" });
+        Ok(())
+    }
+    
+    /// Validate a trusted command before adding it to the configuration.
+    ///
+    /// # Arguments
+    /// * `trusted_command` - The trusted command to validate
+    ///
+    /// # Returns
+    /// A Result indicating if the command is valid
+    fn validate_trusted_command(&self, trusted_command: &TrustedCommand) -> Result<()> {
+        // Check for empty command patterns
+        if trusted_command.command.trim().is_empty() {
+            return Err(eyre!("Command pattern cannot be empty"));
+        }
+        
+        // Check for dangerous patterns that should never be trusted
+        if let Some(pattern_match) = dangerous_patterns::check_all_dangerous_patterns(&trusted_command.command) {
+            let reason = match pattern_match.pattern_type {
+                dangerous_patterns::DangerousPatternType::Destructive => "destructive command",
+                dangerous_patterns::DangerousPatternType::ShellControl => "shell control pattern",
+                dangerous_patterns::DangerousPatternType::IoRedirection => "I/O redirection pattern",
+            };
+            return Err(eyre!("Command pattern '{}' contains dangerous pattern '{}' ({}) and cannot be trusted", 
+                            trusted_command.command, pattern_match.pattern, reason));
+        }
+        
+        // Check for invalid regex patterns when converting glob to regex
+        let regex_pattern = trusted_command.command
+            .replace("*", ".*")
+            .replace("?", ".");
+        let regex_pattern = format!("^{}$", regex_pattern);
+        
+        if regex::Regex::new(&regex_pattern).is_err() {
+            return Err(eyre!("Command pattern '{}' contains invalid regex syntax", trusted_command.command));
+        }
+        
+        Ok(())
+    }
+    
+    /// Get the trusted commands configuration.
+    ///
+    /// # Arguments
+    /// * `global` - If true, get global configuration; otherwise, get current profile configuration
+    ///
+    /// # Returns
+    /// A TrustedCommandsConfig (owned value)
+    pub fn get_trusted_commands(&self, global: bool) -> TrustedCommandsConfig {
+        let config = if global {
+            &self.global_config
+        } else {
+            &self.profile_config
+        };
+        
+        config.trusted_commands.as_ref().cloned().unwrap_or_default()
+    }
+    
+    /// Get combined trusted commands from both global and profile configurations.
+    ///
+    /// # Returns
+    /// A TrustedCommandsConfig containing commands from both global and profile configs
+    pub fn get_combined_trusted_commands(&self) -> TrustedCommandsConfig {
+        let mut combined = TrustedCommandsConfig::default();
+        
+        // Add global trusted commands first
+        if let Some(ref global_trusted) = self.global_config.trusted_commands {
+            combined.trusted_commands.extend(global_trusted.trusted_commands.clone());
+        }
+        
+        // Add profile-specific trusted commands
+        if let Some(ref profile_trusted) = self.profile_config.trusted_commands {
+            // Only add commands that don't already exist (avoid duplicates)
+            for cmd in &profile_trusted.trusted_commands {
+                if !combined.trusted_commands.iter().any(|existing| existing.command == cmd.command) {
+                    combined.trusted_commands.push(cmd.clone());
+                }
+            }
+        }
+        
+        combined
+    }
+    
+    /// Get processed trusted commands for efficient pattern matching.
+    ///
+    /// # Returns
+    /// A ProcessedTrustedCommands containing combined commands from both global and profile configs
+    pub fn get_processed_trusted_commands(&self) -> ProcessedTrustedCommands {
+        let combined_config = self.get_combined_trusted_commands();
+        ProcessedTrustedCommands::new(combined_config)
+    }
+    
+    /// Remove a trusted command from the configuration.
+    ///
+    /// # Arguments
+    /// * `command_pattern` - The command pattern to remove
+    /// * `global` - If true, remove from global configuration; otherwise, remove from current profile
+    ///   configuration
+    ///
+    /// # Returns
+    /// A Result indicating success or an error
+    pub async fn remove_trusted_command(
+        &mut self,
+        ctx: &Context,
+        command_pattern: &str,
+        global: bool,
+    ) -> Result<()> {
+        let config = self.get_config_mut(global);
+        
+        if let Some(ref mut trusted_commands_config) = config.trusted_commands {
+            let original_len = trusted_commands_config.trusted_commands.len();
+            trusted_commands_config.trusted_commands.retain(|cmd| cmd.command != command_pattern);
+            
+            if trusted_commands_config.trusted_commands.len() < original_len {
+                // Save the updated configuration
+                self.save_config(ctx, global).await?;
+                Ok(())
+            } else {
+                Err(eyre!("Trusted command pattern '{}' not found", command_pattern))
+            }
+        } else {
+            Err(eyre!("No trusted commands configuration found"))
+        }
+    }
+    
+    /// Clear all trusted commands from the configuration.
+    ///
+    /// # Arguments
+    /// * `global` - If true, clear global configuration; otherwise, clear current profile
+    ///   configuration
+    ///
+    /// # Returns
+    /// A Result indicating success or an error
+    #[allow(dead_code)]
+    pub async fn clear_trusted_commands(&mut self, ctx: &Context, global: bool) -> Result<()> {
+        let config = self.get_config_mut(global);
+        
+        if let Some(ref mut trusted_commands_config) = config.trusted_commands {
+            trusted_commands_config.trusted_commands.clear();
+        } else {
+            config.trusted_commands = Some(TrustedCommandsConfig::default());
+        }
+        
+        // Save the updated configuration
+        self.save_config(ctx, global).await?;
+        
+        Ok(())
+    }
 }
 
 fn profile_dir_path(ctx: &Context, profile_name: &str) -> Result<PathBuf> {
@@ -608,38 +933,152 @@ pub fn profile_context_path(ctx: &Context, profile_name: &str) -> Result<PathBuf
 /// Load the global context configuration.
 ///
 /// If the global configuration file doesn't exist, returns a default configuration.
+/// Handles errors gracefully by falling back to default configuration when JSON is malformed.
 async fn load_global_config(ctx: &Context) -> Result<ContextConfig> {
     let global_path = directories::chat_global_context_path(ctx)?;
-    debug!(?global_path, "loading profile config");
+    debug!(?global_path, "loading global config");
+    
     if ctx.fs.exists(&global_path) {
-        let contents = ctx.fs.read_to_string(&global_path).await?;
-        let config: ContextConfig =
-            serde_json::from_str(&contents).map_err(|e| eyre!("Failed to parse global configuration: {}", e))?;
-        Ok(config)
+        match load_config_with_error_handling(ctx, &global_path, "global").await {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                tracing::warn!("Failed to load global configuration, using default: {}", e);
+                Ok(get_default_global_config())
+            }
+        }
     } else {
-        // Return default global configuration with predefined paths
-        Ok(ContextConfig {
-            paths: vec![
-                ".amazonq/rules/**/*.md".to_string(),
-                "README.md".to_string(),
-                AMAZONQ_FILENAME.to_string(),
-            ],
-            hooks: HashMap::new(),
-        })
+        Ok(get_default_global_config())
     }
+}
+
+/// Get the default global configuration.
+fn get_default_global_config() -> ContextConfig {
+    ContextConfig {
+        paths: vec![
+            ".amazonq/rules/**/*.md".to_string(),
+            "README.md".to_string(),
+            AMAZONQ_FILENAME.to_string(),
+        ],
+        hooks: HashMap::new(),
+        trusted_commands: None,
+    }
+}
+
+/// Load configuration from a file with comprehensive error handling.
+/// 
+/// This function handles various error scenarios gracefully:
+/// - File read errors (permissions, I/O issues)
+/// - Invalid JSON format
+/// - Malformed trusted commands configuration
+/// - Missing or invalid fields
+async fn load_config_with_error_handling(
+    ctx: &Context,
+    config_path: &Path,
+    config_type: &str,
+) -> Result<ContextConfig> {
+    // Handle file read errors
+    let contents = ctx.fs.read_to_string(config_path).await
+        .map_err(|e| eyre!("Failed to read {} configuration file '{}': {}", config_type, config_path.display(), e))?;
+    
+    // Handle empty files
+    if contents.trim().is_empty() {
+        tracing::warn!("{} configuration file '{}' is empty, using default configuration", config_type, config_path.display());
+        return Ok(ContextConfig::default());
+    }
+    
+    // Parse JSON with detailed error handling
+    let mut config: ContextConfig = serde_json::from_str(&contents)
+        .map_err(|e| {
+            let line_col = format!(" at line {}", e.line());
+            eyre!("Invalid JSON format in {} configuration file '{}'{}: {}", 
+                  config_type, config_path.display(), line_col, e)
+        })?;
+    
+    // Validate and sanitize trusted commands configuration
+    if let Some(ref mut trusted_commands_config) = config.trusted_commands {
+        validate_and_sanitize_trusted_commands(trusted_commands_config, config_type, config_path)?;
+    }
+    
+    Ok(config)
+}
+
+/// Validate and sanitize trusted commands configuration.
+/// 
+/// This function:
+/// - Validates command patterns for basic safety
+/// - Removes invalid or dangerous patterns
+/// - Logs warnings for any issues found
+fn validate_and_sanitize_trusted_commands(
+    trusted_commands_config: &mut TrustedCommandsConfig,
+    config_type: &str,
+    config_path: &Path,
+) -> Result<()> {
+    let original_count = trusted_commands_config.trusted_commands.len();
+    let mut removed_count = 0;
+    
+    // Filter out invalid or potentially dangerous patterns
+    trusted_commands_config.trusted_commands.retain(|cmd| {
+        // Check for empty command patterns
+        if cmd.command.trim().is_empty() {
+            tracing::warn!("Removing empty command pattern from {} configuration '{}'", 
+                          config_type, config_path.display());
+            removed_count += 1;
+            return false;
+        }
+        
+        // Check for dangerous patterns that should never be trusted
+        if let Some(pattern_match) = dangerous_patterns::check_all_dangerous_patterns(&cmd.command) {
+            let reason = match pattern_match.pattern_type {
+                dangerous_patterns::DangerousPatternType::Destructive => "destructive command",
+                dangerous_patterns::DangerousPatternType::ShellControl => "shell control pattern",
+                dangerous_patterns::DangerousPatternType::IoRedirection => "I/O redirection pattern",
+            };
+            tracing::warn!("Removing potentially dangerous command pattern '{}' (contains '{}' - {}) from {} configuration '{}'", 
+                          cmd.command, pattern_match.pattern, reason, config_type, config_path.display());
+            removed_count += 1;
+            return false;
+        }
+        
+        // Check for invalid regex patterns when converting glob to regex
+        let regex_pattern = cmd.command
+            .replace("*", ".*")
+            .replace("?", ".");
+        let regex_pattern = format!("^{}$", regex_pattern);
+        
+        if regex::Regex::new(&regex_pattern).is_err() {
+            tracing::warn!("Removing command pattern '{}' with invalid regex from {} configuration '{}'", 
+                          cmd.command, config_type, config_path.display());
+            removed_count += 1;
+            return false;
+        }
+        
+        true
+    });
+    
+    if removed_count > 0 {
+        tracing::warn!("Removed {} invalid/dangerous trusted command patterns from {} configuration '{}' (originally had {})", 
+                      removed_count, config_type, config_path.display(), original_count);
+    }
+    
+    Ok(())
 }
 
 /// Load a profile's context configuration.
 ///
 /// If the profile configuration file doesn't exist, creates a default configuration.
+/// Handles errors gracefully by falling back to default configuration when JSON is malformed.
 async fn load_profile_config(ctx: &Context, profile_name: &str) -> Result<ContextConfig> {
     let profile_path = profile_context_path(ctx, profile_name)?;
     debug!(?profile_path, "loading profile config");
+    
     if ctx.fs.exists(&profile_path) {
-        let contents = ctx.fs.read_to_string(&profile_path).await?;
-        let config: ContextConfig =
-            serde_json::from_str(&contents).map_err(|e| eyre!("Failed to parse profile configuration: {}", e))?;
-        Ok(config)
+        match load_config_with_error_handling(ctx, &profile_path, &format!("profile '{}'", profile_name)).await {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                tracing::warn!("Failed to load profile '{}' configuration, using default: {}", profile_name, e);
+                Ok(ContextConfig::default())
+            }
+        }
     } else {
         // Return empty configuration for new profiles
         Ok(ContextConfig::default())
@@ -909,5 +1348,390 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn test_trusted_command_deserialization() {
+        // Test basic trusted command deserialization
+        let json = r#"{
+            "command": "npm *",
+            "description": "All npm commands"
+        }"#;
+        
+        let cmd: TrustedCommand = serde_json::from_str(json).unwrap();
+        assert_eq!(cmd.command, "npm *");
+        assert_eq!(cmd.description, Some("All npm commands".to_string()));
+        
+        // Test without description
+        let json = r#"{
+            "command": "git status"
+        }"#;
+        
+        let cmd: TrustedCommand = serde_json::from_str(json).unwrap();
+        assert_eq!(cmd.command, "git status");
+        assert_eq!(cmd.description, None);
+    }
+    
+    #[test]
+    fn test_trusted_commands_config_deserialization() {
+        let json = r#"{
+            "trusted_commands": [
+                {
+                    "command": "npm *",
+                    "description": "All npm commands"
+                },
+                {
+                    "command": "git status"
+                }
+            ]
+        }"#;
+        
+        let config: TrustedCommandsConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.trusted_commands.len(), 2);
+        assert_eq!(config.trusted_commands[0].command, "npm *");
+        assert_eq!(config.trusted_commands[0].description, Some("All npm commands".to_string()));
+        assert_eq!(config.trusted_commands[1].command, "git status");
+        assert_eq!(config.trusted_commands[1].description, None);
+    }
+    
+    #[test]
+    fn test_context_config_with_trusted_commands() {
+        let json = r#"{
+            "paths": ["README.md"],
+            "hooks": {},
+            "trusted_commands": {
+                "trusted_commands": [
+                    {
+                        "command": "npm *",
+                        "description": "All npm commands"
+                    }
+                ]
+            }
+        }"#;
+        
+        let config: ContextConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.paths, vec!["README.md"]);
+        assert!(config.trusted_commands.is_some());
+        
+        let trusted_commands = config.trusted_commands.unwrap();
+        assert_eq!(trusted_commands.trusted_commands.len(), 1);
+        assert_eq!(trusted_commands.trusted_commands[0].command, "npm *");
+    }
+    
+    #[test]
+    fn test_processed_trusted_commands_exact_match() {
+        let config = TrustedCommandsConfig {
+            trusted_commands: vec![
+                TrustedCommand {
+                    command: "git status".to_string(),
+                    description: Some("Git status command".to_string()),
+                },
+                TrustedCommand {
+                    command: "npm install".to_string(),
+                    description: None,
+                },
+            ],
+        };
+        
+        let processed = ProcessedTrustedCommands::new(config);
+        
+        // Test exact matches
+        assert!(processed.is_trusted("git status"));
+        assert!(processed.is_trusted("npm install"));
+        
+        // Test non-matches
+        assert!(!processed.is_trusted("git commit"));
+        assert!(!processed.is_trusted("npm run"));
+        assert!(!processed.is_trusted("ls"));
+    }
+    
+    #[test]
+    fn test_processed_trusted_commands_glob_match() {
+        let config = TrustedCommandsConfig {
+            trusted_commands: vec![
+                TrustedCommand {
+                    command: "npm *".to_string(),
+                    description: Some("All npm commands".to_string()),
+                },
+                TrustedCommand {
+                    command: "git restore *".to_string(),
+                    description: Some("All git restore commands".to_string()),
+                },
+            ],
+        };
+        
+        let processed = ProcessedTrustedCommands::new(config);
+        
+        // Test glob matches
+        assert!(processed.is_trusted("npm install"));
+        assert!(processed.is_trusted("npm run build"));
+        assert!(processed.is_trusted("npm install --save-dev typescript"));
+        assert!(processed.is_trusted("git restore file.txt"));
+        assert!(processed.is_trusted("git restore --staged file.txt"));
+        
+        // Test non-matches
+        assert!(!processed.is_trusted("git status"));
+        assert!(!processed.is_trusted("git commit"));
+        assert!(!processed.is_trusted("yarn install"));
+        assert!(!processed.is_trusted("ls"));
+    }
+    
+    #[test]
+    fn test_processed_trusted_commands_mixed_patterns() {
+        let config = TrustedCommandsConfig {
+            trusted_commands: vec![
+                TrustedCommand {
+                    command: "git status".to_string(),
+                    description: None,
+                },
+                TrustedCommand {
+                    command: "git restore *".to_string(),
+                    description: None,
+                },
+                TrustedCommand {
+                    command: "npm *".to_string(),
+                    description: None,
+                },
+            ],
+        };
+        
+        let processed = ProcessedTrustedCommands::new(config);
+        
+        // Test exact match
+        assert!(processed.is_trusted("git status"));
+        
+        // Test glob matches
+        assert!(processed.is_trusted("git restore file.txt"));
+        assert!(processed.is_trusted("npm install"));
+        
+        // Test non-matches
+        assert!(!processed.is_trusted("git commit"));
+        assert!(!processed.is_trusted("yarn install"));
+    }
+    
+    #[test]
+    fn test_glob_match_edge_cases() {
+        let config = TrustedCommandsConfig {
+            trusted_commands: vec![
+                TrustedCommand {
+                    command: "*".to_string(),
+                    description: None,
+                },
+            ],
+        };
+        
+        let processed = ProcessedTrustedCommands::new(config);
+        
+        // Test that * matches everything
+        assert!(processed.is_trusted("any command"));
+        assert!(processed.is_trusted("git status"));
+        assert!(processed.is_trusted("npm install"));
+        
+        // Test empty pattern
+        let config = TrustedCommandsConfig {
+            trusted_commands: vec![
+                TrustedCommand {
+                    command: "".to_string(),
+                    description: None,
+                },
+            ],
+        };
+        
+        let processed = ProcessedTrustedCommands::new(config);
+        assert!(processed.is_trusted(""));
+        assert!(!processed.is_trusted("git status"));
+    }
+    
+    #[tokio::test]
+    async fn test_trusted_commands_management() -> Result<()> {
+        let ctx = Context::new();
+        let mut manager = create_test_context_manager(None).await?;
+        
+        // Test adding trusted commands
+        let cmd1 = TrustedCommand {
+            command: "npm *".to_string(),
+            description: Some("All npm commands".to_string()),
+        };
+        
+        let cmd2 = TrustedCommand {
+            command: "git status".to_string(),
+            description: None,
+        };
+        
+        // Add to profile config
+        manager.add_trusted_command(&ctx, cmd1.clone(), false).await?;
+        manager.add_trusted_command(&ctx, cmd2.clone(), false).await?;
+        
+        // Test getting trusted commands
+        let profile_commands = manager.get_trusted_commands(false);
+        assert_eq!(profile_commands.trusted_commands.len(), 2);
+        assert_eq!(profile_commands.trusted_commands[0].command, "npm *");
+        assert_eq!(profile_commands.trusted_commands[1].command, "git status");
+        
+        // Test updating existing command description
+        let updated_cmd1 = TrustedCommand {
+            command: "npm *".to_string(),
+            description: Some("Updated npm commands description".to_string()),
+        };
+        let update_result = manager.add_trusted_command(&ctx, updated_cmd1, false).await;
+        assert!(update_result.is_ok());
+        
+        // Verify the description was updated
+        let profile_commands = manager.get_trusted_commands(false);
+        assert_eq!(profile_commands.trusted_commands.len(), 2); // Still 2 commands
+        let npm_cmd = profile_commands.trusted_commands.iter().find(|cmd| cmd.command == "npm *").unwrap();
+        assert_eq!(npm_cmd.description, Some("Updated npm commands description".to_string()));
+        
+        // Test adding to global config
+        let global_cmd = TrustedCommand {
+            command: "ls *".to_string(),
+            description: Some("All ls commands".to_string()),
+        };
+        manager.add_trusted_command(&ctx, global_cmd, true).await?;
+        
+        // Test combined commands
+        let combined = manager.get_combined_trusted_commands();
+        assert_eq!(combined.trusted_commands.len(), 3);
+        
+        // Test removing commands
+        manager.remove_trusted_command(&ctx, "git status", false).await?;
+        let profile_commands = manager.get_trusted_commands(false);
+        assert_eq!(profile_commands.trusted_commands.len(), 1);
+        assert_eq!(profile_commands.trusted_commands[0].command, "npm *");
+        
+        // Test clearing commands
+        manager.clear_trusted_commands(&ctx, false).await?;
+        let profile_commands = manager.get_trusted_commands(false);
+        assert_eq!(profile_commands.trusted_commands.len(), 0);
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_trusted_commands_error_handling() -> Result<()> {
+        let ctx = Context::new();
+        let mut manager = create_test_context_manager(None).await?;
+        
+        // Test validation of empty command patterns
+        let empty_cmd = TrustedCommand {
+            command: "".to_string(),
+            description: None,
+        };
+        let result = manager.add_trusted_command(&ctx, empty_cmd, false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+        
+        // Test validation of dangerous patterns
+        let dangerous_cmd = TrustedCommand {
+            command: "rm -rf /".to_string(),
+            description: None,
+        };
+        let result = manager.add_trusted_command(&ctx, dangerous_cmd, false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("dangerous pattern"));
+        
+        // Test validation of invalid regex patterns
+        let invalid_regex_cmd = TrustedCommand {
+            command: "test[".to_string(), // Invalid regex due to unclosed bracket
+            description: None,
+        };
+        let result = manager.add_trusted_command(&ctx, invalid_regex_cmd, false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("invalid regex"));
+        
+        Ok(())
+    }
+    
+    #[tokio::test]
+    async fn test_config_loading_error_handling() -> Result<()> {
+        let ctx = Context::new();
+        let temp_dir = ctx.fs.create_tempdir().await?;
+        
+        // Test loading invalid JSON
+        let invalid_json_path = temp_dir.path().join("invalid.json");
+        ctx.fs.write(&invalid_json_path, "{ invalid json }").await?;
+        
+        let result = load_config_with_error_handling(&ctx, &invalid_json_path, "test").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid JSON format"));
+        
+        // Test loading empty file
+        let empty_file_path = temp_dir.path().join("empty.json");
+        ctx.fs.write(&empty_file_path, "").await?;
+        
+        let result = load_config_with_error_handling(&ctx, &empty_file_path, "test").await;
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.paths.len(), 0); // Should be default empty config
+        
+        // Test loading file with dangerous trusted commands
+        let dangerous_config = r#"{
+            "paths": [],
+            "hooks": {},
+            "trusted_commands": {
+                "trusted_commands": [
+                    {
+                        "command": "rm -rf /",
+                        "description": "Dangerous command"
+                    },
+                    {
+                        "command": "ls -la",
+                        "description": "Safe command"
+                    }
+                ]
+            }
+        }"#;
+        
+        let dangerous_file_path = temp_dir.path().join("dangerous.json");
+        ctx.fs.write(&dangerous_file_path, dangerous_config).await?;
+        
+        let result = load_config_with_error_handling(&ctx, &dangerous_file_path, "test").await;
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        
+        // Should have removed the dangerous command but kept the safe one
+        let trusted_commands = config.trusted_commands.unwrap();
+        assert_eq!(trusted_commands.trusted_commands.len(), 1);
+        assert_eq!(trusted_commands.trusted_commands[0].command, "ls -la");
+        
+        Ok(())
+    }
+    
+    #[test]
+    fn test_validate_and_sanitize_trusted_commands() {
+        use std::path::Path;
+        
+        let mut config = TrustedCommandsConfig {
+            trusted_commands: vec![
+                TrustedCommand {
+                    command: "".to_string(), // Empty - should be removed
+                    description: None,
+                },
+                TrustedCommand {
+                    command: "rm -rf /".to_string(), // Dangerous - should be removed
+                    description: None,
+                },
+                TrustedCommand {
+                    command: "test[".to_string(), // Invalid regex - should be removed
+                    description: None,
+                },
+                TrustedCommand {
+                    command: "ls -la".to_string(), // Safe - should be kept
+                    description: None,
+                },
+                TrustedCommand {
+                    command: "npm *".to_string(), // Safe with glob - should be kept
+                    description: None,
+                },
+            ],
+        };
+        
+        let result = validate_and_sanitize_trusted_commands(&mut config, "test", Path::new("/test/path"));
+        assert!(result.is_ok());
+        
+        // Should have kept only the 2 safe commands
+        assert_eq!(config.trusted_commands.len(), 2);
+        assert_eq!(config.trusted_commands[0].command, "ls -la");
+        assert_eq!(config.trusted_commands[1].command, "npm *");
     }
 }

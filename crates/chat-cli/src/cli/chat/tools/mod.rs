@@ -1,9 +1,11 @@
 pub mod custom_tool;
+
 pub mod execute;
 pub mod fs_read;
 pub mod fs_write;
 pub mod gh_issue;
 pub mod thinking;
+
 pub mod use_aws;
 
 use std::collections::HashMap;
@@ -63,11 +65,11 @@ impl Tool {
     }
 
     /// Whether or not the tool should prompt the user to accept before [Self::invoke] is called.
-    pub fn requires_acceptance(&self, _ctx: &Context) -> bool {
+    pub fn requires_acceptance(&self, _ctx: &Context, trusted_commands: Option<&crate::cli::chat::context::ProcessedTrustedCommands>) -> bool {
         match self {
             Tool::FsRead(_) => false,
             Tool::FsWrite(_) => true,
-            Tool::ExecuteCommand(execute_command) => execute_command.requires_acceptance(),
+            Tool::ExecuteCommand(execute_command) => execute_command.requires_acceptance(_ctx, trusted_commands),
             Tool::UseAws(use_aws) => use_aws.requires_acceptance(),
             Tool::Custom(_) => true,
             Tool::GhIssue(_) => false,
@@ -93,7 +95,11 @@ impl Tool {
         match self {
             Tool::FsRead(fs_read) => fs_read.queue_description(ctx, output).await,
             Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, output),
-            Tool::ExecuteCommand(execute_command) => execute_command.queue_description(output),
+            Tool::ExecuteCommand(execute_command) => {
+                // Get trusted commands from context - this is a simplified approach
+                // In a full implementation, we'd need to pass this information through the call chain
+                execute_command.queue_description(output, None)
+            },
             Tool::UseAws(use_aws) => use_aws.queue_description(output),
             Tool::Custom(custom_tool) => custom_tool.queue_description(output),
             Tool::GhIssue(gh_issue) => gh_issue.queue_description(output),

@@ -94,7 +94,7 @@ impl SlashCommand {
             Self::Context(args) => args.execute(ctx, session).await,
             Self::PromptEditor(args) => args.execute(session).await,
             Self::Compact(args) => args.execute(ctx, database, telemetry, session).await,
-            Self::Tools(args) => args.execute(session).await,
+            Self::Tools(args) => args.execute(ctx, session).await,
             Self::Issue(args) => {
                 if let Err(err) = args.execute().await {
                     return Err(ChatError::Custom(err.to_string().into()));

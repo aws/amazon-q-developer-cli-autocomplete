@@ -16,6 +16,8 @@ use crossterm::{
 
 use crate::api_client::model::Tool as FigTool;
 use crate::cli::chat::consts::DUMMY_TOOL_NAME;
+use crate::cli::chat::context::TrustedCommand;
+use crate::cli::chat::tools::execute::dangerous_patterns;
 use crate::cli::chat::tools::ToolOrigin;
 use crate::cli::chat::{
     ChatError,
@@ -23,6 +25,7 @@ use crate::cli::chat::{
     ChatState,
     TRUST_ALL_TEXT,
 };
+use crate::platform::Context;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Args)]
@@ -32,9 +35,9 @@ pub struct ToolsArgs {
 }
 
 impl ToolsArgs {
-    pub async fn execute(self, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         if let Some(subcommand) = self.subcommand {
-            return subcommand.execute(session).await;
+            return subcommand.execute(ctx, session).await;
         }
 
         // No subcommand - print the current tools and their permissions.
@@ -96,6 +99,23 @@ impl ToolsArgs {
                         )
                         .as_str(),
                     );
+                    
+                    // Add trusted commands info for execute_bash
+                    if spec.name == "execute_bash" || spec.name == "execute_cmd" {
+                        if let Some(ref context_manager) = session.conversation.context_manager {
+                            let combined_trusted_commands = context_manager.get_combined_trusted_commands();
+                            if !combined_trusted_commands.trusted_commands.is_empty() {
+                                acc.push_str("    * trusted by profile configuration: ");
+                                let commands: Vec<String> = combined_trusted_commands
+                                    .trusted_commands
+                                    .iter()
+                                    .map(|cmd| format!("\"{}\"", cmd.command))
+                                    .collect();
+                                acc.push_str(&commands.join(" "));
+                                acc.push('\n');
+                            }
+                        }
+                    }
                     acc
                 });
 
@@ -123,6 +143,8 @@ impl ToolsArgs {
                 queue!(session.stderr, style::Print(format!(" - {client}")), style::Print("\n"))?;
             }
         }
+
+
 
         queue!(
             session.stderr,
@@ -161,10 +183,88 @@ pub enum ToolsSubcommand {
     Reset,
     /// Reset a single tool to default permission level
     ResetSingle { tool_name: String },
+    /// Allow trusted commands to run without confirmation
+    Allow {
+        #[command(subcommand)]
+        subcommand: AllowSubcommand,
+    },
+    /// Remove trusted commands
+    Remove {
+        #[command(subcommand)]
+        subcommand: RemoveSubcommand,
+    },
+}
+
+#[deny(missing_docs)]
+#[derive(Debug, PartialEq, Subcommand)]
+pub enum AllowSubcommand {
+    /// Add trusted command patterns for execute_bash tool
+    #[command(name = "execute_bash")]
+    ExecuteBash {
+        /// Command patterns to trust (supports * wildcards). Multiple patterns can be specified as separate arguments.
+        #[arg(long, value_name = "PATTERN", num_args = 1.., required = true)]
+        command: Vec<String>,
+        /// Optional description for the trusted commands
+        #[arg(long)]
+        description: Option<String>,
+        /// Add to global configuration instead of current profile
+        #[arg(long, short)]
+        global: bool,
+    },
+}
+
+#[deny(missing_docs)]
+#[derive(Debug, PartialEq, Subcommand)]
+pub enum RemoveSubcommand {
+    /// Remove trusted command patterns for execute_bash tool
+    #[command(name = "execute_bash")]
+    ExecuteBash {
+        /// Command patterns to remove (must match exactly). Multiple patterns can be specified as separate arguments.
+        #[arg(long, value_name = "PATTERN", num_args = 1.., required = true)]
+        command: Vec<String>,
+        /// Remove from global configuration instead of current profile
+        #[arg(long, short)]
+        global: bool,
+    },
+}
+
+/// Validate a command pattern before adding it to trusted commands.
+/// 
+/// # Arguments
+/// * `pattern` - The command pattern to validate
+/// 
+/// # Returns
+/// A Result indicating if the pattern is valid
+fn validate_command_pattern(pattern: &str) -> Result<(), String> {
+    // Check if pattern is empty
+    if pattern.trim().is_empty() {
+        return Err("Command pattern cannot be empty".to_string());
+    }
+    
+    // Check for dangerous patterns that should not be trusted
+    if let Some(pattern_match) = dangerous_patterns::check_all_dangerous_patterns(pattern) {
+        let reason = match pattern_match.pattern_type {
+            dangerous_patterns::DangerousPatternType::Destructive => "destructive command",
+            dangerous_patterns::DangerousPatternType::ShellControl => "shell control pattern",
+            dangerous_patterns::DangerousPatternType::IoRedirection => "I/O redirection pattern",
+        };
+        return Err(format!(
+            "Command pattern contains potentially dangerous sequence '{}' ({}) and cannot be trusted. \
+            Consider using more specific patterns.",
+            pattern_match.pattern, reason
+        ));
+    }
+    
+    // Warn about overly broad patterns
+    if pattern == "*" {
+        return Err("Pattern '*' is too broad and would trust all commands. Use more specific patterns.".to_string());
+    }
+    
+    Ok(())
 }
 
 impl ToolsSubcommand {
-    pub async fn execute(self, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let existing_tools: HashSet<&String> = session
             .conversation
             .tools
@@ -300,6 +400,255 @@ impl ToolsSubcommand {
                     )?;
                 }
             },
+            Self::Allow { subcommand } => {
+                match subcommand {
+                    AllowSubcommand::ExecuteBash { command, description, global } => {
+                        let mut successful_commands = Vec::new();
+                        let mut failed_commands = Vec::new();
+                        
+                        match session.conversation.context_manager {
+                            Some(ref mut context_manager) => {
+                                for cmd_pattern in command {
+                                    // Validate each command pattern
+                                    if let Err(error) = validate_command_pattern(&cmd_pattern) {
+                                        failed_commands.push((cmd_pattern, error));
+                                        continue;
+                                    }
+                                    
+                                    // Create the trusted command
+                                    let trusted_command = TrustedCommand {
+                                        command: cmd_pattern.clone(),
+                                        description: description.clone(),
+                                    };
+                                    
+                                    // Add the trusted command to the configuration
+                                    match context_manager.add_trusted_command(
+                                        ctx,
+                                        trusted_command,
+                                        global
+                                    ).await {
+                                        Ok(()) => {
+                                            successful_commands.push(cmd_pattern);
+                                        },
+                                        Err(error) => {
+                                            failed_commands.push((cmd_pattern, error.to_string()));
+                                        }
+                                    }
+                                }
+                                
+                                // Report results
+                                if !successful_commands.is_empty() {
+                                    let scope = if global { "global" } else { "profile" };
+                                    queue!(
+                                        session.stderr,
+                                        style::SetForegroundColor(Color::Green),
+                                        style::Print(format!(
+                                            "\nSuccessfully added {} trusted command pattern{} to {} configuration:",
+                                            successful_commands.len(),
+                                            if successful_commands.len() == 1 { "" } else { "s" },
+                                            scope
+                                        )),
+                                        style::SetForegroundColor(Color::Reset),
+                                    )?;
+                                    for cmd in &successful_commands {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\n  • \"{}\"", cmd)),
+                                        )?;
+                                    }
+                                    if let Some(desc) = description {
+                                        queue!(
+                                            session.stderr,
+                                            style::SetForegroundColor(Color::DarkGrey),
+                                            style::Print(format!("\nDescription: {}", desc)),
+                                            style::SetForegroundColor(Color::Reset),
+                                        )?;
+                                    }
+                                    queue!(
+                                        session.stderr,
+                                        style::SetForegroundColor(Color::DarkGrey),
+                                        style::Print("\nCommands matching these patterns will not require confirmation before execution."),
+                                        style::SetForegroundColor(Color::Reset),
+                                    )?;
+                                }
+                                
+                                if !failed_commands.is_empty() {
+                                    queue!(
+                                        session.stderr,
+                                        style::SetForegroundColor(Color::Red),
+                                        style::Print(format!(
+                                            "\nFailed to add {} command pattern{}:",
+                                            failed_commands.len(),
+                                            if failed_commands.len() == 1 { "" } else { "s" }
+                                        )),
+                                        style::SetForegroundColor(Color::Reset),
+                                    )?;
+                                    for (cmd, error) in &failed_commands {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\n  • \"{}\": {}", cmd, error)),
+                                        )?;
+                                    }
+                                }
+                            },
+                            None => {
+                                queue!(
+                                    session.stderr,
+                                    style::SetForegroundColor(Color::Red),
+                                    style::Print("\nContext manager not available. Cannot add trusted commands."),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            }
+                        }
+                    }
+                }
+            },
+            Self::Remove { subcommand } => {
+                match subcommand {
+                    RemoveSubcommand::ExecuteBash { command, global } => {
+                        match session.conversation.context_manager {
+                            Some(ref mut context_manager) => {
+                                // Get current trusted commands to check which commands exist
+                                let current_commands = if global {
+                                    context_manager.get_trusted_commands(true)
+                                } else {
+                                    context_manager.get_trusted_commands(false)
+                                };
+                                
+                                let mut successful_removals = Vec::new();
+                                let mut failed_removals = Vec::new();
+                                let mut not_found_commands = Vec::new();
+                                
+                                // Check each command
+                                for cmd_pattern in &command {
+                                    let command_exists = current_commands.trusted_commands
+                                        .iter()
+                                        .any(|cmd| cmd.command == *cmd_pattern);
+                                    
+                                    if !command_exists {
+                                        not_found_commands.push(cmd_pattern.clone());
+                                        continue;
+                                    }
+                                    
+                                    // Command exists, try to remove it
+                                    match context_manager.remove_trusted_command(ctx, cmd_pattern, global).await {
+                                        Ok(()) => {
+                                            successful_removals.push(cmd_pattern.clone());
+                                        },
+                                        Err(error) => {
+                                            failed_removals.push((cmd_pattern.clone(), error.to_string()));
+                                        }
+                                    }
+                                }
+                                
+                                // Report results
+                                if !successful_removals.is_empty() {
+                                    let scope = if global { "global" } else { "profile" };
+                                    queue!(
+                                        session.stderr,
+                                        style::SetForegroundColor(Color::Green),
+                                        style::Print(format!(
+                                            "\nSuccessfully removed {} trusted command pattern{} from {} configuration:",
+                                            successful_removals.len(),
+                                            if successful_removals.len() == 1 { "" } else { "s" },
+                                            scope
+                                        )),
+                                        style::SetForegroundColor(Color::Reset),
+                                    )?;
+                                    for cmd in &successful_removals {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\n  • \"{}\"", cmd)),
+                                        )?;
+                                    }
+                                }
+                                
+                                if !failed_removals.is_empty() {
+                                    queue!(
+                                        session.stderr,
+                                        style::SetForegroundColor(Color::Red),
+                                        style::Print(format!(
+                                            "\nFailed to remove {} command pattern{}:",
+                                            failed_removals.len(),
+                                            if failed_removals.len() == 1 { "" } else { "s" }
+                                        )),
+                                        style::SetForegroundColor(Color::Reset),
+                                    )?;
+                                    for (cmd, error) in &failed_removals {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\n  • \"{}\": {}", cmd, error)),
+                                        )?;
+                                    }
+                                }
+                                
+                                if !not_found_commands.is_empty() {
+                                    let scope = if global { "global" } else { "profile" };
+                                    queue!(
+                                        session.stderr,
+                                        style::SetForegroundColor(Color::Red),
+                                        style::Print(format!(
+                                            "\n{} command pattern{} not found in {} configuration:",
+                                            not_found_commands.len(),
+                                            if not_found_commands.len() == 1 { "" } else { "s" },
+                                            scope
+                                        )),
+                                        style::SetForegroundColor(Color::Reset),
+                                    )?;
+                                    for cmd in &not_found_commands {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\n  • \"{}\"", cmd)),
+                                        )?;
+                                    }
+                                    
+                                    // Show available commands if any commands were not found
+                                    // Refresh the list to show current state after removals
+                                    let updated_commands = if global {
+                                        context_manager.get_trusted_commands(true)
+                                    } else {
+                                        context_manager.get_trusted_commands(false)
+                                    };
+                                    
+                                    if updated_commands.trusted_commands.is_empty() {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\nNo trusted commands configured in {} scope.", scope)),
+                                        )?;
+                                    } else {
+                                        queue!(
+                                            session.stderr,
+                                            style::Print(format!("\nAvailable trusted commands in {} scope:", scope)),
+                                        )?;
+                                        for cmd in &updated_commands.trusted_commands {
+                                            queue!(
+                                                session.stderr,
+                                                style::Print(format!("\n  • \"{}\"", cmd.command)),
+                                            )?;
+                                            if let Some(desc) = &cmd.description {
+                                                queue!(
+                                                    session.stderr,
+                                                    style::SetForegroundColor(Color::DarkGrey),
+                                                    style::Print(format!(" - {}", desc)),
+                                                    style::SetForegroundColor(Color::Reset),
+                                                )?;
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            None => {
+                                queue!(
+                                    session.stderr,
+                                    style::SetForegroundColor(Color::Red),
+                                    style::Print("\nContext manager not available. Cannot remove trusted commands."),
+                                    style::SetForegroundColor(Color::Reset),
+                                )?;
+                            }
+                        }
+                    }
+                }
+            },
         };
 
         session.stderr.flush()?;
@@ -307,5 +656,125 @@ impl ToolsSubcommand {
         Ok(ChatState::PromptUser {
             skip_printing_tools: true,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(subcommand)]
+        tools: ToolsSubcommand,
+    }
+
+    #[test]
+    fn test_allow_execute_bash_multiple_commands() {
+        // Test parsing multiple command patterns as separate arguments
+        let args = vec![
+            "test",
+            "allow",
+            "execute_bash", 
+            "--command", "npm *", "rm test.txt"
+        ];
+        
+        let cli = TestCli::try_parse_from(args).expect("Failed to parse arguments");
+        
+        match cli.tools {
+            ToolsSubcommand::Allow { subcommand } => {
+                match subcommand {
+                    AllowSubcommand::ExecuteBash { command, description: _, global: _ } => {
+                        assert_eq!(command.len(), 2);
+                        assert_eq!(command[0], "npm *");
+                        assert_eq!(command[1], "rm test.txt");
+                    }
+                }
+            }
+            _ => panic!("Expected Allow subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_remove_execute_bash_multiple_commands() {
+        // Test parsing multiple command patterns for removal
+        let args = vec![
+            "test",
+            "remove",
+            "execute_bash",
+            "--command", "npm *", "rm test.txt"
+        ];
+        
+        let cli = TestCli::try_parse_from(args).expect("Failed to parse arguments");
+        
+        match cli.tools {
+            ToolsSubcommand::Remove { subcommand } => {
+                match subcommand {
+                    RemoveSubcommand::ExecuteBash { command, global: _ } => {
+                        assert_eq!(command.len(), 2);
+                        assert_eq!(command[0], "npm *");
+                        assert_eq!(command[1], "rm test.txt");
+                    }
+                }
+            }
+            _ => panic!("Expected Remove subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_allow_execute_bash_single_command() {
+        // Test parsing single command pattern
+        let args = vec![
+            "test",
+            "allow", 
+            "execute_bash",
+            "--command", "ls -la"
+        ];
+        
+        let cli = TestCli::try_parse_from(args).expect("Failed to parse arguments");
+        
+        match cli.tools {
+            ToolsSubcommand::Allow { subcommand } => {
+                match subcommand {
+                    AllowSubcommand::ExecuteBash { command, description: _, global: _ } => {
+                        assert_eq!(command.len(), 1);
+                        assert_eq!(command[0], "ls -la");
+                    }
+                }
+            }
+            _ => panic!("Expected Allow subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_validate_command_pattern_valid() {
+        // Test valid command patterns
+        assert!(validate_command_pattern("npm install").is_ok());
+        assert!(validate_command_pattern("ls -la").is_ok());
+        assert!(validate_command_pattern("npm *").is_ok());
+        assert!(validate_command_pattern("git status").is_ok());
+    }
+
+    #[test]
+    fn test_validate_command_pattern_dangerous() {
+        // Test dangerous patterns are rejected
+        assert!(validate_command_pattern("rm -rf /").is_err());
+        assert!(validate_command_pattern("ls > file.txt").is_err());
+        assert!(validate_command_pattern("cmd && rm file").is_err());
+        assert!(validate_command_pattern("$(malicious)").is_err());
+    }
+
+    #[test]
+    fn test_validate_command_pattern_too_broad() {
+        // Test overly broad patterns are rejected
+        assert!(validate_command_pattern("*").is_err());
+    }
+
+    #[test]
+    fn test_validate_command_pattern_empty() {
+        // Test empty patterns are rejected
+        assert!(validate_command_pattern("").is_err());
+        assert!(validate_command_pattern("   ").is_err());
     }
 }
