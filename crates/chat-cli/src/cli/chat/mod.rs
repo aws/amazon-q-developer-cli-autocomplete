@@ -648,7 +648,7 @@ impl ChatSession {
             )?;
         }
 
-        let (context, report) = match err {
+        let (context, report, display_err_message) = match err {
             ChatError::Interrupted { tool_uses: ref inter } => {
                 execute!(self.stderr, style::Print("\n\n"))?;
 
@@ -673,7 +673,7 @@ impl ChatSession {
                     _ => (),
                 }
 
-                ("Tool use was interrupted", Report::from(err))
+                ("Tool use was interrupted", Report::from(err), false)
             },
             ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
@@ -707,9 +707,10 @@ impl ChatSession {
                     (
                         "The context window has overflowed, summarizing the history...",
                         Report::from(err),
+                        true,
                     )
                 },
-                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err)),
+                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err), true),
                 ApiClientError::ModelOverloadedError { request_id, .. } => {
                     let err = format!(
                         "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again.{}\n\n",
@@ -719,7 +720,7 @@ impl ChatSession {
                         }
                     );
                     self.conversation.append_transcript(err.clone());
-                    ("Amazon Q is having trouble responding right now", eyre!(err))
+                    ("Amazon Q is having trouble responding right now", eyre!(err), true)
                 },
                 ApiClientError::MonthlyLimitReached { .. } => {
                     let subscription_status = get_subscription_status(os).await;
@@ -776,30 +777,40 @@ impl ChatSession {
 
                     return Ok(());
                 },
-                _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
+                _ => (
+                    "Amazon Q is having trouble responding right now",
+                    Report::from(err),
+                    true,
+                ),
             },
-            _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
+            _ => (
+                "Amazon Q is having trouble responding right now",
+                Report::from(err),
+                true,
+            ),
         };
 
-        // Remove non-ASCII and ANSI characters.
-        let re = Regex::new(r"((\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])|([^\x00-\x7F]+)").unwrap();
+        if display_err_message {
+            // Remove non-ASCII and ANSI characters.
+            let re = Regex::new(r"((\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])|([^\x00-\x7F]+)").unwrap();
 
-        queue!(
-            self.stderr,
-            style::SetAttribute(Attribute::Bold),
-            style::SetForegroundColor(Color::Red),
-        )?;
+            queue!(
+                self.stderr,
+                style::SetAttribute(Attribute::Bold),
+                style::SetForegroundColor(Color::Red),
+            )?;
 
-        let text = re.replace_all(&format!("{}: {:?}\n", context, report), "").into_owned();
+            let text = re.replace_all(&format!("{}: {:?}\n", context, report), "").into_owned();
 
-        queue!(self.stderr, style::Print(&text),)?;
-        self.conversation.append_transcript(text);
+            queue!(self.stderr, style::Print(&text),)?;
+            self.conversation.append_transcript(text);
 
-        execute!(
-            self.stderr,
-            style::SetAttribute(Attribute::Reset),
-            style::SetForegroundColor(Color::Reset),
-        )?;
+            execute!(
+                self.stderr,
+                style::SetAttribute(Attribute::Reset),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        }
 
         self.conversation.enforce_conversation_invariants();
         self.conversation.reset_next_user_message();
