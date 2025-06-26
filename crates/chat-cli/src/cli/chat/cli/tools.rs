@@ -281,7 +281,7 @@ impl ToolsSubcommand {
                 queue!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
-                    style::Print("\nReset all tools to the default permission levels."),
+                    style::Print("Reset all tools to the default permission levels.\n"),
                     style::SetForegroundColor(Color::Reset),
                 )?;
             },
