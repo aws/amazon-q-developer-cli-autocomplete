@@ -1403,6 +1403,16 @@ impl ChatSession {
             self.tool_use_status = ToolUseStatus::Idle;
 
             if self.pending_tool_index.is_some() {
+                // If the user just enters "n", replace the message we send to the model with
+                // something more substantial.
+                // TODO: Update this flow to something that does *not* require two requests just to
+                // get a meaningful response from the user - this is a short term solution before
+                // we decide on a better flow.
+                let user_input = if ["n", "N"].contains(&user_input.trim()) {
+                    "I deny this tool request. Ask a follow up question clarifying the expected action".to_string()
+                } else {
+                    user_input
+                };
                 self.conversation.abandon_tool_use(&self.tool_uses, user_input);
             } else {
                 self.conversation.set_next_user_message(user_input).await;
@@ -1787,7 +1797,7 @@ impl ChatSession {
                 match interpret_markdown(input, &mut self.stdout, &mut state) {
                     Ok(parsed) => {
                         offset += parsed.offset_from(&input);
-                        self.stderr.flush()?;
+                        self.stdout.flush()?;
                         state.newline = state.set_newline;
                         state.set_newline = false;
                     },
@@ -1825,11 +1835,11 @@ impl ChatSession {
                 }
 
                 queue!(self.stderr, style::ResetColor, style::SetAttribute(Attribute::Reset))?;
-                execute!(self.stderr, style::Print("\n"))?;
+                execute!(self.stdout, style::Print("\n"))?;
 
                 for (i, citation) in &state.citations {
                     queue!(
-                        self.stderr,
+                        self.stdout,
                         style::Print("\n"),
                         style::SetForegroundColor(Color::Blue),
                         style::Print(format!("[^{i}]: ")),
