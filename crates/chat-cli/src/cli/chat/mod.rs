@@ -128,7 +128,10 @@ use crate::cli::chat::cli::prompts::{
 use crate::database::settings::Setting;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
-use crate::telemetry::core::ToolUseEventBuilder;
+use crate::telemetry::core::{
+    ChatAddedMessage,
+    ToolUseEventBuilder,
+};
 use crate::telemetry::{
     ReasonCode,
     TelemetryResult,
@@ -1048,12 +1051,15 @@ impl ChatSession {
         };
 
         let request_id = response.request_id().map(|s| s.to_string());
-        let summary = {
+        let (summary, request_metadata) = {
             let mut parser = ResponseParser::new(response);
             loop {
                 match parser.recv().await {
-                    Ok(parser::ResponseEvent::EndStream { message }) => {
-                        break message.content().to_string();
+                    Ok(parser::ResponseEvent::EndStream {
+                        message,
+                        request_metadata,
+                    }) => {
+                        break (message.content().to_string(), request_metadata);
                     },
                     Ok(_) => (),
                     Err(err) => {
@@ -1061,15 +1067,16 @@ impl ChatSession {
                             self.failed_request_ids.push(request_id.clone());
                         };
                         let (reason, reason_desc) = get_error_reason(&err);
-                        self.send_chat_telemetry(
-                            os,
-                            err.request_id.clone(),
-                            TelemetryResult::Failed,
-                            Some(reason),
-                            Some(reason_desc),
-                            err.status_code(),
-                        )
-                        .await;
+                        // TODO(telem)
+                        // self.send_chat_telemetry(
+                        //     os,
+                        //     err.request_id.clone(),
+                        //     TelemetryResult::Failed,
+                        //     Some(reason),
+                        //     Some(reason_desc),
+                        //     err.status_code(),
+                        // )
+                        // .await;
                         return Err(err.into());
                     },
                 }
@@ -1086,6 +1093,8 @@ impl ChatSession {
             )?;
         }
 
+        // TODO(telem)
+        // maybe move this? fine for now
         self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
             .await;
 
@@ -1659,7 +1668,7 @@ impl ChatSession {
                             tool_uses.push(tool_use);
                             tool_name_being_recvd = None;
                         },
-                        parser::ResponseEvent::EndStream { message } => {
+                        parser::ResponseEvent::EndStream { message, .. } => {
                             // This log is attempting to help debug instances where users encounter
                             // the response timeout message.
                             if message.content() == RESPONSE_TIMEOUT_CONTENT {
@@ -1803,9 +1812,6 @@ impl ChatSession {
             }
 
             if ended {
-                self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
-                    .await;
-
                 if os
                     .database
                     .settings
@@ -1840,6 +1846,11 @@ impl ChatSession {
         } else {
             self.tool_uses.clear();
             self.pending_tool_index = None;
+
+            // TODO(telem) send recordUserTurnCompletion
+            // self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
+            //     .await;
+            // self.send_record_user_turn_completion();
 
             Ok(ChatState::PromptUser {
                 skip_printing_tools: false,
@@ -1925,6 +1936,16 @@ impl ChatSession {
                     }
                 }
             }
+            // TODO(telem)
+            // self.send_chat_telemetry(
+            //     os,
+            //     err.request_id.clone(),
+            //     TelemetryResult::Failed,
+            //     Some(reason),
+            //     Some(reason_desc),
+            //     err.status_code(),
+            // )
+            // .await;
             self.conversation.add_tool_results(tool_results);
             self.send_tool_use_telemetry(os).await;
             if let ToolUseStatus::Idle = self.tool_use_status {
@@ -2097,6 +2118,15 @@ impl ChatSession {
         Ok(())
     }
 
+    /// Sends an "codewhispererterminal_addChatMessage" telemetry event.
+    ///
+    /// This *MUST* be called in the following cases:
+    /// 1. After the end of a user turn
+    /// 2. After tool use execution has completed
+    /// 3. After an error was encountered during the handling of the response or tool use execution
+    ///
+    /// Note: whether or not to send telemetry should be derived from the chat history rather than
+    /// having to be manually invoked, although that would require more substantial changes.
     #[allow(clippy::too_many_arguments)]
     async fn send_chat_telemetry(
         &self,
@@ -2107,18 +2137,23 @@ impl ChatSession {
         reason_desc: Option<String>,
         status_code: Option<u16>,
     ) {
+        let data = ChatAddedMessage {
+            request_id,
+            message_id: self.conversation.message_id().map(|s| s.to_owned()),
+            context_file_length: self.conversation.context_message_length(),
+            model: self.conversation.model.clone(),
+            reason,
+            reason_desc,
+            status_code,
+            time_to_first_chunk_ms: self.conversation.metadata(),
+            ..Default::default()
+        };
         os.telemetry
             .send_chat_added_message(
                 &os.database,
                 self.conversation.conversation_id().to_owned(),
-                self.conversation.message_id().map(|s| s.to_owned()),
-                request_id,
-                self.conversation.context_message_length(),
                 result,
-                reason,
-                reason_desc,
-                status_code,
-                self.conversation.model.clone(),
+                data,
             )
             .await
             .ok();

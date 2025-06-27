@@ -35,6 +35,8 @@ use crate::telemetry::definitions::types::{
     CodewhispererterminalUtteranceId,
 };
 
+use super::definitions::types::CodewhispererterminalChatConversationType;
+
 /// A serializable telemetry event that can be sent or queued.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,15 +129,24 @@ impl Event {
             ),
             EventType::ChatAddedMessage {
                 conversation_id,
-                context_file_length,
-                message_id,
-                request_id,
                 result,
-                reason,
-                reason_desc,
-                status_code,
-                model,
-                ..
+                data:
+                    ChatAddedMessage {
+                        context_file_length,
+                        message_id,
+                        request_id,
+                        reason,
+                        reason_desc,
+                        status_code,
+                        model,
+                        time_to_first_chunk_ms,
+                        time_between_chunks_ms,
+                        chat_conversation_type,
+                        tool_name,
+                        tool_use_id,
+                        assistant_response_length,
+                        ..
+                    },
             } => Some(
                 CodewhispererterminalAddChatMessage {
                     create_time: self.created_time,
@@ -152,6 +163,12 @@ impl Event {
                     reason_desc: reason_desc.map(Into::into),
                     status_code: status_code.map(|v| v as i64).map(Into::into),
                     codewhispererterminal_model: model.map(Into::into),
+                    codewhispererterminal_time_to_first_chunk_ms: time_to_first_chunk_ms.map(Into::into),
+                    codewhispererterminal_time_between_chunks_ms: time_between_chunks_ms.map(Into::into),
+                    codewhispererterminal_chat_conversation_type: chat_conversation_type.map(Into::into),
+                    codewhispererterminal_tool_name: tool_name.map(Into::into),
+                    codewhispererterminal_tool_use_id: tool_use_id.map(Into::into),
+                    codewhispererterminal_assistant_response_length: assistant_response_length.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -190,6 +207,9 @@ impl Event {
                     codewhispererterminal_custom_tool_latency: custom_tool_call_latency
                         .map(|l| CodewhispererterminalCustomToolLatency(l as i64)),
                     codewhispererterminal_model: model.map(Into::into),
+                    codewhispererterminal_is_tool_use_trusted: todo!(),
+                    codewhispererterminal_tool_execution_duration_ms: todo!(),
+                    codewhispererterminal_tool_turn_duration_ms: todo!(),
                 }
                 .into_metric_datum(),
             ),
@@ -273,6 +293,39 @@ impl Event {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, EnumString, Display, serde::Serialize, serde::Deserialize)]
+pub enum ChatConversationType {
+    EndTurn,
+    ToolUse,
+}
+
+impl From<CodewhispererterminalChatConversationType> for ChatConversationType {
+    fn from(value: CodewhispererterminalChatConversationType) -> Self {
+        match value {
+            CodewhispererterminalChatConversationType::EndTurn => Self::EndTurn,
+            CodewhispererterminalChatConversationType::ToolUse => Self::ToolUse,
+        }
+    }
+}
+
+/// Optional fields to add for a chatAddedMessage telemetry event.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, Default)]
+pub struct ChatAddedMessage {
+    pub message_id: Option<String>,
+    pub request_id: Option<String>,
+    pub context_file_length: Option<usize>,
+    pub reason: Option<String>,
+    pub reason_desc: Option<String>,
+    pub status_code: Option<u16>,
+    pub model: Option<String>,
+    pub time_to_first_chunk_ms: Option<i64>,
+    pub time_between_chunks_ms: Option<String>,
+    pub chat_conversation_type: Option<ChatConversationType>,
+    pub tool_name: Option<String>,
+    pub tool_use_id: Option<String>,
+    pub assistant_response_length: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "type")]
@@ -297,14 +350,8 @@ pub enum EventType {
     },
     ChatAddedMessage {
         conversation_id: String,
-        message_id: Option<String>,
-        request_id: Option<String>,
-        context_file_length: Option<usize>,
         result: TelemetryResult,
-        reason: Option<String>,
-        reason_desc: Option<String>,
-        status_code: Option<u16>,
-        model: Option<String>,
+        data: ChatAddedMessage,
     },
     ToolUseSuggested {
         conversation_id: String,

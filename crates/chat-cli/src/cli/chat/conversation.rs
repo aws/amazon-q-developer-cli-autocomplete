@@ -262,7 +262,12 @@ impl ConversationState {
     }
 
     /// Sets the response message according to the currently set [Self::next_message].
-    pub fn push_assistant_message(&mut self, os: &mut Os, message: AssistantMessage) {
+    pub fn push_assistant_message(
+        &mut self,
+        os: &mut Os,
+        message: AssistantMessage,
+        request_metadata: Option<RequestMetadata>,
+    ) {
         debug_assert!(self.next_message.is_some(), "next_message should exist");
         let next_user_message = self.next_message.take().expect("next user message should exist");
 
@@ -642,7 +647,7 @@ impl ConversationState {
         })
     }
 
-    pub fn replace_history_with_summary(&mut self, summary: String) {
+    pub fn replace_history_with_summary(&mut self, summary: String, summary_request_md: RequestMetadata) {
         self.history.drain(..(self.history.len().saturating_sub(1)));
         self.latest_summary = Some(summary);
         // If the last message contains tool results, then we add the results to the content field
