@@ -170,7 +170,7 @@ pub struct ChatArgs {
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
     /// Whether the command should run without expecting user input
-    #[arg(long)]
+    #[arg(long, alias = "no-interactive")]
     pub non_interactive: bool,
     /// The first question to ask
     pub input: Option<String>,
@@ -179,7 +179,7 @@ pub struct ChatArgs {
 impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
         if self.non_interactive && self.input.is_none() {
-            bail!("Input must be supplied when --non-interactive is set");
+            bail!("Input must be supplied when running in non-interactive mode");
         }
 
         let stdout = std::io::stdout();
@@ -353,11 +353,9 @@ const ROTATING_TIPS: [&str; 16] = [
 
 const GREETING_BREAK_POINT: usize = 80;
 
-const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>
-<green!>ctrl + j</green!> new lines  <em>•</em>  
-<green!>ctrl + s</green!> fuzzy search  <em>•</em>  
-<green!>ctrl + f</green!> accept completion
-</black!>"};
+const POPULAR_SHORTCUTS: &str = color_print::cstr! {
+"<black!><green!>/help</green!> all commands                      <em>•</em>  <green!>ctrl + j</green!> new lines
+<green!>ctrl + s</green!> fuzzy search                   <em>•</em>  <green!>ctrl + f</green!> accept completion</black!>"};
 const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands
 <green!>ctrl + j</green!> new lines
 <green!>ctrl + s</green!> fuzzy search
@@ -650,7 +648,7 @@ impl ChatSession {
             )?;
         }
 
-        let (context, report) = match err {
+        let (context, report, display_err_message) = match err {
             ChatError::Interrupted { tool_uses: ref inter } => {
                 execute!(self.stderr, style::Print("\n\n"))?;
 
@@ -675,7 +673,7 @@ impl ChatSession {
                     _ => (),
                 }
 
-                ("Tool use was interrupted", Report::from(err))
+                ("Tool use was interrupted", Report::from(err), false)
             },
             ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
@@ -709,9 +707,10 @@ impl ChatSession {
                     (
                         "The context window has overflowed, summarizing the history...",
                         Report::from(err),
+                        true,
                     )
                 },
-                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err)),
+                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err), true),
                 ApiClientError::ModelOverloadedError { request_id, .. } => {
                     let err = format!(
                         "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again.{}\n\n",
@@ -721,7 +720,7 @@ impl ChatSession {
                         }
                     );
                     self.conversation.append_transcript(err.clone());
-                    ("Amazon Q is having trouble responding right now", eyre!(err))
+                    ("Amazon Q is having trouble responding right now", eyre!(err), true)
                 },
                 ApiClientError::MonthlyLimitReached { .. } => {
                     let subscription_status = get_subscription_status(os).await;
@@ -778,33 +777,44 @@ impl ChatSession {
 
                     return Ok(());
                 },
-                _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
+                _ => (
+                    "Amazon Q is having trouble responding right now",
+                    Report::from(err),
+                    true,
+                ),
             },
-            _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
+            _ => (
+                "Amazon Q is having trouble responding right now",
+                Report::from(err),
+                true,
+            ),
         };
 
-        // Remove non-ASCII and ANSI characters.
-        let re = Regex::new(r"((\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])|([^\x00-\x7F]+)").unwrap();
+        if display_err_message {
+            // Remove non-ASCII and ANSI characters.
+            let re = Regex::new(r"((\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])|([^\x00-\x7F]+)").unwrap();
 
-        queue!(
-            self.stderr,
-            style::SetAttribute(Attribute::Bold),
-            style::SetForegroundColor(Color::Red),
-        )?;
+            queue!(
+                self.stderr,
+                style::SetAttribute(Attribute::Bold),
+                style::SetForegroundColor(Color::Red),
+            )?;
 
-        let text = re.replace_all(&format!("{}: {:?}\n", context, report), "").into_owned();
+            let text = re.replace_all(&format!("{}: {:?}\n", context, report), "").into_owned();
 
-        queue!(self.stderr, style::Print(&text),)?;
-        self.conversation.append_transcript(text);
+            queue!(self.stderr, style::Print(&text),)?;
+            self.conversation.append_transcript(text);
 
-        execute!(
-            self.stderr,
-            style::SetAttribute(Attribute::Reset),
-            style::SetForegroundColor(Color::Reset),
-        )?;
+            execute!(
+                self.stderr,
+                style::SetAttribute(Attribute::Reset),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        }
 
         self.conversation.enforce_conversation_invariants();
         self.conversation.reset_next_user_message();
+        self.pending_tool_index = None;
 
         self.inner = Some(ChatState::PromptUser {
             skip_printing_tools: false,
@@ -874,7 +884,6 @@ impl Default for ChatState {
 impl ChatSession {
     async fn spawn(&mut self, os: &mut Os) -> Result<()> {
         let is_small_screen = self.terminal_width() < GREETING_BREAK_POINT;
-        let mut interactive_text: Vec<u8> = Vec::new();
         if os
             .database
             .settings
@@ -889,20 +898,20 @@ impl ChatSession {
                 },
             };
 
-            execute!(interactive_text, style::Print(welcome_text), style::Print("\n\n"),)?;
+            execute!(self.stderr, style::Print(welcome_text), style::Print("\n\n"),)?;
 
             let tip = ROTATING_TIPS[usize::try_from(rand::random::<u32>()).unwrap_or(0) % ROTATING_TIPS.len()];
             if is_small_screen {
                 // If the screen is small, print the tip in a single line
                 execute!(
-                    interactive_text,
+                    self.stderr,
                     style::Print("💡 ".to_string()),
                     style::Print(tip),
                     style::Print("\n")
                 )?;
             } else {
                 draw_box(
-                    &mut interactive_text,
+                    &mut self.stderr,
                     "Did you know?",
                     tip,
                     GREETING_BREAK_POINT,
@@ -911,7 +920,7 @@ impl ChatSession {
             }
 
             execute!(
-                interactive_text,
+                self.stderr,
                 style::Print("\n"),
                 style::Print(match is_small_screen {
                     true => SMALL_SCREEN_POPULAR_SHORTCUTS,
@@ -924,38 +933,30 @@ impl ChatSession {
                         .dark_grey()
                 )
             )?;
-            execute!(
-                interactive_text,
-                style::Print("\n"),
-                style::SetForegroundColor(Color::Reset)
-            )?;
+            execute!(self.stderr, style::Print("\n"), style::SetForegroundColor(Color::Reset))?;
         }
 
         if self.all_tools_trusted() {
             queue!(
-                interactive_text,
+                self.stderr,
                 style::Print(format!(
                     "{}{TRUST_ALL_TEXT}\n\n",
                     if !is_small_screen { "\n" } else { "" }
                 ))
             )?;
         }
+        self.stderr.flush()?;
 
         if let Some(ref id) = self.conversation.model {
             if let Some(model_option) = MODEL_OPTIONS.iter().find(|option| option.model_id == *id) {
                 execute!(
-                    interactive_text,
+                    self.stderr,
                     style::SetForegroundColor(Color::Cyan),
                     style::Print(format!("🤖 You are chatting with {}\n", model_option.name)),
                     style::SetForegroundColor(Color::Reset),
                     style::Print("\n")
                 )?;
             }
-        }
-
-        if self.interactive {
-            self.stderr.write_all(&interactive_text)?;
-            self.stderr.flush()?;
         }
 
         if let Some(user_input) = self.initial_input.take() {
@@ -1262,8 +1263,8 @@ impl ChatSession {
             }
         }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
-            // Knowing the first argument is required for error handling.
-            let first_arg = args.first().cloned();
+            // Required for printing errors correctly.
+            let orig_args = args.clone();
 
             // We set the binary name as a dummy name "slash_command" which we
             // replace anytime we error out and print a usage statement.
@@ -1282,7 +1283,7 @@ impl ChatSession {
                             queue!(
                                 self.stderr,
                                 style::SetForegroundColor(Color::Red),
-                                style::Print(format!("Failed to execute command: {}\n", err)),
+                                style::Print(format!("\nFailed to execute command: {}\n", err)),
                                 style::SetForegroundColor(Color::Reset)
                             )?;
                         },
@@ -1305,20 +1306,19 @@ impl ChatSession {
 
                     // Print the subcommand help, if available. Required since by default we won't
                     // show what the actual arguments are, requiring an unnecessary --help call.
-                    if let (
-                        clap::error::ErrorKind::InvalidValue
-                        | clap::error::ErrorKind::UnknownArgument
-                        | clap::error::ErrorKind::InvalidSubcommand
-                        | clap::error::ErrorKind::MissingRequiredArgument,
-                        Some(first_arg),
-                    ) = (err.kind(), first_arg)
+                    if let clap::error::ErrorKind::InvalidValue
+                    | clap::error::ErrorKind::UnknownArgument
+                    | clap::error::ErrorKind::InvalidSubcommand
+                    | clap::error::ErrorKind::MissingRequiredArgument = err.kind()
                     {
                         let mut cmd = SlashCommand::command();
-                        let help = if let Some(subcmd) = cmd.find_subcommand_mut(first_arg) {
-                            subcmd.to_owned().help_template("{all-args}").render_help()
-                        } else {
-                            cmd.help_template("{all-args}").render_help()
-                        };
+                        for arg in &orig_args {
+                            match cmd.find_subcommand(arg) {
+                                Some(subcmd) => cmd = subcmd.clone(),
+                                None => break,
+                            }
+                        }
+                        let help = cmd.help_template("{all-args}").render_help();
                         writeln!(self.stderr, "{}", help.ansi())?;
                     }
                 },
@@ -1369,7 +1369,7 @@ impl ChatSession {
                     queue!(
                         self.stderr,
                         style::SetForegroundColor(Color::Red),
-                        style::Print(format!("Failed to execute command: {}\n", e)),
+                        style::Print(format!("\nFailed to execute command: {}\n", e)),
                         style::SetForegroundColor(Color::Reset)
                     )?;
                 },

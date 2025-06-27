@@ -48,15 +48,15 @@ pub enum GetPromptError {
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Args)]
-#[command(
-    before_long_help = "Prompts are reusable templates that help you quickly access common workflows and tasks. 
+#[command(color = clap::ColorChoice::Always,
+    before_long_help = color_print::cstr!{"Prompts are reusable templates that help you quickly access common workflows and tasks. 
 These templates are provided by the mcp servers you have installed and configured.
 
 To actually retrieve a prompt, directly start with the following command (without prepending /prompt get):
-  <em>@<<prompt name>> [arg]</em>                                   <black!>Retrieve prompt specified</black!>
+  <em>@<<prompt name>> [arg]</em>                             <black!>Retrieve prompt specified</black!>
 Or if you prefer the long way:
-  <em>/prompts get <<prompt name>> [arg]</em>                       <black!>Retrieve prompt specified</black!>"
-)]
+  <em>/prompts get <<prompt name>> [arg]</em>                 <black!>Retrieve prompt specified</black!>"
+})]
 pub struct PromptsArgs {
     #[command(subcommand)]
     subcommand: Option<PromptsSubcommand>,

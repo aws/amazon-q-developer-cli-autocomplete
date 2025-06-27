@@ -716,7 +716,7 @@ impl HooksSubcommand {
 }
 
 /// Prints hook configuration grouped by trigger: conversation session start or per user message
-fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, trigger: HookTrigger) -> Result<()> {
+pub fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, trigger: HookTrigger) -> Result<()> {
     let section = match trigger {
         HookTrigger::ConversationStart => "On Session Start",
         HookTrigger::PerPrompt => "Per User Message",
@@ -754,7 +754,7 @@ fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, tr
     Ok(())
 }
 
-fn map_chat_error(e: ErrReport) -> ChatError {
+pub fn map_chat_error(e: ErrReport) -> ChatError {
     ChatError::Custom(e.to_string().into())
 }
 

@@ -209,9 +209,9 @@ impl ToolsSubcommand {
                         session.stderr,
                         style::SetForegroundColor(Color::Green),
                         if valid_tools.len() > 1 {
-                            style::Print(format!("\nTools '{}' are ", valid_tools.join("', '")))
+                            style::Print(format!("Tools '{}' are ", valid_tools.join("', '")))
                         } else {
-                            style::Print(format!("\nTool '{}' is ", valid_tools[0]))
+                            style::Print(format!("Tool '{}' is ", valid_tools[0]))
                         },
                         style::Print("now trusted. I will "),
                         style::SetAttribute(Attribute::Bold),
@@ -226,6 +226,7 @@ impl ToolsSubcommand {
                                 "this tool"
                             }
                         )),
+                        style::Print("\n"),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 }
@@ -256,11 +257,11 @@ impl ToolsSubcommand {
                         session.stderr,
                         style::SetForegroundColor(Color::Green),
                         if valid_tools.len() > 1 {
-                            style::Print(format!("\nTools '{}' are ", valid_tools.join("', '")))
+                            style::Print(format!("Tools '{}' are ", valid_tools.join("', '")))
                         } else {
-                            style::Print(format!("\nTool '{}' is ", valid_tools[0]))
+                            style::Print(format!("Tool '{}' is ", valid_tools[0]))
                         },
-                        style::Print("set to per-request confirmation."),
+                        style::Print("set to per-request confirmation.\n"),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 }
@@ -274,14 +275,14 @@ impl ToolsSubcommand {
                     .for_each(|FigTool::ToolSpecification(spec)| {
                         session.tool_permissions.trust_tool(spec.name.as_str());
                     });
-                queue!(session.stderr, style::Print(TRUST_ALL_TEXT),)?;
+                queue!(session.stderr, style::Print(TRUST_ALL_TEXT), style::Print("\n"))?;
             },
             Self::Reset => {
                 session.tool_permissions.reset();
                 queue!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
-                    style::Print("\nReset all tools to the default permission levels."),
+                    style::Print("Reset all tools to the default permission levels.\n"),
                     style::SetForegroundColor(Color::Reset),
                 )?;
             },
@@ -291,7 +292,7 @@ impl ToolsSubcommand {
                     queue!(
                         session.stderr,
                         style::SetForegroundColor(Color::Green),
-                        style::Print(format!("\nReset tool '{}' to the default permission level.", tool_name)),
+                        style::Print(format!("Reset tool '{}' to the default permission level.\n", tool_name)),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 } else {
@@ -299,7 +300,7 @@ impl ToolsSubcommand {
                         session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!(
-                            "\nTool '{}' does not exist or is already in default settings.",
+                            "Tool '{}' does not exist or is already in default settings.\n",
                             tool_name
                         )),
                         style::SetForegroundColor(Color::Reset),

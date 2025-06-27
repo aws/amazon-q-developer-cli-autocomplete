@@ -434,7 +434,7 @@ mod test {
     #[test]
     fn test_chat_with_no_interactive_and_resume() {
         assert_parse!(
-            ["chat", "--non-interactive", "--resume"],
+            ["chat", "--no-interactive", "--resume"],
             RootSubcommand::Chat(ChatArgs {
                 resume: true,
                 input: None,
