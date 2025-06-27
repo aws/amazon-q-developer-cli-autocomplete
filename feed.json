@@ -12,6 +12,42 @@
     },
     {
       "type": "release",
+      "date": "2025-06-27",
+      "version": "1.12.2",
+      "title": "Version 1.12.2",
+      "changes": [
+        {
+          "type": "added",
+          "description": "(Beta) The `/knowledge` command in `q chat`, a knowledge base with semantic search capabilities. Enable it with `q settings chat.enableKnowledge true` - [#101](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/101)"
+        },
+        {
+          "type": "added",
+          "description": "Autocompletion with ghost text in `q chat` - [#288](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/288)"
+        },
+        {
+          "type": "added",
+          "description": "A purpose tag for the `fs_write` tool that summarizes the change being made - [#279](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/279)"
+        },
+        {
+          "type": "changed",
+          "description": "The `/context hooks` slash command to `/hooks` in `q chat` - [#223](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/223)"
+        },
+        {
+          "type": "fixed",
+          "description": "`--trust-tools` to work with MCP tools in `q chat` - [#206](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/206)"
+        },
+        {
+          "type": "fixed",
+          "description": "Formatting for error messages on prompt retrieval from MCP servers - [#216](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/216)"
+        },
+        {
+          "type": "fixed",
+          "description": "File name extension inconsistency with `/save` and `/load` in `q chat` - [#289](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/289)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-06-17",
       "version": "1.12.1",
       "title": "Version 1.12.1",
