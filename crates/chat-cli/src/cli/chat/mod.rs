@@ -1403,6 +1403,13 @@ impl ChatSession {
             self.tool_use_status = ToolUseStatus::Idle;
 
             if self.pending_tool_index.is_some() {
+                // If the user just enters "n", replace the message we send to the model with
+                // something more substantial.
+                let user_input = if ["n", "N"].contains(&user_input.trim()) {
+                    "I deny this tool request. Ask a follow up question clarifying the expected action".to_string()
+                } else {
+                    user_input
+                };
                 self.conversation.abandon_tool_use(&self.tool_uses, user_input);
             } else {
                 self.conversation.set_next_user_message(user_input).await;
