@@ -775,7 +775,7 @@ impl Drop for ChatSession {
 /// tool validation, execution, response stream handling, etc.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
-enum ChatState {
+pub enum ChatState {
     /// Prompt the user with `tool_uses`, if available.
     PromptUser {
         /// Used to avoid displaying the tool info at inappropriate times, e.g. after clear or help
