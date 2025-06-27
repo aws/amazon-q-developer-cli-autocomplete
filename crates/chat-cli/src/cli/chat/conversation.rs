@@ -117,7 +117,7 @@ impl ConversationState {
         };
         
         // Remove any potentially problematic characters
-        return truncated.replace(|c: char| c.is_control() && c != '\n' && c != '\r' && c != '\t', "")
+        return truncated.replace(|c: char| c.is_control() && c != '\n' && c != '\r' && c != '\t' && c != '$', "")
     }
     pub async fn new(
         os: &mut Os,
