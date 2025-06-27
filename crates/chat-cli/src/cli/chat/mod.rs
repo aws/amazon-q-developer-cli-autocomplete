@@ -825,7 +825,7 @@ impl ChatSession {
 }
 
 impl Drop for ChatSession {
-    fn drop(&mut self) {
+    fn drop(&mut self) {        
         if let Some(spinner) = &mut self.spinner {
             spinner.stop();
         }
@@ -1167,7 +1167,7 @@ impl ChatSession {
     }
 
     /// Read input from the user.
-    async fn prompt_user(&mut self, os: &Os, skip_printing_tools: bool) -> Result<ChatState, ChatError> {
+    async fn prompt_user(&mut self, os: &Os, skip_printing_tools: bool) -> Result<ChatState, ChatError> {        
         execute!(self.stderr, cursor::Show)?;
 
         // Check token usage and display warnings if needed
