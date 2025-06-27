@@ -129,15 +129,15 @@ pub fn logs_dir() -> Result<PathBuf> {
     }
 }
 
-/// The directory to the directory containing global personas
-pub fn chat_global_persona_path(os: &Os) -> Result<PathBuf> {
-    Ok(home_dir(os)?.join(".aws").join("amazonq").join("personas"))
+/// The directory to the directory containing global agents
+pub fn chat_global_agent_path(os: &Os) -> Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("agents"))
 }
 
 /// The directory to the directory containing config for the `/context` feature in `q chat`.
-pub fn chat_local_persona_dir() -> Result<PathBuf> {
+pub fn chat_local_agent_dir() -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
-    Ok(cwd.join(".aws").join("amazonq").join("personas"))
+    Ok(cwd.join(".aws").join("amazonq").join("agents"))
 }
 
 /// The directory to the directory containing config for the `/context` feature in `q chat`.

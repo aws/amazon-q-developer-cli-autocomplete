@@ -266,7 +266,7 @@ pub fn select_command(_os: &Os, context_manager: &ContextManager, tools: &[Strin
                 },
                 Some(cmd @ CommandType::Profile(_)) if cmd.needs_profile_selection() => {
                     // For profile operations that need a profile name, show profile selector
-                    // As part of the persona implementation, we are disabling the ability to
+                    // As part of the agent implementation, we are disabling the ability to
                     // switch profile after a session has started.
                     // TODO: perhaps revive this after we have a decision on profile switching
                     Ok(Some(selected_command.clone()))

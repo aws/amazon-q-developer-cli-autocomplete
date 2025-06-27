@@ -28,7 +28,7 @@ use crate::cli::chat::{
 use crate::os::Os;
 use crate::util::directories::{
     self,
-    chat_global_persona_path,
+    chat_global_agent_path,
 };
 
 #[deny(missing_docs)]
@@ -216,8 +216,8 @@ impl ProfileSubcommand {
                     profiles.insert(profile_name.clone(), context_config);
                 }
 
-                let global_agent_path = directories::chat_global_persona_path(os).map_err(|e| {
-                    ChatError::Custom(format!("Failed to obtain global persona path for migration {e}").into())
+                let global_agent_path = directories::chat_global_agent_path(os).map_err(|e| {
+                    ChatError::Custom(format!("Failed to obtain global agent path for migration {e}").into())
                 })?;
                 let new_agents = profiles
                     .into_iter()
@@ -377,20 +377,20 @@ impl ProfileSubcommand {
                 session.stderr.flush()?;
             },
             Self::Rename { .. } | Self::Set { .. } | Self::Delete { .. } | Self::Create { .. } => {
-                // As part of the persona implementation, we are disabling the ability to
+                // As part of the agent implementation, we are disabling the ability to
                 // switch / create profile after a session has started.
                 // TODO: perhaps revive this after we have a decision on profile create /
                 // switch
-                let global_path = if let Ok(path) = chat_global_persona_path(os) {
-                    path.to_str().unwrap_or("default global persona path").to_string()
+                let global_path = if let Ok(path) = chat_global_agent_path(os) {
+                    path.to_str().unwrap_or("default global agent path").to_string()
                 } else {
-                    "default global persona path".to_string()
+                    "default global agent path".to_string()
                 };
                 execute!(
                     session.stderr,
                     style::SetForegroundColor(Color::Yellow),
                     style::Print(format!(
-                        "Persona / Profile persistence has been disabled. To persist any changes on persona / profile, use the default persona under {} as example",
+                        "Agent / Profile persistence has been disabled. To persist any changes on agent / profile, use the default agent under {} as example",
                         global_path
                     )),
                     style::SetAttribute(Attribute::Reset)

@@ -2467,7 +2467,7 @@ mod tests {
         assert_eq!(os.fs.read_to_string("/file3.txt").await.unwrap(), "Hello, world!\n");
         assert!(!os.fs.exists("/file4.txt"));
         assert_eq!(os.fs.read_to_string("/file5.txt").await.unwrap(), "Hello, world!\n");
-        // TODO: fix this with persona change (dingfeli)
+        // TODO: fix this with agent change (dingfeli)
         // assert!(!ctx.fs.exists("/file6.txt"));
     }
 

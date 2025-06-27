@@ -324,7 +324,7 @@ async fn get_mcp_server_configs(
     let mut results = Vec::new();
     let mut stderr = std::io::stderr();
     let agents = Agents::load(os, None, &mut stderr).await;
-    let global_path = directories::chat_global_persona_path(os)?;
+    let global_path = directories::chat_global_agent_path(os)?;
     for (_, agent) in agents.agents {
         let scope = if agent
             .path

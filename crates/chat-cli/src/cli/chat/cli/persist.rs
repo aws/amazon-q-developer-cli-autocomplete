@@ -76,7 +76,7 @@ impl PersistSubcommand {
             },
             Self::Load { path: _ } => {
                 // For profile operations that need a profile name, show profile selector
-                // As part of the persona implementation, we are disabling the ability to
+                // As part of the agent implementation, we are disabling the ability to
                 // switch profile after a session has started.
                 // TODO: perhaps revive this after we have a decision on profile switching
                 execute!(

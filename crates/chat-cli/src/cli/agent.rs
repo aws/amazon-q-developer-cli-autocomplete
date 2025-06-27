@@ -90,7 +90,7 @@ impl McpServerConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
-    /// Agent or persona names are derived from the file name. Thus they are skipped for
+    /// Agent names are derived from the file name. Thus they are skipped for
     /// serializing
     #[serde(skip)]
     pub name: String,
@@ -151,12 +151,12 @@ impl Agent {
     pub async fn get_agent_by_name(os: &Os, agent_name: &str) -> eyre::Result<(Agent, PathBuf)> {
         let config_path: Result<PathBuf, PathBuf> = 'config: {
             // local first, and then fall back to looking at global
-            let local_config_dir = directories::chat_local_persona_dir()?.join(agent_name);
+            let local_config_dir = directories::chat_local_agent_dir()?.join(agent_name);
             if os.fs.exists(&local_config_dir) {
                 break 'config Ok::<PathBuf, PathBuf>(local_config_dir);
             }
 
-            let global_config_dir = directories::chat_global_persona_path(os)?.join(format!("{agent_name}.json"));
+            let global_config_dir = directories::chat_global_agent_path(os)?.join(format!("{agent_name}.json"));
             if os.fs.exists(&global_config_dir) {
                 break 'config Ok(global_config_dir);
             }
@@ -241,41 +241,41 @@ impl Agents {
             .ok_or(eyre::eyre!("No agent with name {name} found"))
     }
 
-    /// Migrated from [reload_profiles] from context.rs. It loads the active persona from disk and
+    /// Migrated from [reload_profiles] from context.rs. It loads the active agent from disk and
     /// replaces its in-memory counterpart with it.
-    pub async fn reload_personas(&mut self, os: &Os, output: &mut impl Write) -> eyre::Result<()> {
+    pub async fn reload_agents(&mut self, os: &Os, output: &mut impl Write) -> eyre::Result<()> {
         let persona_name = self.get_active().map(|a| a.name.as_str());
         let mut new_self = Self::load(os, persona_name, output).await;
         std::mem::swap(self, &mut new_self);
         Ok(())
     }
 
-    pub fn list_personas(&self) -> eyre::Result<Vec<String>> {
+    pub fn list_agents(&self) -> eyre::Result<Vec<String>> {
         Ok(self.agents.keys().cloned().collect::<Vec<_>>())
     }
 
     /// Migrated from [create_profile] from context.rs, which was creating profiles under the
     /// global directory. We shall preserve this implicit behavior for now until further notice.
-    pub async fn create_persona(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
-        validate_persona_name(name)?;
+    pub async fn create_agent(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
+        validate_agent_name(name)?;
 
-        let persona_path = directories::chat_global_persona_path(os)?.join(format!("{name}.json"));
-        if persona_path.exists() {
-            return Err(eyre::eyre!("Persona '{}' already exists", name));
+        let agent_path = directories::chat_global_agent_path(os)?.join(format!("{name}.json"));
+        if agent_path.exists() {
+            return Err(eyre::eyre!("Agent '{}' already exists", name));
         }
 
         let agent = Agent {
             name: name.to_string(),
-            path: Some(persona_path.clone()),
+            path: Some(agent_path.clone()),
             ..Default::default()
         };
         let contents = serde_json::to_string_pretty(&agent)
             .map_err(|e| eyre::eyre!("Failed to serialize profile configuration: {}", e))?;
 
-        if let Some(parent) = persona_path.parent() {
+        if let Some(parent) = agent_path.parent() {
             os.fs.create_dir_all(parent).await?;
         }
-        os.fs.write(&persona_path, contents).await?;
+        os.fs.write(&agent_path, contents).await?;
 
         self.agents.insert(name.to_string(), agent);
 
@@ -284,20 +284,20 @@ impl Agents {
 
     /// Migrated from [delete_profile] from context.rs, which was deleting profiles under the
     /// global directory. We shall preserve this implicit behavior for now until further notice.
-    pub async fn delete_persona(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
+    pub async fn delete_agent(&mut self, os: &Os, name: &str) -> eyre::Result<()> {
         if name == self.active_idx.as_str() {
-            eyre::bail!("Cannot delete the active persona. Switch to another persona first");
+            eyre::bail!("Cannot delete the active agent. Switch to another agent first");
         }
 
         let to_delete = self
             .agents
             .get(name)
-            .ok_or(eyre::eyre!("Persona '{name}' does not exist"))?;
+            .ok_or(eyre::eyre!("Agent '{name}' does not exist"))?;
         match to_delete.path.as_ref() {
             Some(path) if path.exists() => {
                 os.fs.remove_file(path).await?;
             },
-            _ => eyre::bail!("Persona {name} does not have an associated path"),
+            _ => eyre::bail!("Agent {name} does not have an associated path"),
         }
 
         self.agents.remove(name);
@@ -312,7 +312,7 @@ impl Agents {
     /// existing context into agent.
     pub async fn load(os: &Os, agent_name: Option<&str>, output: &mut impl Write) -> Self {
         let mut local_agents = 'local: {
-            let Ok(path) = directories::chat_local_persona_dir() else {
+            let Ok(path) = directories::chat_local_agent_dir() else {
                 break 'local Vec::<Agent>::new();
             };
             let Ok(files) = tokio::fs::read_dir(path).await else {
@@ -322,7 +322,7 @@ impl Agents {
         };
 
         let mut global_agents = 'global: {
-            let Ok(path) = directories::chat_global_persona_path(os) else {
+            let Ok(path) = directories::chat_global_agent_path(os) else {
                 break 'global Vec::<Agent>::new();
             };
             let files = match tokio::fs::read_dir(&path).await {
@@ -330,7 +330,7 @@ impl Agents {
                 Err(e) => {
                     if matches!(e.kind(), io::ErrorKind::NotFound) {
                         if let Err(e) = os.fs.create_dir_all(&path).await {
-                            error!("Error creating global persona dir: {:?}", e);
+                            error!("Error creating global agent dir: {:?}", e);
                         }
                     }
                     break 'global Vec::<Agent>::new();
@@ -349,7 +349,7 @@ impl Agents {
                     style::SetForegroundColor(style::Color::Yellow),
                     style::Print("WARNING: "),
                     style::ResetColor,
-                    style::Print("Persona conflict for "),
+                    style::Print("Agent conflict for "),
                     style::SetForegroundColor(style::Color::Green),
                     style::Print(name),
                     style::ResetColor,
@@ -363,10 +363,10 @@ impl Agents {
 
         local_agents.append(&mut global_agents);
 
-        // Ensure that we always have a default persona under the global directory
+        // Ensure that we always have a default agent under the global directory
         if !local_agents.iter().any(|a| a.name == "default") {
             let default_agent = Agent {
-                path: directories::chat_global_persona_path(os)
+                path: directories::chat_global_agent_path(os)
                     .ok()
                     .map(|p| p.join("default.json")),
                 ..Default::default()
@@ -374,10 +374,10 @@ impl Agents {
 
             match serde_json::to_string_pretty(&default_agent) {
                 Ok(content) => {
-                    if let Ok(path) = directories::chat_global_persona_path(os) {
+                    if let Ok(path) = directories::chat_global_agent_path(os) {
                         let default_path = path.join("default.json");
                         if let Err(e) = tokio::fs::write(default_path, &content).await {
-                            error!("Error writing default persona to file: {:?}", e);
+                            error!("Error writing default agent to file: {:?}", e);
                         }
                     };
                 },
@@ -413,9 +413,9 @@ impl Agents {
                 let _ = queue!(
                     output,
                     style::Print(format!(
-                        "Current default persona is malformed: {e}\nAborting migration.\n"
+                        "Current default agent is malformed: {e}\nAborting migration.\n"
                     )),
-                    style::Print("Fix the default persona and try again")
+                    style::Print("Fix the default agent and try again")
                 );
             },
         }
@@ -498,7 +498,7 @@ async fn load_agents_from_entries(mut files: ReadDir) -> Vec<Agent> {
                 Ok(content) => content,
                 Err(e) => {
                     let file_path = file_path.to_string_lossy();
-                    tracing::error!("Error reading persona file {file_path}: {:?}", e);
+                    tracing::error!("Error reading agent file {file_path}: {:?}", e);
                     continue;
                 },
             };
@@ -509,7 +509,7 @@ async fn load_agents_from_entries(mut files: ReadDir) -> Vec<Agent> {
                 },
                 Err(e) => {
                     let file_path = file_path.to_string_lossy();
-                    tracing::error!("Error deserializing persona file {file_path}: {:?}", e);
+                    tracing::error!("Error deserializing agent file {file_path}: {:?}", e);
                     continue;
                 },
             };
@@ -518,24 +518,24 @@ async fn load_agents_from_entries(mut files: ReadDir) -> Vec<Agent> {
                 res.push(agent);
             } else {
                 let file_path = file_path.to_string_lossy();
-                tracing::error!("Unable to determine persona name from config file at {file_path}, skipping");
+                tracing::error!("Unable to determine agent name from config file at {file_path}, skipping");
             }
         }
     }
     res
 }
 
-fn validate_persona_name(name: &str) -> eyre::Result<()> {
+fn validate_agent_name(name: &str) -> eyre::Result<()> {
     // Check if name is empty
     if name.is_empty() {
-        eyre::bail!("Persona name cannot be empty");
+        eyre::bail!("Agent name cannot be empty");
     }
 
     // Check if name contains only allowed characters and starts with an alphanumeric character
     let re = Regex::new(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")?;
     if !re.is_match(name) {
         eyre::bail!(
-            "Persona name must start with an alphanumeric character and can only contain alphanumeric characters, hyphens, and underscores"
+            "Agent name must start with an alphanumeric character and can only contain alphanumeric characters, hyphens, and underscores"
         );
     }
 
@@ -749,7 +749,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_personas() {
+    async fn test_list_agents() {
         let mut collection = Agents::default();
 
         // Add two agents
@@ -763,109 +763,109 @@ mod tests {
         collection.agents.insert("default".to_string(), default_agent);
         collection.agents.insert("dev".to_string(), dev_agent);
 
-        let result = collection.list_personas();
+        let result = collection.list_agents();
         assert!(result.is_ok());
 
-        let personas = result.unwrap();
-        assert_eq!(personas.len(), 2);
-        assert!(personas.contains(&"default".to_string()));
-        assert!(personas.contains(&"dev".to_string()));
+        let agents = result.unwrap();
+        assert_eq!(agents.len(), 2);
+        assert!(agents.contains(&"default".to_string()));
+        assert!(agents.contains(&"dev".to_string()));
     }
 
     #[tokio::test]
-    async fn test_create_persona() {
+    async fn test_create_agent() {
         let mut collection = Agents::default();
         let ctx = Os::new().await.unwrap();
 
-        let persona_name = "test_persona";
-        let result = collection.create_persona(&ctx, persona_name).await;
+        let agent_name = "test_agent";
+        let result = collection.create_agent(&ctx, agent_name).await;
         assert!(result.is_ok());
-        let persona_path = directories::chat_global_persona_path(&ctx)
-            .expect("Error obtaining global persona path")
-            .join(format!("{persona_name}.json"));
-        assert!(persona_path.exists());
-        assert!(collection.agents.contains_key(persona_name));
+        let agent_path = directories::chat_global_agent_path(&ctx)
+            .expect("Error obtaining global agent path")
+            .join(format!("{agent_name}.json"));
+        assert!(agent_path.exists());
+        assert!(collection.agents.contains_key(agent_name));
 
-        // Test with creating a persona with the same name
-        let result = collection.create_persona(&ctx, persona_name).await;
+        // Test with creating a agent with the same name
+        let result = collection.create_agent(&ctx, agent_name).await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
-            format!("Persona '{persona_name}' already exists")
+            format!("agent '{agent_name}' already exists")
         );
 
-        // Test invalid persona names
-        let result = collection.create_persona(&ctx, "").await;
+        // Test invalid agent names
+        let result = collection.create_agent(&ctx, "").await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Persona name cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "agent name cannot be empty");
 
-        let result = collection.create_persona(&ctx, "123-invalid!").await;
+        let result = collection.create_agent(&ctx, "123-invalid!").await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_delete_persona() {
+    async fn test_delete_agent() {
         let mut collection = Agents::default();
         let ctx = Os::new().await.unwrap();
 
-        let persona_name_one = "test_persona_one";
+        let agent_name_one = "test_agent_one";
         collection
-            .create_persona(&ctx, persona_name_one)
+            .create_agent(&ctx, agent_name_one)
             .await
-            .expect("Failed to create persona");
-        let persona_name_two = "test_persona_two";
+            .expect("Failed to create agent");
+        let agent_name_two = "test_agent_two";
         collection
-            .create_persona(&ctx, persona_name_two)
+            .create_agent(&ctx, agent_name_two)
             .await
-            .expect("Failed to create persona");
+            .expect("Failed to create agent");
 
-        collection.switch(persona_name_one).expect("Failed to switch persona");
+        collection.switch(agent_name_one).expect("Failed to switch agent");
 
-        // Should not be able to delete active persona
+        // Should not be able to delete active agent
         let active = collection
             .get_active()
-            .expect("Failed to obtain active persona")
+            .expect("Failed to obtain active agent")
             .name
             .clone();
-        let result = collection.delete_persona(&ctx, &active).await;
+        let result = collection.delete_agent(&ctx, &active).await;
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
-            "Cannot delete the active persona. Switch to another persona first"
+            "Cannot delete the active agent. Switch to another agent first"
         );
 
-        // Should be able to delete inactive persona
-        let persona_two_path = collection
+        // Should be able to delete inactive agent
+        let agent_two_path = collection
             .agents
-            .get(persona_name_two)
-            .expect("Failed to obtain persona that's yet to be deleted")
+            .get(agent_name_two)
+            .expect("Failed to obtain agent that's yet to be deleted")
             .path
             .clone()
-            .expect("Persona should have path");
-        let result = collection.delete_persona(&ctx, persona_name_two).await;
+            .expect("agent should have path");
+        let result = collection.delete_agent(&ctx, agent_name_two).await;
         assert!(result.is_ok());
-        assert!(!collection.agents.contains_key(persona_name_two));
-        assert!(!persona_two_path.exists());
+        assert!(!collection.agents.contains_key(agent_name_two));
+        assert!(!agent_two_path.exists());
 
-        let result = collection.delete_persona(&ctx, "nonexistent").await;
+        let result = collection.delete_agent(&ctx, "nonexistent").await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "Persona 'nonexistent' does not exist");
+        assert_eq!(result.unwrap_err().to_string(), "agent 'nonexistent' does not exist");
     }
 
     #[test]
-    fn test_validate_persona_name() {
+    fn test_validate_agent_name() {
         // Valid names
-        assert!(validate_persona_name("valid").is_ok());
-        assert!(validate_persona_name("valid123").is_ok());
-        assert!(validate_persona_name("valid-name").is_ok());
-        assert!(validate_persona_name("valid_name").is_ok());
-        assert!(validate_persona_name("123valid").is_ok());
+        assert!(validate_agent_name("valid").is_ok());
+        assert!(validate_agent_name("valid123").is_ok());
+        assert!(validate_agent_name("valid-name").is_ok());
+        assert!(validate_agent_name("valid_name").is_ok());
+        assert!(validate_agent_name("123valid").is_ok());
 
         // Invalid names
-        assert!(validate_persona_name("").is_err());
-        assert!(validate_persona_name("-invalid").is_err());
-        assert!(validate_persona_name("_invalid").is_err());
-        assert!(validate_persona_name("invalid!").is_err());
-        assert!(validate_persona_name("invalid space").is_err());
+        assert!(validate_agent_name("").is_err());
+        assert!(validate_agent_name("-invalid").is_err());
+        assert!(validate_agent_name("_invalid").is_err());
+        assert!(validate_agent_name("invalid!").is_err());
+        assert!(validate_agent_name("invalid space").is_err());
     }
 }
