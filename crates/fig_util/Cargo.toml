@@ -37,7 +37,7 @@ whoami.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 appkit-nsworkspace-bindings.workspace = true
-core-foundation = "0.10.0"
+core-foundation = "0.10.1"
 macos-utils = { path = "../macos-utils" }
 objc2.workspace = true
 objc2-app-kit = { workspace = true, features = ["NSWorkspace"] }
