@@ -10,6 +10,11 @@ use crossterm::{
     style,
 };
 
+use crate::cli::chat::cli::hooks::{
+    HookTrigger,
+    map_chat_error,
+    print_hook_section,
+};
 use crate::cli::chat::consts::CONTEXT_FILES_MAX_SIZE;
 use crate::cli::chat::token_counter::TokenCounter;
 use crate::cli::chat::util::drop_matched_context_files;
@@ -28,7 +33,7 @@ The files matched by these rules provide Amazon Q with additional information
 about your project or environment. Adding relevant files helps Q generate 
 more accurate and helpful responses.
 
-Notes
+Notes:
 • You can add specific files or use glob patterns (e.g., \"*.py\", \"src/**/*.js\")
 • Profile rules apply only to the current profile
 • Global rules apply across all profiles
@@ -47,12 +52,15 @@ pub enum ContextSubcommand {
         /// Include even if matched files exceed size limits
         #[arg(short, long)]
         force: bool,
+        #[arg(required = true)]
         paths: Vec<String>,
     },
     /// Remove specified rules from current profile
     Remove { paths: Vec<String> },
     /// Remove all rules from current profile
     Clear,
+    #[command(hide = true)]
+    Hooks,
 }
 
 impl ContextSubcommand {
@@ -105,6 +113,28 @@ impl ContextSubcommand {
                         }
                         execute!(session.stderr, style::Print("\n"))?;
                     }
+                    execute!(session.stderr, style::Print("\n"))?;
+                }
+
+                if expand {
+                    execute!(
+                        session.stderr,
+                        style::SetAttribute(Attribute::Bold),
+                        style::SetForegroundColor(Color::DarkYellow),
+                        style::Print("    🔧 Hooks:\n")
+                    )?;
+                    print_hook_section(
+                        &mut session.stderr,
+                        &context_manager.profile_config.hooks,
+                        HookTrigger::ConversationStart,
+                    )
+                    .map_err(map_chat_error)?;
+                    print_hook_section(
+                        &mut session.stderr,
+                        &context_manager.profile_config.hooks,
+                        HookTrigger::PerPrompt,
+                    )
+                    .map_err(map_chat_error)?;
                     execute!(session.stderr, style::Print("\n"))?;
                 }
 
@@ -267,6 +297,18 @@ impl ContextSubcommand {
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
                     style::Print("\nCleared context\n\n"),
+                    style::SetForegroundColor(Color::Reset)
+                )?;
+            },
+            Self::Hooks => {
+                execute!(
+                    session.stderr,
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print("The /context hooks command is deprecated. Use "),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("/hooks"),
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print(" instead.\n\n"),
                     style::SetForegroundColor(Color::Reset)
                 )?;
             },

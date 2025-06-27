@@ -393,7 +393,7 @@ impl HookExecutor {
 commands will be appended to the prompt to Amazon Q. Hooks can be defined 
 in global or local profiles.
 
-Notes
+Notes:
 • Hooks are executed in parallel
 • 'conversation_start' hooks run on the first user prompt and are attached once to the conversation history sent to Amazon Q
 • 'per_prompt' hooks run on each user prompt and are attached to the prompt, but are not stored in conversation history"
@@ -440,7 +440,7 @@ impl HooksArgs {
             session.stderr,
             style::Print(format!(
                 "\nUse {} to manage hooks.\n\n",
-                "/context hooks help".to_string().dark_green()
+                "/hooks help".to_string().dark_green()
             )),
         )?;
 
@@ -613,12 +613,6 @@ impl HooksSubcommand {
                     style::SetAttribute(Attribute::Reset),
                 )?;
 
-                queue!(
-                    session.stderr,
-                    style::SetAttribute(Attribute::Bold),
-                    style::SetForegroundColor(Color::DarkYellow),
-                    style::Print("    🔧 Hooks:\n")
-                )?;
                 print_hook_section(
                     &mut session.stderr,
                     &context_manager.profile_config.hooks,
@@ -642,7 +636,7 @@ impl HooksSubcommand {
 }
 
 /// Prints hook configuration grouped by trigger: conversation session start or per user message
-fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, trigger: HookTrigger) -> Result<()> {
+pub fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, trigger: HookTrigger) -> Result<()> {
     let section = match trigger {
         HookTrigger::ConversationStart => "On Session Start",
         HookTrigger::PerPrompt => "Per User Message",
@@ -680,7 +674,7 @@ fn print_hook_section(output: &mut impl Write, hooks: &HashMap<String, Hook>, tr
     Ok(())
 }
 
-fn map_chat_error(e: ErrReport) -> ChatError {
+pub fn map_chat_error(e: ErrReport) -> ChatError {
     ChatError::Custom(e.to_string().into())
 }
 

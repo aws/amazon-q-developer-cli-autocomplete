@@ -178,9 +178,15 @@ pub enum ToolsSubcommand {
     /// Show the input schema for all available tools
     Schema,
     /// Trust a specific tool or tools for the session
-    Trust { tool_names: Vec<String> },
+    Trust {
+        #[arg(required = true)]
+        tool_names: Vec<String>,
+    },
     /// Revert a tool or tools to per-request confirmation
-    Untrust { tool_names: Vec<String> },
+    Untrust {
+        #[arg(required = true)]
+        tool_names: Vec<String>,
+    },
     /// Trust all tools (equivalent to deprecated /acceptall)
     TrustAll,
     /// Reset all tools to default permission levels
@@ -275,6 +281,7 @@ impl ToolsSubcommand {
                                 "this tool"
                             }
                         )),
+                        style::Print("\n"),
                         style::SetForegroundColor(Color::Reset),
                     )?;
 
@@ -324,7 +331,7 @@ impl ToolsSubcommand {
                         } else {
                             style::Print(format!("\nTool '{}' is ", tools_to_untrust[0]))
                         },
-                        style::Print("set to per-request confirmation."),
+                        style::Print("set to per-request confirmation.\n"),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 }

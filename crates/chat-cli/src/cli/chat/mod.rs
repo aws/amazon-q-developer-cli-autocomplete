@@ -6,6 +6,7 @@ mod error_formatter;
 mod input_source;
 mod message;
 mod parse;
+use std::path::MAIN_SEPARATOR;
 mod parser;
 mod prompt;
 mod prompt_parser;
@@ -29,6 +30,7 @@ use std::time::Duration;
 use amzn_codewhisperer_client::types::SubscriptionStatus;
 use clap::{
     Args,
+    CommandFactory,
     Parser,
 };
 pub use conversation::ConversationState;
@@ -114,7 +116,10 @@ use crate::cli::chat::cli::model::{
     MODEL_OPTIONS,
     default_model_id,
 };
-use crate::cli::chat::cli::prompts::GetPromptError;
+use crate::cli::chat::cli::prompts::{
+    GetPromptError,
+    PromptsSubcommand,
+};
 use crate::database::settings::Setting;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
@@ -129,6 +134,18 @@ use crate::util::MCP_SERVER_TOOL_DELIMITER;
 const LIMIT_REACHED_TEXT: &str = color_print::cstr! { "You've used all your free requests for this month. You have two options:
 1. Upgrade to a paid subscription for increased limits. See our Pricing page for what's included> <blue!>https://aws.amazon.com/q/developer/pricing/</blue!>
 2. Wait until next month when your limit automatically resets." };
+
+pub const EXTRA_HELP: &str = color_print::cstr! {"
+<cyan,em>MCP:</cyan,em>
+<black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
+
+<cyan,em>Tips:</cyan,em>
+<em>!{command}</em>            <black!>Quickly execute a command in your current session</black!>
+<em>Ctrl(^) + j</em>           <black!>Insert new-line to provide multi-line prompt. Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
+<em>Ctrl(^) + s</em>           <black!>Fuzzy search commands and context files. Use Tab to select multiple items.</black!>
+                      <black!>Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)</black!>
+<em>chat.editMode</em>         <black!>Set editing mode (vim or emacs) using: q settings chat.editMode vi/emacs</black!>
+"};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
 pub struct ChatArgs {
@@ -149,7 +166,7 @@ pub struct ChatArgs {
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
     /// Whether the command should run without expecting user input
-    #[arg(long)]
+    #[arg(long, alias = "no-interactive")]
     pub non_interactive: bool,
     /// The first question to ask
     pub input: Option<String>,
@@ -158,7 +175,7 @@ pub struct ChatArgs {
 impl ChatArgs {
     pub async fn execute(mut self, os: &mut Os) -> Result<ExitCode> {
         if self.non_interactive && self.input.is_none() {
-            bail!("Input must be supplied when --non-interactive is set");
+            bail!("Input must be supplied when running in non-interactive mode");
         }
 
         let stdout = std::io::stdout();
@@ -301,11 +318,9 @@ const ROTATING_TIPS: [&str; 16] = [
 
 const GREETING_BREAK_POINT: usize = 80;
 
-const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>
-<green!>ctrl + j</green!> new lines  <em>•</em>  
-<green!>ctrl + s</green!> fuzzy search  <em>•</em>  
-<green!>ctrl + f</green!> accept completion
-</black!>"};
+const POPULAR_SHORTCUTS: &str = color_print::cstr! {
+"<black!><green!>/help</green!> all commands                      <em>•</em>  <green!>ctrl + j</green!> new lines
+<green!>ctrl + s</green!> fuzzy search                   <em>•</em>  <green!>ctrl + f</green!> accept completion</black!>"};
 const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands
 <green!>ctrl + j</green!> new lines
 <green!>ctrl + s</green!> fuzzy search
@@ -350,6 +365,10 @@ pub enum ChatError {
     Interrupted { tool_uses: Option<Vec<QueuedTool>> },
     #[error(transparent)]
     GetPromptError(#[from] GetPromptError),
+    #[error(
+        "Tool approval required but --no-interactive was specified. Use --trust-all-tools to automatically approve tools."
+    )]
+    NonInteractiveToolApproval,
 }
 
 impl ChatError {
@@ -363,6 +382,7 @@ impl ChatError {
             ChatError::Custom(_) => None,
             ChatError::Interrupted { .. } => None,
             ChatError::GetPromptError(_) => None,
+            ChatError::NonInteractiveToolApproval => None,
         }
     }
 }
@@ -378,6 +398,7 @@ impl ReasonCode for ChatError {
             ChatError::Interrupted { .. } => "Interrupted".to_string(),
             ChatError::GetPromptError(_) => "GetPromptError".to_string(),
             ChatError::Auth(_) => "AuthError".to_string(),
+            ChatError::NonInteractiveToolApproval => "NonInteractiveToolApproval".to_string(),
         }
     }
 }
@@ -523,10 +544,16 @@ impl ChatSession {
         let ctrl_c_stream = ctrl_c();
         let result = match self.inner.take().expect("state must always be Some") {
             ChatState::PromptUser { skip_printing_tools } => {
-                if !self.interactive {
-                    self.inner = Some(ChatState::Exit);
-                    return Ok(());
-                }
+                match (self.interactive, self.tool_uses.is_empty()) {
+                    (false, true) => {
+                        self.inner = Some(ChatState::Exit);
+                        return Ok(());
+                    },
+                    (false, false) => {
+                        return Err(ChatError::NonInteractiveToolApproval);
+                    },
+                    _ => (),
+                };
 
                 self.prompt_user(os, skip_printing_tools).await
             },
@@ -588,7 +615,7 @@ impl ChatSession {
             )?;
         }
 
-        let (context, report) = match err {
+        let (context, report, display_err_message) = match err {
             ChatError::Interrupted { tool_uses: ref inter } => {
                 execute!(self.stderr, style::Print("\n\n"))?;
 
@@ -613,7 +640,7 @@ impl ChatSession {
                     _ => (),
                 }
 
-                ("Tool use was interrupted", Report::from(err))
+                ("Tool use was interrupted", Report::from(err), false)
             },
             ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
@@ -647,9 +674,10 @@ impl ChatSession {
                     (
                         "The context window has overflowed, summarizing the history...",
                         Report::from(err),
+                        true,
                     )
                 },
-                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err)),
+                ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err), true),
                 ApiClientError::ModelOverloadedError { request_id, .. } => {
                     let err = format!(
                         "The model you've selected is temporarily unavailable. Please use '/model' to select a different model and try again.{}\n\n",
@@ -659,7 +687,7 @@ impl ChatSession {
                         }
                     );
                     self.conversation.append_transcript(err.clone());
-                    ("Amazon Q is having trouble responding right now", eyre!(err))
+                    ("Amazon Q is having trouble responding right now", eyre!(err), true)
                 },
                 ApiClientError::MonthlyLimitReached { .. } => {
                     let subscription_status = get_subscription_status(os).await;
@@ -716,33 +744,44 @@ impl ChatSession {
 
                     return Ok(());
                 },
-                _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
+                _ => (
+                    "Amazon Q is having trouble responding right now",
+                    Report::from(err),
+                    true,
+                ),
             },
-            _ => ("Amazon Q is having trouble responding right now", Report::from(err)),
+            _ => (
+                "Amazon Q is having trouble responding right now",
+                Report::from(err),
+                true,
+            ),
         };
 
-        // Remove non-ASCII and ANSI characters.
-        let re = Regex::new(r"((\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])|([^\x00-\x7F]+)").unwrap();
+        if display_err_message {
+            // Remove non-ASCII and ANSI characters.
+            let re = Regex::new(r"((\x9B|\x1B\[)[0-?]*[ -\/]*[@-~])|([^\x00-\x7F]+)").unwrap();
 
-        queue!(
-            self.stderr,
-            style::SetAttribute(Attribute::Bold),
-            style::SetForegroundColor(Color::Red),
-        )?;
+            queue!(
+                self.stderr,
+                style::SetAttribute(Attribute::Bold),
+                style::SetForegroundColor(Color::Red),
+            )?;
 
-        let text = re.replace_all(&format!("{}: {:?}\n", context, report), "").into_owned();
+            let text = re.replace_all(&format!("{}: {:?}\n", context, report), "").into_owned();
 
-        queue!(self.stderr, style::Print(&text),)?;
-        self.conversation.append_transcript(text);
+            queue!(self.stderr, style::Print(&text),)?;
+            self.conversation.append_transcript(text);
 
-        execute!(
-            self.stderr,
-            style::SetAttribute(Attribute::Reset),
-            style::SetForegroundColor(Color::Reset),
-        )?;
+            execute!(
+                self.stderr,
+                style::SetAttribute(Attribute::Reset),
+                style::SetForegroundColor(Color::Reset),
+            )?;
+        }
 
         self.conversation.enforce_conversation_invariants();
         self.conversation.reset_next_user_message();
+        self.pending_tool_index = None;
 
         self.inner = Some(ChatState::PromptUser {
             skip_printing_tools: false,
@@ -1174,17 +1213,44 @@ impl ChatSession {
         queue!(self.stderr, style::Print('\n'))?;
 
         let input = user_input.trim();
+
+        // handle image path
+        if input.starts_with('/') {
+            if let Some(after_slash) = input.strip_prefix('/') {
+                let looks_like_path = after_slash.contains(MAIN_SEPARATOR)
+                    || after_slash.contains('/')
+                    || after_slash.contains('\\')
+                    || after_slash.contains('.');
+
+                if looks_like_path {
+                    return Ok(ChatState::HandleInput {
+                        input: after_slash.to_string(),
+                    });
+                }
+            }
+        }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
-            args.insert(0, "q".to_owned());
+            // Required for printing errors correctly.
+            let orig_args = args.clone();
+
+            // We set the binary name as a dummy name "slash_command" which we
+            // replace anytime we error out and print a usage statement.
+            args.insert(0, "slash_command".to_owned());
+
             match SlashCommand::try_parse_from(args) {
                 Ok(command) => {
                     match command.execute(os, self).await {
-                        Ok(chat_state) if matches!(chat_state, ChatState::Exit) => return Ok(chat_state),
+                        Ok(chat_state)
+                            if matches!(chat_state, ChatState::Exit)
+                                || matches!(chat_state, ChatState::HandleInput { input: _ }) =>
+                        {
+                            return Ok(chat_state);
+                        },
                         Err(err) => {
                             queue!(
                                 self.stderr,
                                 style::SetForegroundColor(Color::Red),
-                                style::Print(format!("Failed to execute command: {}\n", err)),
+                                style::Print(format!("\nFailed to execute command: {}\n", err)),
                                 style::SetForegroundColor(Color::Reset)
                             )?;
                         },
@@ -1194,13 +1260,58 @@ impl ChatSession {
                     writeln!(self.stderr)?;
                 },
                 Err(err) => {
-                    writeln!(self.stderr, "{}", err)?;
+                    // Replace the dummy name with a slash. Also have to check for an ansi sequence
+                    // for invalid slash commands (e.g. on a "/doesntexist" input).
+                    let ansi_output = err
+                        .render()
+                        .ansi()
+                        .to_string()
+                        .replace("slash_command ", "/")
+                        .replace("slash_command\u{1b}[0m ", "/");
+
+                    writeln!(self.stderr, "{}", ansi_output)?;
+
+                    // Print the subcommand help, if available. Required since by default we won't
+                    // show what the actual arguments are, requiring an unnecessary --help call.
+                    if let clap::error::ErrorKind::InvalidValue
+                    | clap::error::ErrorKind::UnknownArgument
+                    | clap::error::ErrorKind::InvalidSubcommand
+                    | clap::error::ErrorKind::MissingRequiredArgument = err.kind()
+                    {
+                        let mut cmd = SlashCommand::command();
+                        for arg in &orig_args {
+                            match cmd.find_subcommand(arg) {
+                                Some(subcmd) => cmd = subcmd.clone(),
+                                None => break,
+                            }
+                        }
+                        let help = cmd.help_template("{all-args}").render_help();
+                        writeln!(self.stderr, "{}", help.ansi())?;
+                    }
                 },
             }
 
             Ok(ChatState::PromptUser {
                 skip_printing_tools: false,
             })
+        } else if let Some(command) = input.strip_prefix("@") {
+            let input_parts =
+                shlex::split(command).ok_or(ChatError::Custom("Error splitting prompt command".into()))?;
+
+            let mut iter = input_parts.into_iter();
+            let prompt_name = iter
+                .next()
+                .ok_or(ChatError::Custom("Prompt name needs to be specified".into()))?;
+
+            let args: Vec<String> = iter.collect();
+            let arguments = if args.is_empty() { None } else { Some(args) };
+
+            let subcommand = PromptsSubcommand::Get {
+                orig_input: Some(command.to_string()),
+                name: prompt_name,
+                arguments,
+            };
+            return subcommand.execute(self).await;
         } else if let Some(command) = input.strip_prefix("!") {
             // Use platform-appropriate shell
             let result = if cfg!(target_os = "windows") {
@@ -1225,7 +1336,7 @@ impl ChatSession {
                     queue!(
                         self.stderr,
                         style::SetForegroundColor(Color::Red),
-                        style::Print(format!("Failed to execute command: {}\n", e)),
+                        style::Print(format!("\nFailed to execute command: {}\n", e)),
                         style::SetForegroundColor(Color::Reset)
                     )?;
                 },
@@ -1287,7 +1398,10 @@ impl ChatSession {
             queue!(self.stderr, style::SetForegroundColor(Color::Reset))?;
             queue!(self.stderr, cursor::Hide)?;
             execute!(self.stderr, style::Print("\n"))?;
-            self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
+
+            if self.interactive {
+                self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
+            }
 
             Ok(ChatState::HandleResponseStream(
                 os.client.send_message(conv_state).await?,

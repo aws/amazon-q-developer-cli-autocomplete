@@ -364,7 +364,7 @@ async fn set_start_url_and_region(database: &Database, event: &mut Event) {
 struct TelemetryClient {
     client_id: Uuid,
     telemetry_enabled: bool,
-    codewhisperer_client: ApiClient,
+    codewhisperer_client: Option<ApiClient>,
     toolkit_telemetry_client: Option<ToolkitTelemetryClient>,
 }
 
@@ -421,23 +421,36 @@ impl TelemetryClient {
             })
         }
 
+        // cw telemetry is only available with bearer token auth.
+        let codewhisperer_client = if env.get("AMAZON_Q_SIGV4").is_ok() {
+            None
+        } else {
+            Some(ApiClient::new(env, fs, database, None).await?)
+        };
+
         Ok(Self {
             client_id: client_id(env, database, telemetry_enabled)?,
             telemetry_enabled,
             toolkit_telemetry_client,
-            codewhisperer_client: ApiClient::new(env, fs, database, None).await?,
+            codewhisperer_client,
         })
     }
 
+    /// Sends a telemetry event to both the CW and toolkit API's. If the clients do not exist, then
+    /// telemetry is not sent.
+    ///
+    /// See [TelemetryClient::new] for which conditions the clients are created for.
     async fn send_event(&self, event: Event) {
-        // This client will exist when telemetry is disabled.
         self.send_cw_telemetry_event(&event).await;
-
-        // This client won't exist when telemetry is disabled.
         self.send_telemetry_toolkit_metric(event).await;
     }
 
     async fn send_cw_telemetry_event(&self, event: &Event) {
+        let Some(codewhisperer_client) = self.codewhisperer_client.clone() else {
+            trace!("not sending cw metric - client does not exist");
+            return;
+        };
+
         if let EventType::ChatAddedMessage {
             conversation_id,
             message_id,
@@ -466,8 +479,7 @@ impl TelemetryClient {
                 telemetry_enabled = self.telemetry_enabled,
                 "Sending cw telemetry event"
             );
-            if let Err(err) = self
-                .codewhisperer_client
+            if let Err(err) = codewhisperer_client
                 .send_telemetry_event(event, user_context, self.telemetry_enabled, model.to_owned())
                 .await
             {
@@ -651,6 +663,8 @@ mod test {
             .unwrap();
         client
             .codewhisperer_client
+            .as_ref()
+            .expect("cw telemetry client should exist")
             .send_telemetry_event(
                 TelemetryEvent::ChatAddMessageEvent(
                     ChatAddMessageEvent::builder()
