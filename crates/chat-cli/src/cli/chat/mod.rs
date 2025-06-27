@@ -125,6 +125,7 @@ use crate::cli::chat::cli::prompts::{
     GetPromptError,
     PromptsSubcommand,
 };
+use crate::cli::script::read_q_script;
 use crate::database::settings::Setting;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
@@ -172,13 +173,28 @@ pub struct ChatArgs {
     /// Whether the command should run without expecting user input
     #[arg(long, alias = "no-interactive")]
     pub non_interactive: bool,
+    /// Runs the given path as a Q script
+    #[arg(long, conflicts_with = "input")]
+    pub script: Option<String>,
     /// The first question to ask
     pub input: Option<String>,
 }
 
 impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
-        if self.non_interactive && self.input.is_none() {
+        // input and script are mutually exclusive options, so we can just read the script and
+        // pass it as the input here
+        let mut input = self.input.clone();
+        if let Some(script) = self.script {
+            match read_q_script(&script).await {
+                Ok(v) => input = Some(v),
+                Err(e) => {
+                    bail!("Unable to read script {}, {}", script, e);
+                },
+            }
+        }
+
+        if self.non_interactive && input.is_none() {
             bail!("Input must be supplied when running in non-interactive mode");
         }
 
@@ -286,7 +302,7 @@ impl ChatArgs {
             stdout,
             stderr,
             &conversation_id,
-            self.input,
+            input,
             InputSource::new(os, prompt_request_sender, prompt_response_receiver)?,
             self.resume,
             || terminal::window_size().map(|s| s.columns.into()).ok(),

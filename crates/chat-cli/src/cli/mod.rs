@@ -4,6 +4,7 @@ mod diagnostics;
 mod feed;
 mod issue;
 mod mcp;
+mod script;
 mod settings;
 mod user;
 
@@ -355,7 +356,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })),
             verbose: 2,
             help_all: false,
@@ -394,7 +396,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })
         );
     }
@@ -410,7 +413,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })
         );
     }
@@ -426,7 +430,8 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })
         );
     }
@@ -442,7 +447,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: true
+                non_interactive: true,
+                script: None,
             })
         );
         assert_parse!(
@@ -454,7 +460,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: true
+                non_interactive: true,
+                script: None,
             })
         );
     }
@@ -470,7 +477,8 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })
         );
     }
@@ -486,7 +494,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["".to_string()]),
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })
         );
     }
@@ -502,7 +511,8 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["fs_read".to_string(), "fs_write".to_string()]),
-                non_interactive: false
+                non_interactive: false,
+                script: None,
             })
         );
     }
