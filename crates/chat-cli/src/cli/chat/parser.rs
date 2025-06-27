@@ -1,30 +1,50 @@
+use std::sync::Arc;
 use std::time::{
     Duration,
     Instant,
 };
 
+use aws_types::request_id::RequestId;
 use eyre::Result;
+use futures::FutureExt;
+use futures::future::Either;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use thiserror::Error;
+use tokio::sync::{
+    Mutex,
+    broadcast,
+};
 use tracing::{
     error,
     info,
     trace,
+    warn,
 };
 
 use super::message::{
     AssistantMessage,
     AssistantToolUse,
 };
-use crate::api_client::model::ChatResponseStream;
+use crate::api_client::model::{
+    ChatResponseStream,
+    ConversationState,
+};
 use crate::api_client::send_message_output::SendMessageOutput;
+use crate::api_client::{
+    ApiClient,
+    ApiClientError,
+};
 use crate::telemetry::ReasonCode;
+use crate::telemetry::core::ChatConversationType;
 
 #[derive(Debug, Error)]
 pub struct RecvError {
-    /// The request id associated with the [SendMessageOutput] stream.
-    pub request_id: Option<String>,
     #[source]
     pub source: RecvErrorKind,
+    pub request_metadata: RequestMetadata,
 }
 
 impl RecvError {
@@ -34,6 +54,7 @@ impl RecvError {
             RecvErrorKind::Json(_) => None,
             RecvErrorKind::StreamTimeout { .. } => None,
             RecvErrorKind::UnexpectedToolUseEos { .. } => None,
+            RecvErrorKind::Interrupted => None,
         }
     }
 }
@@ -45,6 +66,7 @@ impl ReasonCode for RecvError {
             RecvErrorKind::Json(_) => "RecvErrorJson".to_string(),
             RecvErrorKind::StreamTimeout { .. } => "RecvErrorStreamTimeout".to_string(),
             RecvErrorKind::UnexpectedToolUseEos { .. } => "RecvErrorUnexpectedToolUseEos".to_string(),
+            RecvErrorKind::Interrupted => "Interrupted".to_string(),
         }
     }
 }
@@ -52,7 +74,7 @@ impl ReasonCode for RecvError {
 impl std::fmt::Display for RecvError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Failed to receive the next message: ")?;
-        if let Some(request_id) = self.request_id.as_ref() {
+        if let Some(request_id) = self.request_metadata.request_id.as_ref() {
             write!(f, "request_id: {}, error: ", request_id)?;
         }
         write!(f, "{}", self.source)?;
@@ -90,6 +112,9 @@ pub enum RecvErrorKind {
         message: Box<AssistantMessage>,
         time_elapsed: Duration,
     },
+    /// An interrupt signal was received while stream processing
+    #[error("Stream handling was interrupted")]
+    Interrupted,
 }
 
 /// State associated with parsing a [ChatResponseStream] into a [Message].
@@ -100,7 +125,7 @@ pub enum RecvErrorKind {
 /// [ResponseEvent::EndStream] value is returned.
 #[derive(Debug)]
 pub struct ResponseParser {
-    /// The response to consume and parse into a sequence of [Ev].
+    /// The response to consume and parse into a sequence of [ResponseEvent].
     response: SendMessageOutput,
     /// Buffer to hold the next event in [SendMessageOutput].
     peek: Option<ChatResponseStream>,
@@ -113,6 +138,17 @@ pub struct ResponseParser {
     /// Whether or not we are currently receiving tool use delta events. Tuple of
     /// `Some((tool_use_id, name))` if true, [None] otherwise.
     parsing_tool_use: Option<(String, String)>,
+
+    ctrl_c: broadcast::Receiver<()>,
+    request_metadata: Arc<Mutex<Option<RequestMetadata>>>,
+
+    // metadata fields
+    /// Time immediately after sending the request.
+    start_time: Instant,
+    /// Total size (in bytes) of the response received so far.
+    received_response_size: usize,
+    time_to_first_chunk: Option<Duration>,
+    time_between_chunks: Vec<Duration>,
 }
 
 impl ResponseParser {
@@ -126,11 +162,56 @@ impl ResponseParser {
             assistant_text: String::new(),
             tool_uses: Vec::new(),
             parsing_tool_use: None,
+            start_time: Instant::now(),
+            received_response_size: 0,
+            time_to_first_chunk: None,
+            time_between_chunks: Vec::new(),
+            ctrl_c: todo!(),
+            request_metadata: todo!(),
+        }
+    }
+
+    pub async fn send_message(
+        client: &ApiClient,
+        conversation_state: ConversationState,
+        ctrl_c: broadcast::Receiver<()>,
+        request_metadata: Arc<Mutex<Option<RequestMetadata>>>,
+    ) -> Result<Self, ApiClientError> {
+        let message_id = uuid::Uuid::new_v4().to_string();
+        info!(?message_id, "Generated new message id");
+        let response = client.send_message(conversation_state).await?;
+        Ok(Self {
+            response,
+            peek: None,
+            message_id,
+            assistant_text: String::new(),
+            tool_uses: Vec::new(),
+            parsing_tool_use: None,
+            start_time: Instant::now(),
+            received_response_size: 0,
+            time_to_first_chunk: None,
+            time_between_chunks: Vec::new(),
+            ctrl_c,
+            request_metadata,
+        })
+    }
+
+    pub async fn try_recv(&mut self) -> Result<ResponseEvent, RecvError> {
+        let mut ctrl_c = self.ctrl_c.resubscribe();
+
+        tokio::select! {
+            res = self.recv() => res,
+            Ok(_) = ctrl_c.recv() => {
+                println!("BOTTOM CTRLC: {:?}", self);
+                let err = self.error(RecvErrorKind::Interrupted);
+                *self.request_metadata.lock().await = Some(err.request_metadata.clone());
+                Err(self.error(RecvErrorKind::Interrupted))
+            },
         }
     }
 
     /// Consumes the associated [ConverseStreamResponse] until a valid [ResponseEvent] is parsed.
-    pub async fn recv(&mut self) -> Result<ResponseEvent, RecvError> {
+    async fn recv(&mut self) -> Result<ResponseEvent, RecvError> {
         if let Some((id, name)) = self.parsing_tool_use.take() {
             let tool_use = self.parse_tool_use(id, name).await?;
             self.tool_uses.push(tool_use.clone());
@@ -182,16 +263,25 @@ impl ResponseParser {
                 Ok(None) => {
                     let message_id = Some(self.message_id.clone());
                     let content = std::mem::take(&mut self.assistant_text);
-                    let message = if self.tool_uses.is_empty() {
-                        AssistantMessage::new_response(message_id, content)
+                    let (message, conv_type) = if self.tool_uses.is_empty() {
+                        (
+                            AssistantMessage::new_response(message_id, content),
+                            ChatConversationType::EndTurn,
+                        )
                     } else {
-                        AssistantMessage::new_tool_use(
-                            message_id,
-                            content,
-                            self.tool_uses.clone().into_iter().collect(),
+                        (
+                            AssistantMessage::new_tool_use(
+                                message_id,
+                                content,
+                                self.tool_uses.clone().into_iter().collect(),
+                            ),
+                            ChatConversationType::ToolUse,
                         )
                     };
-                    return Ok(ResponseEvent::EndStream { message });
+                    return Ok(ResponseEvent::EndStream {
+                        message,
+                        request_metadata: self.make_metadata(Some(conv_type)),
+                    });
                 },
                 Err(err) => return Err(err),
             }
@@ -299,6 +389,24 @@ impl ResponseParser {
         match result {
             Ok(r) => {
                 trace!(?r, "Received new event");
+
+                // Track metadata about the chunk.
+                self.time_to_first_chunk.get_or_insert(duration);
+                self.time_between_chunks.push(duration);
+                if let Some(r) = r.as_ref() {
+                    match r {
+                        ChatResponseStream::AssistantResponseEvent { content } => {
+                            self.received_response_size += content.len();
+                        },
+                        ChatResponseStream::ToolUseEvent { input, .. } => {
+                            self.received_response_size += input.as_ref().map(String::len).unwrap_or_default();
+                        },
+                        _ => {
+                            warn!(?r, "received unexpected event from the response stream");
+                        },
+                    }
+                }
+
                 Ok(r)
             },
             Err(err) => {
@@ -311,15 +419,25 @@ impl ResponseParser {
         }
     }
 
-    fn request_id(&self) -> Option<&str> {
+    pub fn request_id(&self) -> Option<&str> {
         self.response.request_id()
     }
 
     /// Helper to create a new [RecvError] populated with the associated request id for the stream.
     fn error(&self, source: impl Into<RecvErrorKind>) -> RecvError {
         RecvError {
-            request_id: self.request_id().map(str::to_string),
             source: source.into(),
+            request_metadata: self.make_metadata(None),
+        }
+    }
+
+    fn make_metadata(&self, chat_conversation_type: Option<ChatConversationType>) -> RequestMetadata {
+        RequestMetadata {
+            request_id: self.request_id().map(String::from),
+            time_to_first_chunk: self.time_to_first_chunk.clone(),
+            time_between_chunks: self.time_between_chunks.clone(),
+            response_size: self.received_response_size,
+            chat_conversation_type,
         }
     }
 }
@@ -339,7 +457,24 @@ pub enum ResponseEvent {
         /// previously emitted. This should be stored in the conversation history and sent in
         /// subsequent requests.
         message: AssistantMessage,
+        /// Metadata for the request stream.
+        request_metadata: RequestMetadata,
     },
+}
+
+/// Metadata about the sent request and associated response stream.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestMetadata {
+    /// The request id associated with the [SendMessageOutput] stream.
+    pub request_id: Option<String>,
+    /// Time until the first chunk was received.
+    pub time_to_first_chunk: Option<Duration>,
+    /// Time between each received chunk in the stream.
+    pub time_between_chunks: Vec<Duration>,
+    /// Total size (in bytes) of the response.
+    pub response_size: usize,
+    /// [ChatConversationType] for the returned assistant message.
+    pub chat_conversation_type: Option<ChatConversationType>,
 }
 
 #[cfg(test)]

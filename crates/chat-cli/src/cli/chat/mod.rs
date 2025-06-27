@@ -26,6 +26,7 @@ use std::collections::{
 };
 use std::io::Write;
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Duration;
 
 use amzn_codewhisperer_client::types::SubscriptionStatus;
@@ -68,6 +69,7 @@ use parse::{
 };
 use parser::{
     RecvErrorKind,
+    RequestMetadata,
     ResponseParser,
 };
 use regex::Regex;
@@ -79,6 +81,11 @@ use thiserror::Error;
 use time::OffsetDateTime;
 use token_counter::TokenCounter;
 use tokio::signal::ctrl_c;
+use tokio::sync::{
+    Mutex,
+    broadcast,
+    mpsc,
+};
 use tool_manager::{
     McpServerConfig,
     ToolManager,
@@ -128,7 +135,10 @@ use crate::cli::chat::cli::prompts::{
 use crate::database::settings::Setting;
 use crate::mcp_client::Prompt;
 use crate::os::Os;
-use crate::telemetry::core::ToolUseEventBuilder;
+use crate::telemetry::core::{
+    ChatAddedMessage,
+    ToolUseEventBuilder,
+};
 use crate::telemetry::{
     ReasonCode,
     TelemetryResult,
@@ -404,6 +414,8 @@ pub enum ChatError {
         "Tool approval required but --no-interactive was specified. Use --trust-all-tools to automatically approve tools."
     )]
     NonInteractiveToolApproval,
+    // #[error("{0}")]
+    // JoinError(#[from] tokio::task::JoinError),
 }
 
 impl ChatError {
@@ -615,11 +627,46 @@ impl ChatSession {
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: None })
                 }
             },
-            ChatState::HandleResponseStream(response) => tokio::select! {
-                res = self.handle_response(os, response) => res,
-                Ok(_) = ctrl_c_stream => {
-                    self.send_chat_telemetry(os, None, TelemetryResult::Cancelled, None, None, None).await;
-                    Err(ChatError::Interrupted { tool_uses: None })
+            ChatState::HandleResponseStream(response) => {
+                let (ctrlc_tx, mut ctrlc_rx) = tokio::sync::broadcast::channel(4);
+                let ctrlc_rx_clone = ctrlc_tx.subscribe();
+
+                let ctrlc_join = tokio::spawn(async move {
+                    loop {
+                        match ctrl_c().await {
+                            Ok(_) => {
+                                let _ = ctrlc_tx
+                                    .send(())
+                                    .map_err(|err| error!(?err, "failed to send ctrlc to broadcast channel"));
+                            },
+                            Err(err) => {
+                                error!(?err, "Encountered an error while receiving a ctrl+c");
+                            },
+                        }
+                    }
+                });
+
+                let os_clone = os.clone();
+
+                let request_metadata: Arc<Mutex<Option<RequestMetadata>>> = Arc::new(Mutex::new(None));
+                let request_metadata_clone = Arc::clone(&request_metadata);
+
+                // let handle = tokio::spawn(async move {
+                //     self.handle_response(os_clone, response, request_metadata_clone, ctrlc_rx_clone).await
+                // });
+
+                tokio::select! {
+                    res = self.handle_response(os, response, request_metadata_clone, ctrlc_rx_clone) => res,
+                    Ok(_) = ctrlc_rx.recv() => {
+                        // 1. wait for handle_response to send some result.
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                        let rm = request_metadata.lock().await.take();
+                        println!("TOP LEVEL HANDLER: {:?}", rm);
+                        // 2. if nothing was sent, then request metadata will just be assumed to be
+                        //    None.
+                        self.send_chat_telemetry(os, None, TelemetryResult::Cancelled, None, None, None).await;
+                        Err(ChatError::Interrupted { tool_uses: None })
+                    }
                 }
             },
             ChatState::Exit => return Ok(()),
@@ -668,6 +715,7 @@ impl ChatSession {
                                 None,
                                 "Tool uses were interrupted, waiting for the next user prompt".to_string(),
                             ),
+                            None,
                         );
                     },
                     _ => (),
@@ -861,7 +909,8 @@ enum ChatState {
     /// Execute the list of tools.
     ExecuteTools,
     /// Consume the response stream and display to the user.
-    HandleResponseStream(SendMessageOutput),
+    HandleResponseStream(crate::api_client::model::ConversationState),
+    // HandleResponseStream(SendMessageOutput),
     /// Compact the chat history.
     CompactHistory {
         /// Custom prompt to include as part of history compaction.
@@ -1013,15 +1062,16 @@ impl ChatSession {
             Ok(res) => res,
             Err(err) => {
                 let (reason, reason_desc) = get_error_reason(&err);
-                self.send_chat_telemetry(
-                    os,
-                    None,
-                    TelemetryResult::Failed,
-                    Some(reason),
-                    Some(reason_desc),
-                    err.status_code(),
-                )
-                .await;
+                // TODO(telem): why chat telemetry? and not error telemetry?
+                // self.send_chat_telemetry(
+                //     os,
+                //     None,
+                //     TelemetryResult::Failed,
+                //     Some(reason),
+                //     Some(reason_desc),
+                //     err.status_code(),
+                // )
+                // .await;
                 match err {
                     ApiClientError::ContextWindowOverflow { .. } => {
                         self.conversation.clear(true);
@@ -1048,28 +1098,32 @@ impl ChatSession {
         };
 
         let request_id = response.request_id().map(|s| s.to_string());
-        let summary = {
+        let (summary, request_metadata) = {
             let mut parser = ResponseParser::new(response);
             loop {
-                match parser.recv().await {
-                    Ok(parser::ResponseEvent::EndStream { message }) => {
-                        break message.content().to_string();
+                match parser.try_recv().await {
+                    Ok(parser::ResponseEvent::EndStream {
+                        message,
+                        request_metadata,
+                    }) => {
+                        break (message.content().to_string(), request_metadata);
                     },
                     Ok(_) => (),
                     Err(err) => {
-                        if let Some(request_id) = &err.request_id {
+                        if let Some(request_id) = &err.request_metadata.request_id {
                             self.failed_request_ids.push(request_id.clone());
                         };
                         let (reason, reason_desc) = get_error_reason(&err);
-                        self.send_chat_telemetry(
-                            os,
-                            err.request_id.clone(),
-                            TelemetryResult::Failed,
-                            Some(reason),
-                            Some(reason_desc),
-                            err.status_code(),
-                        )
-                        .await;
+                        // TODO(telem) again, we should send error telemetry and NOT chat telemetry
+                        // self.send_chat_telemetry(
+                        //     os,
+                        //     err.request_id.clone(),
+                        //     TelemetryResult::Failed,
+                        //     Some(reason),
+                        //     Some(reason_desc),
+                        //     err.status_code(),
+                        // )
+                        // .await;
                         return Err(err.into());
                     },
                 }
@@ -1086,10 +1140,11 @@ impl ChatSession {
             )?;
         }
 
+        self.conversation
+            .replace_history_with_summary(summary.clone(), request_metadata);
+
         self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
             .await;
-
-        self.conversation.replace_history_with_summary(summary.clone());
 
         // Print output to the user.
         {
@@ -1150,14 +1205,19 @@ impl ChatSession {
         // If a next message is set, then retry the request.
         if self.conversation.next_user_message().is_some() {
             Ok(ChatState::HandleResponseStream(
-                os.client
-                    .send_message(
-                        self.conversation
-                            .as_sendable_conversation_state(os, &mut self.stderr, false)
-                            .await?,
-                    )
+                self.conversation
+                    .as_sendable_conversation_state(os, &mut self.stderr, false)
                     .await?,
             ))
+            // Ok(ChatState::HandleResponseStream(
+            //     os.client
+            //         .send_message(
+            //             self.conversation
+            //                 .as_sendable_conversation_state(os, &mut self.stderr, false)
+            //                 .await?,
+            //         )
+            //         .await?,
+            // ))
         } else {
             // Otherwise, return back to the prompt for any pending tool uses.
             Ok(ChatState::PromptUser {
@@ -1421,9 +1481,7 @@ impl ChatSession {
                 self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
             }
 
-            Ok(ChatState::HandleResponseStream(
-                os.client.send_message(conv_state).await?,
-            ))
+            Ok(ChatState::HandleResponseStream(conv_state))
         }
     }
 
@@ -1592,22 +1650,48 @@ impl ChatSession {
 
         self.send_tool_use_telemetry(os).await;
         return Ok(ChatState::HandleResponseStream(
-            os.client
-                .send_message(
-                    self.conversation
-                        .as_sendable_conversation_state(os, &mut self.stderr, false)
-                        .await?,
-                )
+            self.conversation
+                .as_sendable_conversation_state(os, &mut self.stderr, false)
                 .await?,
         ));
     }
 
-    async fn handle_response(&mut self, os: &mut Os, response: SendMessageOutput) -> Result<ChatState, ChatError> {
-        let request_id = response.request_id().map(|s| s.to_string());
+    /// Sends a [crate::api_client::ApiClient::send_message] request to the backend and consumes
+    /// the response stream.
+    ///
+    /// In order to handle ctrl+c signals while also keeping track of metadata about how the
+    /// response stream was handled, we need two extra parameters:
+    /// - `request_metadata_lock` - Updated with the [RequestMetadata] once it has been received
+    /// (either though a successful request, or on an error).
+    /// - `ctrl_c` - a receiver for whenever ctrl+c signals are encountered.
+    ///
+    /// The top-level caller is expected to check the value of `request_metadata_lock` when a
+    /// ctrl+c is sent to get the relevant request metadata.
+    async fn handle_response(
+        &mut self,
+        os: &mut Os,
+        state: crate::api_client::model::ConversationState,
+        request_metadata_lock: Arc<Mutex<Option<RequestMetadata>>>,
+        ctrl_c: broadcast::Receiver<()>,
+    ) -> Result<ChatState, ChatError> {
+        let (tx, mut rx) = mpsc::channel(16);
+        let mut parser =
+            ResponseParser::send_message(&os.client, state, ctrl_c, Arc::clone(&request_metadata_lock)).await?;
+        let request_id = parser.request_id().map(String::from);
+
+        // Spawning a task in order to handle ctrl+c without the current future being aborted first.
+        tokio::spawn(async move {
+            loop {
+                let _ = tx
+                    .send(parser.try_recv().await)
+                    .await
+                    .map_err(|err| error!(?err, "failed to send response stream event"));
+            }
+        });
+
         let mut buf = String::new();
         let mut offset = 0;
         let mut ended = false;
-        let mut parser = ResponseParser::new(response);
         let mut state = ParseState::new(Some(self.terminal_width()));
         let mut response_prefix_printed = false;
 
@@ -1626,8 +1710,8 @@ impl ChatSession {
         }
 
         loop {
-            match parser.recv().await {
-                Ok(msg_event) => {
+            match rx.recv().await {
+                Some(Ok(msg_event)) => {
                     trace!("Consumed: {:?}", msg_event);
                     match msg_event {
                         parser::ResponseEvent::ToolUseStart { name } => {
@@ -1659,26 +1743,38 @@ impl ChatSession {
                             tool_uses.push(tool_use);
                             tool_name_being_recvd = None;
                         },
-                        parser::ResponseEvent::EndStream { message } => {
+                        parser::ResponseEvent::EndStream {
+                            message,
+                            request_metadata,
+                        } => {
                             // This log is attempting to help debug instances where users encounter
                             // the response timeout message.
                             if message.content() == RESPONSE_TIMEOUT_CONTENT {
                                 error!(?request_id, ?message, "Encountered an unexpected model response");
                             }
-                            self.conversation.push_assistant_message(os, message);
+                            *request_metadata_lock.lock().await = Some(request_metadata.clone());
+                            self.conversation
+                                .push_assistant_message(os, message, Some(request_metadata));
                             ended = true;
                         },
                     }
                 },
-                Err(recv_error) => {
-                    if let Some(request_id) = &recv_error.request_id {
+                Some(Err(recv_error)) => {
+                    if let Some(request_id) = &recv_error.request_metadata.request_id {
                         self.failed_request_ids.push(request_id.clone());
                     };
+                    *request_metadata_lock.lock().await = Some(recv_error.request_metadata.clone());
 
+                    // TODO(telem)
+                    // this isn't right, we need to send this after the below error handlers, since
+                    // it includes request metadata about *this* specific failure.
+                    //
+                    // Solution: pass request metadata into the telemetry method call itself? makes the
+                    // most sense honestly.
                     let (reason, reason_desc) = get_error_reason(&recv_error);
                     self.send_chat_telemetry(
                         os,
-                        recv_error.request_id.clone(),
+                        recv_error.request_metadata.request_id.clone(),
                         TelemetryResult::Failed,
                         Some(reason),
                         Some(reason_desc),
@@ -1689,7 +1785,7 @@ impl ChatSession {
                     match recv_error.source {
                         RecvErrorKind::StreamTimeout { source, duration } => {
                             error!(
-                                recv_error.request_id,
+                                recv_error.request_metadata.request_id,
                                 ?source,
                                 "Encountered a stream timeout after waiting for {}s",
                                 duration.as_secs()
@@ -1703,6 +1799,7 @@ impl ChatSession {
                             self.conversation.push_assistant_message(
                                 os,
                                 AssistantMessage::new_response(None, RESPONSE_TIMEOUT_CONTENT.to_string()),
+                                None,
                             );
                             self.conversation
                                 .set_next_user_message(
@@ -1712,12 +1809,8 @@ impl ChatSession {
                                 .await;
                             self.send_tool_use_telemetry(os).await;
                             return Ok(ChatState::HandleResponseStream(
-                                os.client
-                                    .send_message(
-                                        self.conversation
-                                            .as_sendable_conversation_state(os, &mut self.stderr, false)
-                                            .await?,
-                                    )
+                                self.conversation
+                                    .as_sendable_conversation_state(os, &mut self.stderr, false)
                                     .await?,
                             ));
                         },
@@ -1728,10 +1821,11 @@ impl ChatSession {
                             ..
                         } => {
                             error!(
-                                recv_error.request_id,
+                                recv_error.request_metadata.request_id,
                                 tool_use_id, name, "The response stream ended before the entire tool use was received"
                             );
-                            self.conversation.push_assistant_message(os, *message);
+                            self.conversation
+                                .push_assistant_message(os, *message, Some(recv_error.request_metadata));
                             let tool_results = vec![ToolUseResult {
                                     tool_use_id,
                                     content: vec![ToolUseResultBlock::Text(
@@ -1742,17 +1836,17 @@ impl ChatSession {
                             self.conversation.add_tool_results(tool_results);
                             self.send_tool_use_telemetry(os).await;
                             return Ok(ChatState::HandleResponseStream(
-                                os.client
-                                    .send_message(
-                                        self.conversation
-                                            .as_sendable_conversation_state(os, &mut self.stderr, false)
-                                            .await?,
-                                    )
+                                self.conversation
+                                    .as_sendable_conversation_state(os, &mut self.stderr, false)
                                     .await?,
                             ));
                         },
                         _ => return Err(recv_error.into()),
                     }
+                },
+                None => {
+                    warn!("response stream receiver closed before receiving a stop event");
+                    ended = true;
                 },
             }
 
@@ -1803,9 +1897,6 @@ impl ChatSession {
             }
 
             if ended {
-                self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
-                    .await;
-
                 if os
                     .database
                     .settings
@@ -1840,6 +1931,11 @@ impl ChatSession {
         } else {
             self.tool_uses.clear();
             self.pending_tool_index = None;
+
+            // TODO(telem) send recordUserTurnCompletion
+            // self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
+            //     .await;
+            // self.send_record_user_turn_completion();
 
             Ok(ChatState::PromptUser {
                 skip_printing_tools: false,
@@ -1925,6 +2021,16 @@ impl ChatSession {
                     }
                 }
             }
+            // TODO(telem)
+            // self.send_chat_telemetry(
+            //     os,
+            //     err.request_id.clone(),
+            //     TelemetryResult::Failed,
+            //     Some(reason),
+            //     Some(reason_desc),
+            //     err.status_code(),
+            // )
+            // .await;
             self.conversation.add_tool_results(tool_results);
             self.send_tool_use_telemetry(os).await;
             if let ToolUseStatus::Idle = self.tool_use_status {
@@ -1935,15 +2041,11 @@ impl ChatSession {
                 );
             }
 
-            let response = os
-                .client
-                .send_message(
-                    self.conversation
-                        .as_sendable_conversation_state(os, &mut self.stderr, false)
-                        .await?,
-                )
-                .await?;
-            return Ok(ChatState::HandleResponseStream(response));
+            return Ok(ChatState::HandleResponseStream(
+                self.conversation
+                    .as_sendable_conversation_state(os, &mut self.stderr, false)
+                    .await?,
+            ));
         }
 
         self.tool_uses = queued_tools;
@@ -2097,6 +2199,16 @@ impl ChatSession {
         Ok(())
     }
 
+    /// Sends an "codewhispererterminal_addChatMessage" telemetry event.
+    ///
+    /// This *MUST* be called in the following cases:
+    /// 1. After the end of a user turn
+    /// 2. After tool use execution has completed
+    /// 3. After an error was encountered during the handling of the response stream or tool use
+    ///    execution
+    ///
+    /// Note: whether or not to send telemetry should be derived from the chat history rather than
+    /// having to be manually invoked, although that would require more substantial changes.
     #[allow(clippy::too_many_arguments)]
     async fn send_chat_telemetry(
         &self,
@@ -2106,19 +2218,37 @@ impl ChatSession {
         reason: Option<String>,
         reason_desc: Option<String>,
         status_code: Option<u16>,
+        // request_metadata: Option<RequestMetadata>,
     ) {
+        // TODO: update method to directly take request metadata
+        let md = self.conversation.latest_request_metadata();
+        let data = ChatAddedMessage {
+            request_id,
+            message_id: self.conversation.message_id().map(|s| s.to_owned()),
+            context_file_length: self.conversation.context_message_length(),
+            model: self.conversation.model.clone(),
+            reason,
+            reason_desc,
+            status_code,
+            time_to_first_chunk_ms: md.and_then(|md| md.time_to_first_chunk.map(|d| d.as_millis() as i64)),
+            time_between_chunks_ms: md.map(|md| {
+                md.time_between_chunks
+                    .iter()
+                    .map(|d| d.as_millis().to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }),
+            chat_conversation_type: md.and_then(|md| md.chat_conversation_type),
+            tool_use_id: self.conversation.latest_tool_use_ids(),
+            tool_name: self.conversation.latest_tool_use_names(),
+            assistant_response_length: md.map(|md| md.response_size as i64),
+        };
         os.telemetry
             .send_chat_added_message(
                 &os.database,
                 self.conversation.conversation_id().to_owned(),
-                self.conversation.message_id().map(|s| s.to_owned()),
-                request_id,
-                self.conversation.context_message_length(),
                 result,
-                reason,
-                reason_desc,
-                status_code,
-                self.conversation.model.clone(),
+                data,
             )
             .await
             .ok();
