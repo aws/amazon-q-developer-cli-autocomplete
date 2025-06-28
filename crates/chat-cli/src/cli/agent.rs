@@ -20,6 +20,7 @@ use crossterm::{
     queue,
     style,
 };
+use dialoguer::Select;
 use eyre::bail;
 use regex::Regex;
 use serde::{
@@ -40,6 +41,7 @@ use crate::cli::chat::cli::hooks::{
     HookTrigger,
 };
 use crate::cli::chat::context::ContextConfig;
+use crate::database::settings::Setting;
 use crate::os::Os;
 use crate::util::{
     MCP_SERVER_TOOL_DELIMITER,
@@ -485,6 +487,172 @@ impl Agents {
     }
 }
 
+struct ContextMigrate<const S: char> {
+    legacy_global_context: Option<ContextConfig>,
+    legacy_profiles: HashMap<String, ContextConfig>,
+    new_agents: Vec<Agent>,
+}
+
+impl ContextMigrate<'a'> {
+    async fn scan(os: &Os) -> eyre::Result<ContextMigrate<'b'>> {
+        let legacy_global_context_path = directories::chat_global_context_path(os)?;
+        let legacy_global_context: Option<ContextConfig> = 'global: {
+            let Ok(content) = os.fs.read(&legacy_global_context_path).await else {
+                break 'global None;
+            };
+            serde_json::from_slice::<ContextConfig>(&content).ok()
+        };
+
+        let legacy_profile_path = directories::chat_profiles_dir(os)?;
+        let legacy_profiles: HashMap<String, ContextConfig> = 'profiles: {
+            let mut profiles = HashMap::<String, ContextConfig>::new();
+            let Ok(mut read_dir) = os.fs.read_dir(&legacy_profile_path).await else {
+                break 'profiles profiles;
+            };
+
+            // Here we assume every profile is stored under their own folders
+            // And that the profile config is in profile_name/context.json
+            while let Ok(Some(entry)) = read_dir.next_entry().await {
+                let config_file_path = entry.path().join("context.json");
+                if !os.fs.exists(&config_file_path) {
+                    continue;
+                }
+                let Some(profile_name) = entry.file_name().to_str().map(|s| s.to_string()) else {
+                    continue;
+                };
+                let Ok(content) = tokio::fs::read_to_string(&config_file_path).await else {
+                    continue;
+                };
+                let Ok(mut context_config) = serde_json::from_str::<ContextConfig>(content.as_str()) else {
+                    continue;
+                };
+
+                // Combine with global context since you can now only choose one agent at a time
+                // So this is how we make what is previously global available to every new agent migrated
+                if let Some(context) = legacy_global_context.as_ref() {
+                    context_config.paths.extend(context.paths.clone());
+                    context_config.hooks.extend(context.hooks.clone());
+                }
+
+                profiles.insert(profile_name.clone(), context_config);
+            }
+
+            profiles
+        };
+
+        if legacy_global_context.is_some() || !legacy_profiles.is_empty() {
+            Ok(ContextMigrate {
+                legacy_global_context,
+                legacy_profiles,
+                new_agents: vec![],
+            })
+        } else {
+            bail!("Nothing to migrate");
+        }
+    }
+}
+
+impl ContextMigrate<'b'> {
+    async fn prompt_migrate(self) -> eyre::Result<ContextMigrate<'c'>> {
+        let ContextMigrate {
+            legacy_global_context,
+            legacy_profiles,
+            new_agents,
+        } = self;
+
+        let labels = vec!["Yes", "No"];
+        let selection: Option<_> = match Select::with_theme(&crate::util::dialoguer_theme())
+            .with_prompt(
+                "You have context and/or profiles that belong to a legacy config. Would you like to migrate them?",
+            )
+            .items(&labels)
+            .default(1)
+            .interact_on_opt(&dialoguer::console::Term::stdout())
+        {
+            Ok(sel) => {
+                let _ = crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::style::SetForegroundColor(crossterm::style::Color::Magenta)
+                );
+                sel
+            },
+            // Ctrl‑C -> Err(Interrupted)
+            Err(dialoguer::Error::IO(ref e)) if e.kind() == std::io::ErrorKind::Interrupted => None,
+            Err(e) => bail!("Failed to choose an option: {e}"),
+        };
+
+        if let Some(0) = selection {
+            Ok(ContextMigrate {
+                legacy_global_context,
+                legacy_profiles,
+                new_agents,
+            })
+        } else {
+            bail!("Aborting migration")
+        }
+    }
+}
+
+impl ContextMigrate<'c'> {
+    async fn migrate(self, os: &Os) -> eyre::Result<ContextMigrate<'d'>> {
+        let ContextMigrate {
+            legacy_global_context,
+            legacy_profiles,
+            new_agents,
+        } = self;
+
+        // Migration of global context
+        if let Some(context) = &legacy_global_context {}
+
+        // Migration of profile context
+
+        Ok(ContextMigrate {
+            legacy_global_context: None,
+            legacy_profiles,
+            new_agents,
+        })
+    }
+}
+
+impl ContextMigrate<'d'> {
+    async fn prompt_set_default(self, os: &mut Os) -> eyre::Result<(Option<usize>, Vec<Agent>)> {
+        let ContextMigrate { new_agents, .. } = self;
+
+        let labels = new_agents.iter().map(|a| a.name.as_str()).collect::<Vec<_>>();
+        let selection: Option<_> = match Select::with_theme(&crate::util::dialoguer_theme())
+            .with_prompt(
+                "Set an agent as default. This is the agent that q chat will launch with unless specified otherwise.",
+            )
+            .items(&labels)
+            .interact_on_opt(&dialoguer::console::Term::stdout())
+        {
+            Ok(sel) => {
+                let _ = crossterm::execute!(
+                    std::io::stdout(),
+                    crossterm::style::SetForegroundColor(crossterm::style::Color::Magenta)
+                );
+                sel
+            },
+            // Ctrl‑C -> Err(Interrupted)
+            Err(dialoguer::Error::IO(ref e)) if e.kind() == std::io::ErrorKind::Interrupted => None,
+            Err(e) => bail!("Failed to choose an option: {e}"),
+        };
+
+        let mut agent_to_load = None::<usize>;
+        if let Some(i) = selection {
+            if let Some(name) = labels.get(i) {
+                if let Ok(value) = serde_json::to_value(name) {
+                    if os.database.settings.set(Setting::ChatDefaultAgent, value).await.is_ok() {
+                        agent_to_load.replace(i);
+                    }
+                }
+            }
+        }
+
+        Ok((agent_to_load, new_agents))
+    }
+}
+
 async fn load_agents_from_entries(mut files: ReadDir) -> Vec<Agent> {
     let mut res = Vec::<Agent>::new();
     while let Ok(Some(file)) = files.next_entry().await {
@@ -540,6 +708,17 @@ fn validate_agent_name(name: &str) -> eyre::Result<()> {
     }
 
     Ok(())
+}
+
+async fn migrate(os: &mut Os) -> eyre::Result<(Option<usize>, Vec<Agent>)> {
+    ContextMigrate::<'a'>::scan(os)
+        .await?
+        .prompt_migrate()
+        .await?
+        .migrate(os)
+        .await?
+        .prompt_set_default(os)
+        .await
 }
 
 /// Migration of context consists of the following:
