@@ -39,6 +39,8 @@ use use_aws::UseAws;
 
 use super::consts::MAX_TOOL_RESPONSE_SIZE;
 use super::util::images::RichImageBlocks;
+use crate::database::Database;
+use crate::database::settings::Setting;
 use crate::os::Os;
 
 /// Represents an executable tool use.
@@ -222,6 +224,15 @@ impl ToolPermissions {
         }
 
         self.permissions.contains_key(tool_name)
+    }
+
+    pub fn trust_from_database(&mut self, database: &Database) {
+        database
+            .settings
+            .get_array::<String>(Setting::TrustedTools)
+            .into_iter()
+            .flatten()
+            .for_each(|tool_name| self.trust_tool(&tool_name));
     }
 
     /// Provide default permission labels for the built-in set of tools.
