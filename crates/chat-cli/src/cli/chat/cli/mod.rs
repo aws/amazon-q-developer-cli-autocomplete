@@ -1,5 +1,6 @@
 pub mod clear;
 pub mod compact;
+pub mod complete;
 pub mod context;
 pub mod editor;
 pub mod hooks;
@@ -16,6 +17,7 @@ pub mod usage;
 use clap::Parser;
 use clear::ClearArgs;
 use compact::CompactArgs;
+use complete::CompleteArgs;
 use context::ContextSubcommand;
 use editor::EditorArgs;
 use hooks::HooksArgs;
@@ -47,6 +49,8 @@ pub enum SlashCommand {
     Quit,
     /// Clear the conversation history
     Clear(ClearArgs),
+    /// Generate a completion for the last assistant message
+    Complete(CompleteArgs),
     /// Manage profiles
     #[command(subcommand)]
     Profile(ProfileSubcommand),
@@ -89,6 +93,7 @@ impl SlashCommand {
         match self {
             Self::Quit => Ok(ChatState::Exit),
             Self::Clear(args) => args.execute(session).await,
+            Self::Complete(args) => args.execute(os, session).await,
             Self::Profile(subcommand) => subcommand.execute(os, session).await,
             Self::Context(args) => args.execute(os, session).await,
             Self::Knowledge(subcommand) => subcommand.execute(os, session).await,
