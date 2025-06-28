@@ -33,6 +33,7 @@ pub enum Setting {
     McpNoInteractiveTimeout,
     McpLoadedBefore,
     ChatDefaultModel,
+    TrustedTools,
 }
 
 impl AsRef<str> for Setting {
@@ -54,6 +55,7 @@ impl AsRef<str> for Setting {
             Self::McpNoInteractiveTimeout => "mcp.noInteractiveTimeout",
             Self::McpLoadedBefore => "mcp.loadedBefore",
             Self::ChatDefaultModel => "chat.defaultModel",
+            Self::TrustedTools => "tools.trusted",
         }
     }
 }
@@ -85,6 +87,7 @@ impl TryFrom<&str> for Setting {
             "mcp.noInteractiveTimeout" => Ok(Self::McpNoInteractiveTimeout),
             "mcp.loadedBefore" => Ok(Self::McpLoadedBefore),
             "chat.defaultModel" => Ok(Self::ChatDefaultModel),
+            "tools.trusted" => Ok(Self::TrustedTools),
             _ => Err(DatabaseError::InvalidSetting(value.to_string())),
         }
     }
@@ -150,6 +153,19 @@ impl Settings {
         self.get(key).and_then(|value| value.as_str().map(|s| s.into()))
     }
 
+    pub fn get_array<T>(&self, key: Setting) -> Option<Vec<T>>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.get(key).and_then(|value| {
+            value.as_array().and_then(|arr| {
+                arr.iter()
+                    .map(|v| serde_json::from_value(v.clone()).ok())
+                    .collect::<Option<Vec<T>>>()
+            })
+        })
+    }
+
     pub fn get_int(&self, key: Setting) -> Option<i64> {
         self.get(key).and_then(|value| value.as_i64())
     }
@@ -204,12 +220,17 @@ mod test {
         assert_eq!(settings.get(Setting::ShareCodeWhispererContent), None);
         assert_eq!(settings.get(Setting::McpLoadedBefore), None);
         assert_eq!(settings.get(Setting::ChatDefaultModel), None);
+        assert_eq!(settings.get(Setting::TrustedTools), None);
 
         settings.set(Setting::TelemetryEnabled, true).await.unwrap();
         settings.set(Setting::OldClientId, "test").await.unwrap();
         settings.set(Setting::ShareCodeWhispererContent, false).await.unwrap();
         settings.set(Setting::McpLoadedBefore, true).await.unwrap();
         settings.set(Setting::ChatDefaultModel, "model 1").await.unwrap();
+        settings
+            .set(Setting::TrustedTools, r#"["tool_a","tool_b"]"#)
+            .await
+            .unwrap();
 
         assert_eq!(settings.get(Setting::TelemetryEnabled), Some(&Value::Bool(true)));
         assert_eq!(
@@ -225,15 +246,21 @@ mod test {
             settings.get(Setting::ChatDefaultModel),
             Some(&Value::String("model 1".to_string()))
         );
+        assert_eq!(
+            settings.get(Setting::TrustedTools),
+            Some(&Value::String(r#"["tool_a","tool_b"]"#.to_string()))
+        );
 
         settings.remove(Setting::TelemetryEnabled).await.unwrap();
         settings.remove(Setting::OldClientId).await.unwrap();
         settings.remove(Setting::ShareCodeWhispererContent).await.unwrap();
         settings.remove(Setting::McpLoadedBefore).await.unwrap();
+        settings.remove(Setting::TrustedTools).await.unwrap();
 
         assert_eq!(settings.get(Setting::TelemetryEnabled), None);
         assert_eq!(settings.get(Setting::OldClientId), None);
         assert_eq!(settings.get(Setting::ShareCodeWhispererContent), None);
         assert_eq!(settings.get(Setting::McpLoadedBefore), None);
+        assert_eq!(settings.get(Setting::TrustedTools), None);
     }
 }

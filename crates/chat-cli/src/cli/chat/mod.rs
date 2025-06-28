@@ -255,6 +255,7 @@ impl ChatArgs {
             .build(os, Box::new(std::io::stderr()), !self.non_interactive)
             .await?;
         let tool_config = tool_manager.load_tools(os, &mut stderr).await?;
+
         let mut tool_permissions = ToolPermissions::new(tool_config.len());
 
         if self.trust_all_tools {
@@ -279,6 +280,9 @@ impl ChatArgs {
                     tool_permissions.untrust_tool(&tool.name);
                 }
             }
+        } else {
+            // CLI args has precendence over Database config
+            tool_permissions.trust_from_database(&os.database);
         }
 
         ChatSession::new(
