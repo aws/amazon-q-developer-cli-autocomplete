@@ -970,13 +970,13 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
-            format!("agent '{agent_name}' already exists")
+            format!("Agent '{agent_name}' already exists")
         );
 
         // Test invalid agent names
         let result = collection.create_agent(&ctx, "").await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "agent name cannot be empty");
+        assert_eq!(result.unwrap_err().to_string(), "Agent name cannot be empty");
 
         let result = collection.create_agent(&ctx, "123-invalid!").await;
         assert!(result.is_err());
@@ -1028,7 +1028,7 @@ mod tests {
 
         let result = collection.delete_agent(&ctx, "nonexistent").await;
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "agent 'nonexistent' does not exist");
+        assert_eq!(result.unwrap_err().to_string(), "Agent 'nonexistent' does not exist");
     }
 
     #[test]
