@@ -91,14 +91,12 @@ impl Tool {
     }
 
     /// Queues up a tool's intention in a human readable format
-    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write, trusted_commands: Option<&crate::cli::chat::context::ProcessedTrustedCommands>) -> Result<()> {
         match self {
             Tool::FsRead(fs_read) => fs_read.queue_description(ctx, output).await,
             Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, output),
             Tool::ExecuteCommand(execute_command) => {
-                // Get trusted commands from context - this is a simplified approach
-                // In a full implementation, we'd need to pass this information through the call chain
-                execute_command.queue_description(output, None)
+                execute_command.queue_description(output, trusted_commands)
             },
             Tool::UseAws(use_aws) => use_aws.queue_description(output),
             Tool::Custom(custom_tool) => custom_tool.queue_description(output),

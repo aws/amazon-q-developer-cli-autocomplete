@@ -2025,9 +2025,14 @@ impl ChatSession {
             style::Print(TOOL_BULLET)
         )?;
 
+        // Get trusted commands from context manager if available
+        let trusted_commands = self.conversation.context_manager
+            .as_ref()
+            .map(|cm| cm.get_processed_trusted_commands());
+
         tool_use
             .tool
-            .queue_description(ctx, &mut self.stdout)
+            .queue_description(ctx, &mut self.stdout, trusted_commands.as_ref())
             .await
             .map_err(|e| ChatError::Custom(format!("failed to print tool, `{}`: {}", tool_use.name, e).into()))?;
 
