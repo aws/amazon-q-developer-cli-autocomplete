@@ -594,7 +594,7 @@ impl ContextMigrate<'b'> {
 }
 
 impl ContextMigrate<'c'> {
-    async fn migrate(self, os: &Os) -> eyre::Result<ContextMigrate<'d'>> {
+    async fn migrate(self, _os: &Os) -> eyre::Result<ContextMigrate<'d'>> {
         let ContextMigrate {
             legacy_global_context,
             legacy_profiles,
@@ -602,7 +602,7 @@ impl ContextMigrate<'c'> {
         } = self;
 
         // Migration of global context
-        if let Some(context) = &legacy_global_context {}
+        if let Some(_context) = &legacy_global_context {}
 
         // Migration of profile context
 
