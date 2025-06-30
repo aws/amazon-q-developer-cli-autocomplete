@@ -1248,19 +1248,8 @@ impl ChatSession {
         let input = user_input.trim();
 
         // handle image path
-        if input.starts_with('/') {
-            if let Some(after_slash) = input.strip_prefix('/') {
-                let looks_like_path = after_slash.contains(MAIN_SEPARATOR)
-                    || after_slash.contains('/')
-                    || after_slash.contains('\\')
-                    || after_slash.contains('.');
-
-                if looks_like_path {
-                    return Ok(ChatState::HandleInput {
-                        input: after_slash.to_string(),
-                    });
-                }
-            }
+        if let Some(chat_state) = does_input_reference_file(input) {
+            return Ok(chat_state);
         }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
             // Required for printing errors correctly.
@@ -1648,15 +1637,11 @@ impl ChatSession {
                             tool_name_being_recvd = Some(name);
                         },
                         parser::ResponseEvent::AssistantText(text) => {
-                            // Add Q response prefix before the first assistant text
+                            // Add Q response prefix before the first assistant text.
+                            // This must be markdown - using a code tick, which is printed
+                            // as green.
                             if !response_prefix_printed && !text.trim().is_empty() {
-                                // Print the Q response prefix with cyan color
-                                execute!(
-                                    self.stdout,
-                                    style::SetForegroundColor(Color::Cyan),
-                                    style::Print("> "),
-                                    style::SetForegroundColor(Color::Reset)
-                                )?;
+                                buf.push_str("`>` ");
                                 response_prefix_printed = true;
                             }
                             buf.push_str(&text);
@@ -2241,6 +2226,25 @@ where
     result
 }
 
+/// Checks if an input may be referencing a file and should not be handled as a typical slash
+/// command. If true, then return [Option::Some<ChatState>], otherwise [Option::None].
+fn does_input_reference_file(input: &str) -> Option<ChatState> {
+    let after_slash = input.strip_prefix("/")?;
+
+    if let Some(first) = shlex::split(after_slash).unwrap_or_default().first() {
+        let looks_like_path =
+            first.contains(MAIN_SEPARATOR) || first.contains('/') || first.contains('\\') || first.contains('.');
+
+        if looks_like_path {
+            return Some(ChatState::HandleInput {
+                input: after_slash.to_string(),
+            });
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2652,5 +2656,22 @@ mod tests {
         .spawn(&mut os)
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn test_does_input_reference_file() {
+        let tests = &[
+            (
+                r"/Users/user/Desktop/Screenshot\ 2025-06-30\ at\ 2.13.34 PM.png read this image for me",
+                true,
+            ),
+            ("/path/to/file.json", true),
+            ("/save output.json", false),
+            ("~/does/not/start/with/slash", false),
+        ];
+        for (input, expected) in tests {
+            let actual = does_input_reference_file(input).is_some();
+            assert_eq!(actual, *expected, "expected {} for input {}", expected, input);
+        }
     }
 }
