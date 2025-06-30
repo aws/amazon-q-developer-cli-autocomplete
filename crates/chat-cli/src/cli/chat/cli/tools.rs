@@ -210,11 +210,14 @@ pub enum RemoveSubcommand {
     #[command(name = "execute_bash")]
     ExecuteBash {
         /// Command patterns to remove (must match exactly). Multiple patterns can be specified as separate arguments.
-        #[arg(long, value_name = "PATTERN", num_args = 1.., required = true)]
+        #[arg(long, value_name = "PATTERN", num_args = 1.., required_unless_present = "all")]
         command: Vec<String>,
         /// Remove from global configuration instead of current profile
         #[arg(long, short)]
         global: bool,
+        /// Remove all trusted command patterns
+        #[arg(long, conflicts_with = "command")]
+        all: bool,
     },
 }
 
@@ -492,129 +495,200 @@ impl ToolsSubcommand {
             },
             Self::Remove { subcommand } => {
                 match subcommand {
-                    RemoveSubcommand::ExecuteBash { command, global } => {
+                    RemoveSubcommand::ExecuteBash { command, global, all } => {
                         match session.conversation.context_manager {
                             Some(ref mut context_manager) => {
-                                // Get current trusted commands to check which commands exist
-                                let current_commands = if global {
-                                    context_manager.get_trusted_commands(true)
-                                } else {
-                                    context_manager.get_trusted_commands(false)
-                                };
-
-                                let mut successful_removals = Vec::new();
-                                let mut failed_removals = Vec::new();
-                                let mut not_found_commands = Vec::new();
-
-                                // Check each command
-                                for cmd_pattern in &command {
-                                    let command_exists = current_commands
-                                        .trusted_commands
-                                        .iter()
-                                        .any(|cmd| cmd.command == *cmd_pattern);
-
-                                    if !command_exists {
-                                        not_found_commands.push(cmd_pattern.clone());
-                                        continue;
-                                    }
-
-                                    // Command exists, try to remove it
-                                    match context_manager.remove_trusted_command(os, cmd_pattern, global).await {
-                                        Ok(()) => {
-                                            successful_removals.push(cmd_pattern.clone());
-                                        },
-                                        Err(error) => {
-                                            failed_removals.push((cmd_pattern.clone(), error.to_string()));
-                                        },
-                                    }
-                                }
-
-                                // Report results
-                                if !successful_removals.is_empty() {
+                                if all {
+                                    // Clear all trusted commands
                                     let scope = if global { "global" } else { "profile" };
-                                    queue!(
-                                        session.stderr,
-                                        style::SetForegroundColor(Color::Green),
-                                        style::Print(format!(
-                                            "\nSuccessfully removed {} trusted command pattern{} from {} configuration:",
-                                            successful_removals.len(),
-                                            if successful_removals.len() == 1 { "" } else { "s" },
-                                            scope
-                                        )),
-                                        style::SetForegroundColor(Color::Reset),
-                                    )?;
-                                    for cmd in &successful_removals {
-                                        queue!(session.stderr, style::Print(format!("\n  • \"{}\"", cmd)),)?;
-                                    }
-                                }
 
-                                if !failed_removals.is_empty() {
-                                    queue!(
-                                        session.stderr,
-                                        style::SetForegroundColor(Color::Red),
-                                        style::Print(format!(
-                                            "\nFailed to remove {} command pattern{}:",
-                                            failed_removals.len(),
-                                            if failed_removals.len() == 1 { "" } else { "s" }
-                                        )),
-                                        style::SetForegroundColor(Color::Reset),
-                                    )?;
-                                    for (cmd, error) in &failed_removals {
-                                        queue!(session.stderr, style::Print(format!("\n  • \"{}\": {}", cmd, error)),)?;
-                                    }
-                                }
-
-                                if !not_found_commands.is_empty() {
-                                    let scope = if global { "global" } else { "profile" };
-                                    queue!(
-                                        session.stderr,
-                                        style::SetForegroundColor(Color::Red),
-                                        style::Print(format!(
-                                            "\n{} command pattern{} not found in {} configuration:",
-                                            not_found_commands.len(),
-                                            if not_found_commands.len() == 1 { "" } else { "s" },
-                                            scope
-                                        )),
-                                        style::SetForegroundColor(Color::Reset),
-                                    )?;
-                                    for cmd in &not_found_commands {
-                                        queue!(session.stderr, style::Print(format!("\n  • \"{}\"", cmd)),)?;
-                                    }
-
-                                    // Show available commands if any commands were not found
-                                    // Refresh the list to show current state after removals
-                                    let updated_commands = if global {
+                                    // Get current commands to show what will be cleared
+                                    let current_commands = if global {
                                         context_manager.get_trusted_commands(true)
                                     } else {
                                         context_manager.get_trusted_commands(false)
                                     };
 
-                                    if updated_commands.trusted_commands.is_empty() {
+                                    if current_commands.trusted_commands.is_empty() {
                                         queue!(
                                             session.stderr,
+                                            style::SetForegroundColor(Color::Yellow),
                                             style::Print(format!(
-                                                "\nNo trusted commands configured in {} scope.",
+                                                "\nNo trusted commands found in {} configuration.",
                                                 scope
                                             )),
+                                            style::SetForegroundColor(Color::Reset),
                                         )?;
                                     } else {
-                                        queue!(
-                                            session.stderr,
-                                            style::Print(format!("\nAvailable trusted commands in {} scope:", scope)),
-                                        )?;
-                                        for cmd in &updated_commands.trusted_commands {
-                                            queue!(session.stderr, style::Print(format!("\n  • \"{}\"", cmd.command)),)?;
-                                            if let Some(desc) = &cmd.description {
+                                        match context_manager.clear_trusted_commands(os, global).await {
+                                            Ok(()) => {
                                                 queue!(
                                                     session.stderr,
-                                                    style::SetForegroundColor(Color::DarkGrey),
-                                                    style::Print(format!(" - {}", desc)),
+                                                    style::SetForegroundColor(Color::Green),
+                                                    style::Print(format!(
+                                                        "\nSuccessfully cleared {} trusted command pattern{} from {} configuration:",
+                                                        current_commands.trusted_commands.len(),
+                                                        if current_commands.trusted_commands.len() == 1 {
+                                                            ""
+                                                        } else {
+                                                            "s"
+                                                        },
+                                                        scope
+                                                    )),
                                                     style::SetForegroundColor(Color::Reset),
                                                 )?;
+                                                for cmd in &current_commands.trusted_commands {
+                                                    queue!(
+                                                        session.stderr,
+                                                        style::Print(format!("\n  • \"{}\"", cmd.command)),
+                                                    )?;
+                                                }
+                                            },
+                                            Err(error) => {
+                                                queue!(
+                                                    session.stderr,
+                                                    style::SetForegroundColor(Color::Red),
+                                                    style::Print(format!(
+                                                        "\nFailed to clear trusted commands: {}",
+                                                        error
+                                                    )),
+                                                    style::SetForegroundColor(Color::Reset),
+                                                )?;
+                                            },
+                                        }
+                                    }
+                                } else {
+                                    // Remove specific commands - existing logic
+                                    // Get current trusted commands to check which commands exist
+                                    let current_commands = if global {
+                                        context_manager.get_trusted_commands(true)
+                                    } else {
+                                        context_manager.get_trusted_commands(false)
+                                    };
+
+                                    let mut successful_removals = Vec::new();
+                                    let mut failed_removals = Vec::new();
+                                    let mut not_found_commands = Vec::new();
+
+                                    // Check each command
+                                    for cmd_pattern in &command {
+                                        let command_exists = current_commands
+                                            .trusted_commands
+                                            .iter()
+                                            .any(|cmd| cmd.command == *cmd_pattern);
+
+                                        if !command_exists {
+                                            not_found_commands.push(cmd_pattern.clone());
+                                            continue;
+                                        }
+
+                                        // Command exists, try to remove it
+                                        match context_manager.remove_trusted_command(os, cmd_pattern, global).await {
+                                            Ok(()) => {
+                                                successful_removals.push(cmd_pattern.clone());
+                                            },
+                                            Err(error) => {
+                                                failed_removals.push((cmd_pattern.clone(), error.to_string()));
+                                            },
+                                        }
+                                    }
+
+                                    // Report results
+                                    if !successful_removals.is_empty() {
+                                        let scope = if global { "global" } else { "profile" };
+                                        queue!(
+                                            session.stderr,
+                                            style::SetForegroundColor(Color::Green),
+                                            style::Print(format!(
+                                                "\nSuccessfully removed {} trusted command pattern{} from {} configuration:",
+                                                successful_removals.len(),
+                                                if successful_removals.len() == 1 { "" } else { "s" },
+                                                scope
+                                            )),
+                                            style::SetForegroundColor(Color::Reset),
+                                        )?;
+                                        for cmd in &successful_removals {
+                                            queue!(session.stderr, style::Print(format!("\n  • \"{}\"", cmd)),)?;
+                                        }
+                                    }
+
+                                    if !failed_removals.is_empty() {
+                                        queue!(
+                                            session.stderr,
+                                            style::SetForegroundColor(Color::Red),
+                                            style::Print(format!(
+                                                "\nFailed to remove {} command pattern{}:",
+                                                failed_removals.len(),
+                                                if failed_removals.len() == 1 { "" } else { "s" }
+                                            )),
+                                            style::SetForegroundColor(Color::Reset),
+                                        )?;
+                                        for (cmd, error) in &failed_removals {
+                                            queue!(
+                                                session.stderr,
+                                                style::Print(format!("\n  • \"{}\": {}", cmd, error)),
+                                            )?;
+                                        }
+                                    }
+
+                                    if !not_found_commands.is_empty() {
+                                        let scope = if global { "global" } else { "profile" };
+                                        queue!(
+                                            session.stderr,
+                                            style::SetForegroundColor(Color::Red),
+                                            style::Print(format!(
+                                                "\n{} command pattern{} not found in {} configuration:",
+                                                not_found_commands.len(),
+                                                if not_found_commands.len() == 1 { "" } else { "s" },
+                                                scope
+                                            )),
+                                            style::SetForegroundColor(Color::Reset),
+                                        )?;
+                                        for cmd in &not_found_commands {
+                                            queue!(session.stderr, style::Print(format!("\n  • \"{}\"", cmd)),)?;
+                                        }
+
+                                        // Show available commands if any commands were not found
+                                        // Refresh the list to show current state after removals
+                                        let updated_commands = if global {
+                                            context_manager.get_trusted_commands(true)
+                                        } else {
+                                            context_manager.get_trusted_commands(false)
+                                        };
+
+                                        if updated_commands.trusted_commands.is_empty() {
+                                            queue!(
+                                                session.stderr,
+                                                style::Print(format!(
+                                                    "\nNo trusted commands configured in {} scope.",
+                                                    scope
+                                                )),
+                                            )?;
+                                        } else {
+                                            queue!(
+                                                session.stderr,
+                                                style::Print(format!(
+                                                    "\nAvailable trusted commands in {} scope:",
+                                                    scope
+                                                )),
+                                            )?;
+                                            for cmd in &updated_commands.trusted_commands {
+                                                queue!(
+                                                    session.stderr,
+                                                    style::Print(format!("\n  • \"{}\"", cmd.command)),
+                                                )?;
+                                                if let Some(desc) = &cmd.description {
+                                                    queue!(
+                                                        session.stderr,
+                                                        style::SetForegroundColor(Color::DarkGrey),
+                                                        style::Print(format!(" - {}", desc)),
+                                                        style::SetForegroundColor(Color::Reset),
+                                                    )?;
+                                                }
                                             }
                                         }
                                     }
-                                }
+                                } // Close the else block for specific command removal
                             },
                             None => {
                                 queue!(
@@ -681,10 +755,15 @@ mod tests {
 
         match cli.tools {
             ToolsSubcommand::Remove { subcommand } => match subcommand {
-                RemoveSubcommand::ExecuteBash { command, global: _ } => {
+                RemoveSubcommand::ExecuteBash {
+                    command,
+                    global: _,
+                    all,
+                } => {
                     assert_eq!(command.len(), 2);
                     assert_eq!(command[0], "npm *");
                     assert_eq!(command[1], "rm test.txt");
+                    assert!(!all);
                 },
             },
             _ => panic!("Expected Remove subcommand"),
@@ -743,233 +822,300 @@ mod tests {
         assert!(validate_command_pattern("").is_err());
         assert!(validate_command_pattern("   ").is_err());
     }
+    #[test]
+    fn test_remove_execute_bash_all_flag() {
+        // Test parsing --all flag for removing all trusted commands
+        let args = vec!["test", "remove", "execute_bash", "--all"];
+
+        let cli = TestCli::try_parse_from(args).expect("Failed to parse arguments");
+
+        match cli.tools {
+            ToolsSubcommand::Remove { subcommand } => match subcommand {
+                RemoveSubcommand::ExecuteBash { command, global, all } => {
+                    assert!(command.is_empty()); // No specific commands when using --all
+                    assert!(!global); // Default is false
+                    assert!(all); // --all flag should be true
+                },
+            },
+            _ => panic!("Expected Remove subcommand"),
+        }
+    }
+
+    #[test]
+    fn test_remove_execute_bash_all_flag_global() {
+        // Test parsing --all flag with --global
+        let args = vec!["test", "remove", "execute_bash", "--all", "--global"];
+
+        let cli = TestCli::try_parse_from(args).expect("Failed to parse arguments");
+
+        match cli.tools {
+            ToolsSubcommand::Remove { subcommand } => match subcommand {
+                RemoveSubcommand::ExecuteBash { command, global, all } => {
+                    assert!(command.is_empty());
+                    assert!(global); // --global flag should be true
+                    assert!(all); // --all flag should be true
+                },
+            },
+            _ => panic!("Expected Remove subcommand"),
+        }
+    }
 }
-    #[test]
-    fn test_slash_command_parsing_allow() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
-
-        // Test parsing /tools allow execute_bash --command "pattern"
-        let args = vec!["slash_command", "tools", "allow", "execute_bash", "--command", "npm *"];
-        
-        let result = SlashCommand::try_parse_from(args);
-        assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
-        
-        match result.unwrap() {
-            SlashCommand::Tools(tools_args) => {
-                match tools_args.subcommand {
-                    Some(ToolsSubcommand::Allow { subcommand }) => {
-                        match subcommand {
-                            AllowSubcommand::ExecuteBash { command, description: _, global: _ } => {
-                                assert_eq!(command.len(), 1);
-                                assert_eq!(command[0], "npm *");
-                            },
-                        }
-                    },
-                    _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
-                }
-            },
-            _ => panic!("Expected Tools command"),
-        }
-    }
-
-    #[test]
-    fn test_slash_command_parsing_remove() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
-
-        // Test parsing /tools remove execute_bash --command "pattern"
-        let args = vec!["slash_command", "tools", "remove", "execute_bash", "--command", "npm *"];
-        
-        let result = SlashCommand::try_parse_from(args);
-        assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
-        
-        match result.unwrap() {
-            SlashCommand::Tools(tools_args) => {
-                match tools_args.subcommand {
-                    Some(ToolsSubcommand::Remove { subcommand }) => {
-                        match subcommand {
-                            RemoveSubcommand::ExecuteBash { command, global: _ } => {
-                                assert_eq!(command.len(), 1);
-                                assert_eq!(command[0], "npm *");
-                            },
-                        }
-                    },
-                    _ => panic!("Expected Remove subcommand, got: {:?}", tools_args.subcommand),
-                }
-            },
-            _ => panic!("Expected Tools command"),
-        }
-    }
-
-    #[test]
-    fn test_slash_command_parsing_multiple_patterns() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
-
-        // Test parsing multiple command patterns
-        let args = vec![
-            "slash_command", "tools", "allow", "execute_bash", 
-            "--command", "npm *", "git status", "ls -la"
-        ];
-        
-        let result = SlashCommand::try_parse_from(args);
-        assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
-        
-        match result.unwrap() {
-            SlashCommand::Tools(tools_args) => {
-                match tools_args.subcommand {
-                    Some(ToolsSubcommand::Allow { subcommand }) => {
-                        match subcommand {
-                            AllowSubcommand::ExecuteBash { command, description: _, global: _ } => {
-                                assert_eq!(command.len(), 3);
-                                assert_eq!(command[0], "npm *");
-                                assert_eq!(command[1], "git status");
-                                assert_eq!(command[2], "ls -la");
-                            },
-                        }
-                    },
-                    _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
-                }
-            },
-            _ => panic!("Expected Tools command"),
-        }
-    }
-
-    #[test]
-    fn test_slash_command_parsing_with_description() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
-
-        // Test parsing with description
-        let args = vec![
-            "slash_command", "tools", "allow", "execute_bash", 
-            "--command", "npm *", "--description", "Trust npm commands"
-        ];
-        
-        let result = SlashCommand::try_parse_from(args);
-        assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
-        
-        match result.unwrap() {
-            SlashCommand::Tools(tools_args) => {
-                match tools_args.subcommand {
-                    Some(ToolsSubcommand::Allow { subcommand }) => {
-                        match subcommand {
-                            AllowSubcommand::ExecuteBash { command, description, global: _ } => {
-                                assert_eq!(command.len(), 1);
-                                assert_eq!(command[0], "npm *");
-                                assert_eq!(description, Some("Trust npm commands".to_string()));
-                            },
-                        }
-                    },
-                    _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
-                }
-            },
-            _ => panic!("Expected Tools command"),
-        }
-    }
-
-    #[test]
-    fn test_slash_command_parsing_global_flag() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
-
-        // Test parsing with global flag
-        let args = vec![
-            "slash_command", "tools", "allow", "execute_bash", 
-            "--command", "npm *", "--global"
-        ];
-        
-        let result = SlashCommand::try_parse_from(args);
-        assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
-        
-        match result.unwrap() {
-            SlashCommand::Tools(tools_args) => {
-                match tools_args.subcommand {
-                    Some(ToolsSubcommand::Allow { subcommand }) => {
-                        match subcommand {
-                            AllowSubcommand::ExecuteBash { command, description: _, global } => {
-                                assert_eq!(command.len(), 1);
-                                assert_eq!(command[0], "npm *");
-                                assert!(global);
-                            },
-                        }
-                    },
-                    _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
-                }
-            },
-            _ => panic!("Expected Tools command"),
-        }
-    }    
 #[test]
-    fn test_input_parsing_simulation() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
+fn test_slash_command_parsing_allow() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
 
-        // Simulate how the chat session processes input
-        let user_input = "/tools allow execute_bash --command \"npm *\"";
-        
-        // This mimics the logic in handle_input method
-        if let Some(args) = user_input.strip_prefix("/").and_then(shlex::split) {
-            let mut args_with_binary = args.clone();
-            args_with_binary.insert(0, "slash_command".to_owned());
-            
-            let result = SlashCommand::try_parse_from(args_with_binary);
-            assert!(result.is_ok(), "Failed to parse user input '{}': {:?}", user_input, result.err());
-            
-            match result.unwrap() {
-                SlashCommand::Tools(tools_args) => {
-                    match tools_args.subcommand {
-                        Some(ToolsSubcommand::Allow { subcommand }) => {
-                            match subcommand {
-                                AllowSubcommand::ExecuteBash { command, description: _, global: _ } => {
-                                    assert_eq!(command.len(), 1);
-                                    assert_eq!(command[0], "npm *");
-                                },
-                            }
-                        },
-                        _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
-                    }
+    // Test parsing /tools allow execute_bash --command "pattern"
+    let args = vec!["slash_command", "tools", "allow", "execute_bash", "--command", "npm *"];
+
+    let result = SlashCommand::try_parse_from(args);
+    assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
+
+    match result.unwrap() {
+        SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+            Some(ToolsSubcommand::Allow { subcommand }) => match subcommand {
+                AllowSubcommand::ExecuteBash {
+                    command,
+                    description: _,
+                    global: _,
+                } => {
+                    assert_eq!(command.len(), 1);
+                    assert_eq!(command[0], "npm *");
                 },
-                _ => panic!("Expected Tools command"),
-            }
-        } else {
-            panic!("Failed to parse input as slash command");
-        }
+            },
+            _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
+        },
+        _ => panic!("Expected Tools command"),
     }
+}
 
-    #[test]
-    fn test_input_parsing_simulation_remove() {
-        use crate::cli::chat::cli::SlashCommand;
-        use clap::Parser;
+#[test]
+fn test_slash_command_parsing_remove() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
 
-        // Test the remove command as well
-        let user_input = "/tools remove execute_bash --command \"npm *\"";
-        
-        if let Some(args) = user_input.strip_prefix("/").and_then(shlex::split) {
-            let mut args_with_binary = args.clone();
-            args_with_binary.insert(0, "slash_command".to_owned());
-            
-            let result = SlashCommand::try_parse_from(args_with_binary);
-            assert!(result.is_ok(), "Failed to parse user input '{}': {:?}", user_input, result.err());
-            
-            match result.unwrap() {
-                SlashCommand::Tools(tools_args) => {
-                    match tools_args.subcommand {
-                        Some(ToolsSubcommand::Remove { subcommand }) => {
-                            match subcommand {
-                                RemoveSubcommand::ExecuteBash { command, global: _ } => {
-                                    assert_eq!(command.len(), 1);
-                                    assert_eq!(command[0], "npm *");
-                                },
-                            }
-                        },
-                        _ => panic!("Expected Remove subcommand, got: {:?}", tools_args.subcommand),
-                    }
+    // Test parsing /tools remove execute_bash --command "pattern"
+    let args = vec!["slash_command", "tools", "remove", "execute_bash", "--command", "npm *"];
+
+    let result = SlashCommand::try_parse_from(args);
+    assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
+
+    match result.unwrap() {
+        SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+            Some(ToolsSubcommand::Remove { subcommand }) => match subcommand {
+                RemoveSubcommand::ExecuteBash {
+                    command,
+                    global: _,
+                    all,
+                } => {
+                    assert_eq!(command.len(), 1);
+                    assert_eq!(command[0], "npm *");
+                    assert!(!all);
                 },
-                _ => panic!("Expected Tools command"),
-            }
-        } else {
-            panic!("Failed to parse input as slash command");
-        }
+            },
+            _ => panic!("Expected Remove subcommand, got: {:?}", tools_args.subcommand),
+        },
+        _ => panic!("Expected Tools command"),
     }
+}
+
+#[test]
+fn test_slash_command_parsing_multiple_patterns() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
+
+    // Test parsing multiple command patterns
+    let args = vec![
+        "slash_command",
+        "tools",
+        "allow",
+        "execute_bash",
+        "--command",
+        "npm *",
+        "git status",
+        "ls -la",
+    ];
+
+    let result = SlashCommand::try_parse_from(args);
+    assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
+
+    match result.unwrap() {
+        SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+            Some(ToolsSubcommand::Allow { subcommand }) => match subcommand {
+                AllowSubcommand::ExecuteBash {
+                    command,
+                    description: _,
+                    global: _,
+                } => {
+                    assert_eq!(command.len(), 3);
+                    assert_eq!(command[0], "npm *");
+                    assert_eq!(command[1], "git status");
+                    assert_eq!(command[2], "ls -la");
+                },
+            },
+            _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
+        },
+        _ => panic!("Expected Tools command"),
+    }
+}
+
+#[test]
+fn test_slash_command_parsing_with_description() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
+
+    // Test parsing with description
+    let args = vec![
+        "slash_command",
+        "tools",
+        "allow",
+        "execute_bash",
+        "--command",
+        "npm *",
+        "--description",
+        "Trust npm commands",
+    ];
+
+    let result = SlashCommand::try_parse_from(args);
+    assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
+
+    match result.unwrap() {
+        SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+            Some(ToolsSubcommand::Allow { subcommand }) => match subcommand {
+                AllowSubcommand::ExecuteBash {
+                    command,
+                    description,
+                    global: _,
+                } => {
+                    assert_eq!(command.len(), 1);
+                    assert_eq!(command[0], "npm *");
+                    assert_eq!(description, Some("Trust npm commands".to_string()));
+                },
+            },
+            _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
+        },
+        _ => panic!("Expected Tools command"),
+    }
+}
+
+#[test]
+fn test_slash_command_parsing_global_flag() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
+
+    // Test parsing with global flag
+    let args = vec![
+        "slash_command",
+        "tools",
+        "allow",
+        "execute_bash",
+        "--command",
+        "npm *",
+        "--global",
+    ];
+
+    let result = SlashCommand::try_parse_from(args);
+    assert!(result.is_ok(), "Failed to parse slash command: {:?}", result.err());
+
+    match result.unwrap() {
+        SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+            Some(ToolsSubcommand::Allow { subcommand }) => match subcommand {
+                AllowSubcommand::ExecuteBash {
+                    command,
+                    description: _,
+                    global,
+                } => {
+                    assert_eq!(command.len(), 1);
+                    assert_eq!(command[0], "npm *");
+                    assert!(global);
+                },
+            },
+            _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
+        },
+        _ => panic!("Expected Tools command"),
+    }
+}
+#[test]
+fn test_input_parsing_simulation() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
+
+    // Simulate how the chat session processes input
+    let user_input = "/tools allow execute_bash --command \"npm *\"";
+
+    // This mimics the logic in handle_input method
+    if let Some(args) = user_input.strip_prefix("/").and_then(shlex::split) {
+        let mut args_with_binary = args.clone();
+        args_with_binary.insert(0, "slash_command".to_owned());
+
+        let result = SlashCommand::try_parse_from(args_with_binary);
+        assert!(
+            result.is_ok(),
+            "Failed to parse user input '{}': {:?}",
+            user_input,
+            result.err()
+        );
+
+        match result.unwrap() {
+            SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+                Some(ToolsSubcommand::Allow { subcommand }) => match subcommand {
+                    AllowSubcommand::ExecuteBash {
+                        command,
+                        description: _,
+                        global: _,
+                    } => {
+                        assert_eq!(command.len(), 1);
+                        assert_eq!(command[0], "npm *");
+                    },
+                },
+                _ => panic!("Expected Allow subcommand, got: {:?}", tools_args.subcommand),
+            },
+            _ => panic!("Expected Tools command"),
+        }
+    } else {
+        panic!("Failed to parse input as slash command");
+    }
+}
+
+#[test]
+fn test_input_parsing_simulation_remove() {
+    use crate::cli::chat::cli::SlashCommand;
+    use clap::Parser;
+
+    // Test the remove command as well
+    let user_input = "/tools remove execute_bash --command \"npm *\"";
+
+    if let Some(args) = user_input.strip_prefix("/").and_then(shlex::split) {
+        let mut args_with_binary = args.clone();
+        args_with_binary.insert(0, "slash_command".to_owned());
+
+        let result = SlashCommand::try_parse_from(args_with_binary);
+        assert!(
+            result.is_ok(),
+            "Failed to parse user input '{}': {:?}",
+            user_input,
+            result.err()
+        );
+
+        match result.unwrap() {
+            SlashCommand::Tools(tools_args) => match tools_args.subcommand {
+                Some(ToolsSubcommand::Remove { subcommand }) => match subcommand {
+                    RemoveSubcommand::ExecuteBash {
+                        command,
+                        global: _,
+                        all,
+                    } => {
+                        assert_eq!(command.len(), 1);
+                        assert_eq!(command[0], "npm *");
+                        assert!(!all);
+                    },
+                },
+                _ => panic!("Expected Remove subcommand, got: {:?}", tools_args.subcommand),
+            },
+            _ => panic!("Expected Tools command"),
+        }
+    } else {
+        panic!("Failed to parse input as slash command");
+    }
+}
+

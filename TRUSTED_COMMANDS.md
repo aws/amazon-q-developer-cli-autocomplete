@@ -182,7 +182,7 @@ A: The 'c' option only appears for `execute_bash` and `execute_cmd` tools, and o
 A: Remember that patterns are case-sensitive and use glob-style matching. `npm *` matches `npm install` but not `NPM install` or `Npm install`.
 
 **Q: How do I remove a trusted command?**
-A: Currently, you need to manually edit your profile's `context.json` file to remove trusted commands. Look for the file at `~/.aws/amazonq/profiles/<profile_name>/context.json`.
+A: You can use the `/tools remove execute_bash`commands. To remove all commands type `/tolls remove execute_bash --all`. You can also manually edit your profile's `context.json` file to remove trusted commands. Look for the file at `~/.aws/amazonq/profiles/<profile_name>/context.json`.
 
 ### Error Handling
 
