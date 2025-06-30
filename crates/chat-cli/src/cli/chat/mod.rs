@@ -144,11 +144,14 @@ pub const EXTRA_HELP: &str = color_print::cstr! {"
 <black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
 
 <cyan,em>Tips:</cyan,em>
-<em>!{command}</em>            <black!>Quickly execute a command in your current session</black!>
-<em>Ctrl(^) + j</em>           <black!>Insert new-line to provide multi-line prompt. Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
-<em>Ctrl(^) + s</em>           <black!>Fuzzy search commands and context files. Use Tab to select multiple items.</black!>
-                      <black!>Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)</black!>
-<em>chat.editMode</em>         <black!>Set editing mode (vim or emacs) using: q settings chat.editMode vi/emacs</black!>
+<em>!{command}</em>          <black!>Quickly execute a command in your current session</black!>
+<em>Ctrl(^) + j</em>         <black!>Insert new-line to provide multi-line prompt</black!>
+                    <black!>Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
+<em>Ctrl(^) + s</em>         <black!>Fuzzy search commands and context files</black!>
+                    <black!>Use Tab to select multiple items</black!>
+                    <black!>Change the keybind using: q settings chat.skimCommandKey x</black!>
+<em>chat.editMode</em>       <black!>The prompt editing mode (vim or emacs)</black!>
+                    <black!>Change using: q settings chat.skimCommandKey x</black!>
 "};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
@@ -353,13 +356,10 @@ const ROTATING_TIPS: [&str; 16] = [
 
 const GREETING_BREAK_POINT: usize = 80;
 
-const POPULAR_SHORTCUTS: &str = color_print::cstr! {
-"<black!><green!>/help</green!> all commands                      <em>•</em>  <green!>ctrl + j</green!> new lines
-<green!>ctrl + s</green!> fuzzy search                   <em>•</em>  <green!>ctrl + f</green!> accept completion</black!>"};
+const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>  <green!>ctrl + j</green!> new lines  <em>•</em>  <green!>ctrl + s</green!> fuzzy search</black!>"};
 const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands
 <green!>ctrl + j</green!> new lines
 <green!>ctrl + s</green!> fuzzy search
-<green!>ctrl + f</green!> accept completion
 </black!>"};
 
 const RESPONSE_TIMEOUT_CONTENT: &str = "Response timed out - message took too long to generate";
