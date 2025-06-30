@@ -245,6 +245,12 @@ their IPC:
 
 
 
+## 📚 Documentation
+
+- [**Trusted Commands**](TRUSTED_COMMANDS.md) - Configure frequently used shell commands to execute without confirmation
+- [**Contributing**](CONTRIBUTING.md) - Guidelines for contributing to the project
+- [**Codebase Summary**](codebase-summary.md) - High-level overview of the codebase structure
+
 ## 🛡️ Security
 
 See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
