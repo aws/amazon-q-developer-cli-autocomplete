@@ -2226,9 +2226,13 @@ impl ChatSession {
             style::SetForegroundColor(Color::Green),
             style::Print(format!("{}. ", options.len() + 1)),
             style::SetForegroundColor(Color::Reset),
-            style::Print("Run the command without adding a rule\n\n"),
+            style::Print("Run the command without adding a rule\n"),
+            style::SetForegroundColor(Color::Green),
+            style::Print(format!("{}. ", options.len() + 2)),
+            style::SetForegroundColor(Color::Reset),
+            style::Print("Exit rule creation and don't run any commands\n\n"),
             style::SetForegroundColor(Color::DarkGrey),
-            style::Print(format!("Enter your choice (1-{}): ", options.len() + 1)),
+            style::Print(format!("Enter your choice (1-{}): ", options.len() + 2)),
             style::SetForegroundColor(Color::Reset),
         )?;
 
@@ -2274,6 +2278,11 @@ impl ChatSession {
                 // User chose to run without adding a rule
                 self.tool_uses[tool_index].accepted = true;
                 return Ok(ChatState::ExecuteTools);
+            } else if choice == options.len() + 2 {
+                // User chose to exit without running the command
+                return Ok(ChatState::PromptUser {
+                    skip_printing_tools: false,
+                });
             }
         }
         

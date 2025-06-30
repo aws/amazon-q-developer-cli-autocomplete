@@ -172,87 +172,29 @@ impl ContextManager {
         })
     }
 
-    /// Save the current configuration to disk.
-    ///
-    /// # Arguments
-    /// * `global` - If true, save the global configuration; otherwise, save the current profile
-    ///   configuration
-    ///
-    /// # Returns
-    /// A Result indicating success or an error
     async fn save_config(&self, ctx: &Context, global: bool) -> Result<()> {
         if global {
             let global_path = directories::chat_global_context_path(ctx)?;
-            self.save_config_to_path(ctx, &global_path, &self.global_config, "global").await
+            if let Some(parent) = global_path.parent() {
+                ctx.fs.create_dir_all(parent).await?;
+            }
+            let contents = serde_json::to_string_pretty(&self.global_config)?;
+            ctx.fs.write(&global_path, contents).await?;
         } else {
             let profile_path = profile_context_path(ctx, &self.current_profile)?;
-            self.save_config_to_path(ctx, &profile_path, &self.profile_config, &format!("profile '{}'", self.current_profile)).await
+            if let Some(parent) = profile_path.parent() {
+                ctx.fs.create_dir_all(parent).await?;
+            }
+            let contents = serde_json::to_string_pretty(&self.profile_config)?;
+            ctx.fs.write(&profile_path, contents).await?;
         }
+        Ok(())
     }
     
     /// Save configuration to a specific path with comprehensive error handling.
-    ///
-    /// # Arguments
-    /// * `config_path` - Path to save the configuration to
-    /// * `config` - Configuration to save
-    /// * `config_type` - Type of configuration for error messages
-    ///
-    /// # Returns
-    /// A Result indicating success or an error
-    async fn save_config_to_path(
-        &self,
-        ctx: &Context,
-        config_path: &Path,
-        config: &ContextConfig,
-        config_type: &str,
-    ) -> Result<()> {
-        // Ensure parent directory exists
-        if let Some(parent) = config_path.parent() {
-            ctx.fs.create_dir_all(parent).await
-                .map_err(|e| eyre!("Failed to create directory '{}' for {} configuration: {}", 
-                                  parent.display(), config_type, e))?;
-        }
-        
-        // Serialize configuration with error handling
-        let contents = serde_json::to_string_pretty(config)
-            .map_err(|e| eyre!("Failed to serialize {} configuration: {}", config_type, e))?;
-        
-        // Write to file with error handling
-        ctx.fs.write(config_path, contents).await
-            .map_err(|e| eyre!("Failed to write {} configuration to '{}': {}", 
-                              config_type, config_path.display(), e))?;
-        
-        tracing::debug!("Successfully saved {} configuration to '{}'", config_type, config_path.display());
-        Ok(())
-    }
-
-    /// Reloads the global and profile config from disk.
-    /// Handles errors gracefully by falling back to default configurations when files are corrupted.
     pub async fn reload_config(&mut self, ctx: &Context) -> Result<()> {
-        // Reload global config with error handling
-        match load_global_config(ctx).await {
-            Ok(config) => {
-                self.global_config = config;
-                tracing::debug!("Successfully reloaded global configuration");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to reload global configuration, keeping current: {}", e);
-                // Keep the current global config instead of failing
-            }
-        }
-        
-        // Reload profile config with error handling
-        match load_profile_config(ctx, &self.current_profile).await {
-            Ok(config) => {
-                self.profile_config = config;
-                tracing::debug!("Successfully reloaded profile '{}' configuration", self.current_profile);
-            }
-            Err(e) => {
-                tracing::warn!("Failed to reload profile '{}' configuration, keeping current: {}", self.current_profile, e);
-                // Keep the current profile config instead of failing
-            }
-        }
-        
+        self.global_config = load_global_config(ctx).await?;
+        self.profile_config = load_profile_config(ctx, &self.current_profile).await?;
         Ok(())
     }
 
