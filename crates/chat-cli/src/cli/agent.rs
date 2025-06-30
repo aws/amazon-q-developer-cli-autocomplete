@@ -326,7 +326,7 @@ impl Agents {
             match migrate(os).await {
                 Ok((i, new_agents)) => (i, new_agents),
                 Err(e) => {
-                    warn!("Migration did not happen for the following reason {e}. This is not necessarily an error");
+                    warn!("Migration did not happen for the following reason: {e}. This is not necessarily an error");
                     (None, vec![])
                 },
             }
@@ -568,14 +568,11 @@ impl ContextMigrate<'c'> {
             mut new_agents,
         } = self;
 
-        let mut create_hooks = None::<HashMap<String, Hook>>;
-        let mut prompt_hooks = None::<HashMap<String, Hook>>;
-        let mut included_files = None::<Vec<String>>;
         let has_global_context = legacy_global_context.is_some();
 
         // Migration of global context
         if let Some(context) = legacy_global_context {
-            let (start_hooks, per_prompt_hooks) =
+            let (create_hooks, prompt_hooks) =
                 context
                     .hooks
                     .into_iter()
@@ -583,23 +580,13 @@ impl ContextMigrate<'c'> {
                         matches!(hook.trigger, HookTrigger::ConversationStart)
                     });
 
-            create_hooks.replace(start_hooks);
-            prompt_hooks.replace(per_prompt_hooks);
-            included_files.replace(context.paths);
-
             new_agents.push(Agent {
                 name: LEGACY_GLOBAL_AGENT_NAME.to_string(),
                 description: Some(DEFAULT_DESC.to_string()),
                 path: Some(directories::chat_global_agent_path(os)?.join(format!("{LEGACY_GLOBAL_AGENT_NAME}.json"))),
-                included_files: included_files.clone().unwrap_or_default(),
-                create_hooks: {
-                    let create_hooks = create_hooks.clone().unwrap_or_default();
-                    serde_json::to_value(create_hooks).unwrap_or(serde_json::json!({}))
-                },
-                prompt_hooks: {
-                    let prompt_hooks = prompt_hooks.clone().unwrap_or_default();
-                    serde_json::to_value(prompt_hooks).unwrap_or(serde_json::json!({}))
-                },
+                included_files: context.paths,
+                create_hooks: serde_json::to_value(create_hooks).unwrap_or(serde_json::json!({})),
+                prompt_hooks: serde_json::to_value(prompt_hooks).unwrap_or(serde_json::json!({})),
                 ..Default::default()
             });
         }
@@ -607,17 +594,7 @@ impl ContextMigrate<'c'> {
         let global_agent_path = directories::chat_global_agent_path(os)?;
 
         // Migration of profile context
-        for (profile_name, mut context) in legacy_profiles.drain() {
-            if let Some(create_hooks) = create_hooks.as_ref() {
-                context.hooks.extend(create_hooks.clone());
-            }
-            if let Some(prompt_hooks) = prompt_hooks.as_ref() {
-                context.hooks.extend(prompt_hooks.clone());
-            }
-            if let Some(included_files) = included_files.as_ref() {
-                context.paths.extend(included_files.clone());
-            }
-
+        for (profile_name, context) in legacy_profiles.drain() {
             let (create_hooks, prompt_hooks) =
                 context
                     .hooks
@@ -688,7 +665,11 @@ impl ContextMigrate<'d'> {
     async fn prompt_set_default(self, os: &mut Os) -> eyre::Result<(Option<String>, Vec<Agent>)> {
         let ContextMigrate { new_agents, .. } = self;
 
-        let labels = new_agents.iter().map(|a| a.name.as_str()).collect::<Vec<_>>();
+        let labels = new_agents
+            .iter()
+            .map(|a| a.name.as_str())
+            .chain(vec!["Let me do this on my own later"])
+            .collect::<Vec<_>>();
         let selection: Option<_> = match Select::with_theme(&crate::util::dialoguer_theme())
             .with_prompt(
                 "Set an agent as default. This is the agent that q chat will launch with unless specified otherwise.",
