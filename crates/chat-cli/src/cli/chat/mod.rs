@@ -182,7 +182,16 @@ impl ChatArgs {
         let mut stderr = std::io::stderr();
 
         let agents = {
-            let mut agents = Agents::load(os, self.profile.as_deref(), &mut stderr).await;
+            let mut default_agent_name = None::<String>;
+            let agent_name = if let Some(profile) = self.profile.as_deref() {
+                Some(profile)
+            } else if let Some(agent) = os.database.settings.get_string(Setting::ChatDefaultAgent) {
+                default_agent_name.replace(agent);
+                default_agent_name.as_deref()
+            } else {
+                None
+            };
+            let mut agents = Agents::load(os, agent_name, self.non_interactive, &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
             if let Some(name) = self.profile.as_ref() {

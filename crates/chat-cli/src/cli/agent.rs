@@ -28,7 +28,11 @@ use serde::{
     Serialize,
 };
 use tokio::fs::ReadDir;
-use tracing::error;
+use tracing::{
+    error,
+    info,
+    warn,
+};
 
 use super::chat::tools::custom_tool::CustomToolConfig;
 use super::chat::tools::{
@@ -245,9 +249,9 @@ impl Agents {
 
     /// Migrated from [reload_profiles] from context.rs. It loads the active agent from disk and
     /// replaces its in-memory counterpart with it.
-    pub async fn reload_agents(&mut self, os: &Os, output: &mut impl Write) -> eyre::Result<()> {
+    pub async fn reload_agents(&mut self, os: &mut Os, output: &mut impl Write) -> eyre::Result<()> {
         let persona_name = self.get_active().map(|a| a.name.as_str());
-        let mut new_self = Self::load(os, persona_name, output).await;
+        let mut new_self = Self::load(os, persona_name, true, output).await;
         std::mem::swap(self, &mut new_self);
         Ok(())
     }
@@ -312,7 +316,28 @@ impl Agents {
     /// notice.
     /// In addition to loading, this function also calls the function responsible for migrating
     /// existing context into agent.
-    pub async fn load(os: &Os, agent_name: Option<&str>, output: &mut impl Write) -> Self {
+    pub async fn load(
+        os: &mut Os,
+        mut agent_name: Option<&str>,
+        skip_migration: bool,
+        output: &mut impl Write,
+    ) -> Self {
+        let (chosen_name, new_agents) = if !skip_migration {
+            match migrate(os).await {
+                Ok((i, new_agents)) => (i, new_agents),
+                Err(e) => {
+                    warn!("Migration did not happen for the following reason {e}. This is not necessarily an error");
+                    (None, vec![])
+                },
+            }
+        } else {
+            (None, vec![])
+        };
+
+        if let Some(name) = chosen_name.as_ref() {
+            agent_name.replace(name.as_str());
+        }
+
         let mut local_agents = 'local: {
             let Ok(path) = directories::chat_local_agent_dir() else {
                 break 'local Vec::<Agent>::new();
@@ -339,7 +364,10 @@ impl Agents {
                 },
             };
             load_agents_from_entries(files).await
-        };
+        }
+        .into_iter()
+        .chain(new_agents)
+        .collect::<Vec<_>>();
 
         let local_names = local_agents.iter().map(|a| a.name.as_str()).collect::<HashSet<&str>>();
         global_agents.retain(|a| {
@@ -364,71 +392,6 @@ impl Agents {
         });
 
         local_agents.append(&mut global_agents);
-
-        // Ensure that we always have a default agent under the global directory
-        if !local_agents.iter().any(|a| a.name == "default") {
-            let default_agent = Agent {
-                path: directories::chat_global_agent_path(os)
-                    .ok()
-                    .map(|p| p.join("default.json")),
-                ..Default::default()
-            };
-
-            match serde_json::to_string_pretty(&default_agent) {
-                Ok(content) => {
-                    if let Ok(path) = directories::chat_global_agent_path(os) {
-                        let default_path = path.join("default.json");
-                        if let Err(e) = tokio::fs::write(default_path, &content).await {
-                            error!("Error writing default agent to file: {:?}", e);
-                        }
-                    };
-                },
-                Err(e) => {
-                    error!("Error serializing default persona: {:?}", e);
-                },
-            }
-
-            local_agents.push(default_agent);
-        }
-
-        let default_agent = local_agents
-            .iter_mut()
-            .find(|a| a.name == "default")
-            .expect("Missing default agent");
-
-        match migrate_global_context(os, default_agent).await {
-            Ok(true) => {
-                let _ = queue!(
-                    output,
-                    style::Print(format!(
-                        "Global context config has been migrated to {}\n",
-                        default_agent
-                            .path
-                            .as_ref()
-                            .and_then(|p| p.to_str())
-                            .unwrap_or("global config directory.")
-                    ))
-                );
-            },
-            Ok(false) => {},
-            Err(e) => {
-                let _ = queue!(
-                    output,
-                    style::Print(format!(
-                        "Current default agent is malformed: {e}\nAborting migration.\n"
-                    )),
-                    style::Print("Fix the default agent and try again")
-                );
-            },
-        }
-
-        // Check to see if we have legacy profile directory still
-        if let Ok(_legacy_profile_dir) = directories::chat_profiles_dir(os) {
-            let _ = queue!(
-                output,
-                style::Print("Legacy profile directory detected. Run /profile migrate to migrate them")
-            );
-        }
 
         let _ = output.flush();
 
@@ -594,17 +557,124 @@ impl ContextMigrate<'b'> {
 }
 
 impl ContextMigrate<'c'> {
-    async fn migrate(self, _os: &Os) -> eyre::Result<ContextMigrate<'d'>> {
+    async fn migrate(self, os: &Os) -> eyre::Result<ContextMigrate<'d'>> {
+        const LEGACY_GLOBAL_AGENT_NAME: &str = "migrated_agent_from_global_context";
+        const DEFAULT_DESC: &str = "This is an agent migrated from global context";
+        const PROFILE_DESC: &str = "This is an agent migrated from profile context";
+
         let ContextMigrate {
             legacy_global_context,
-            legacy_profiles,
-            new_agents,
+            mut legacy_profiles,
+            mut new_agents,
         } = self;
 
+        let mut create_hooks = None::<HashMap<String, Hook>>;
+        let mut prompt_hooks = None::<HashMap<String, Hook>>;
+        let mut included_files = None::<Vec<String>>;
+        let has_global_context = legacy_global_context.is_some();
+
         // Migration of global context
-        if let Some(_context) = &legacy_global_context {}
+        if let Some(context) = legacy_global_context {
+            let (start_hooks, per_prompt_hooks) =
+                context
+                    .hooks
+                    .into_iter()
+                    .partition::<HashMap<String, Hook>, _>(|(_, hook)| {
+                        matches!(hook.trigger, HookTrigger::ConversationStart)
+                    });
+
+            create_hooks.replace(start_hooks);
+            prompt_hooks.replace(per_prompt_hooks);
+            included_files.replace(context.paths);
+
+            new_agents.push(Agent {
+                name: LEGACY_GLOBAL_AGENT_NAME.to_string(),
+                description: Some(DEFAULT_DESC.to_string()),
+                path: Some(directories::chat_global_agent_path(os)?.join(format!("{LEGACY_GLOBAL_AGENT_NAME}.json"))),
+                included_files: included_files.clone().unwrap_or_default(),
+                create_hooks: {
+                    let create_hooks = create_hooks.clone().unwrap_or_default();
+                    serde_json::to_value(create_hooks).unwrap_or(serde_json::json!({}))
+                },
+                prompt_hooks: {
+                    let prompt_hooks = prompt_hooks.clone().unwrap_or_default();
+                    serde_json::to_value(prompt_hooks).unwrap_or(serde_json::json!({}))
+                },
+                ..Default::default()
+            });
+        }
+
+        let global_agent_path = directories::chat_global_agent_path(os)?;
 
         // Migration of profile context
+        for (profile_name, mut context) in legacy_profiles.drain() {
+            if let Some(create_hooks) = create_hooks.as_ref() {
+                context.hooks.extend(create_hooks.clone());
+            }
+            if let Some(prompt_hooks) = prompt_hooks.as_ref() {
+                context.hooks.extend(prompt_hooks.clone());
+            }
+            if let Some(included_files) = included_files.as_ref() {
+                context.paths.extend(included_files.clone());
+            }
+
+            let (create_hooks, prompt_hooks) =
+                context
+                    .hooks
+                    .into_iter()
+                    .partition::<HashMap<String, Hook>, _>(|(_, hook)| {
+                        matches!(hook.trigger, HookTrigger::ConversationStart)
+                    });
+
+            new_agents.push(Agent {
+                path: Some(global_agent_path.join(format!("{profile_name}.json"))),
+                name: profile_name,
+                description: Some(PROFILE_DESC.to_string()),
+                included_files: context.paths,
+                create_hooks: serde_json::to_value(create_hooks).unwrap_or(serde_json::json!({})),
+                prompt_hooks: serde_json::to_value(prompt_hooks).unwrap_or(serde_json::json!({})),
+                ..Default::default()
+            });
+        }
+
+        if !os.fs.exists(&global_agent_path) {
+            os.fs.create_dir_all(&global_agent_path).await?;
+        }
+
+        for agent in &new_agents {
+            let content = serde_json::to_string_pretty(agent)?;
+            if let Some(path) = agent.path.as_ref() {
+                info!("Agent {} peristed in path {}", agent.name, path.to_string_lossy());
+                os.fs.write(path, content).await?;
+            } else {
+                warn!(
+                    "Agent with name {} does not have path associated and is thus not migrated.",
+                    agent.name
+                );
+            }
+        }
+
+        let legacy_profile_config_path = directories::chat_profiles_dir(os)?;
+        let profile_backup_path = legacy_profile_config_path
+            .parent()
+            .ok_or(eyre::eyre!("Failed to obtaine profile config parent path"))?
+            .join("profiles.bak");
+        os.fs.rename(legacy_profile_config_path, profile_backup_path).await?;
+
+        if has_global_context {
+            let legacy_global_config_path = directories::chat_global_context_path(os)?;
+            let legacy_global_config_file_name = legacy_global_config_path
+                .file_name()
+                .ok_or(eyre::eyre!("Failed to obtain legacy global config name"))?
+                .to_string_lossy();
+            let global_context_backup_path = legacy_global_config_path
+                .parent()
+                .ok_or(eyre::eyre!("Failed to obtain parent path for global context"))?
+                .join(format!("{}.bak", legacy_global_config_file_name));
+            os.fs
+                .rename(legacy_global_config_path, global_context_backup_path)
+                .await?;
+        }
 
         Ok(ContextMigrate {
             legacy_global_context: None,
@@ -615,7 +685,7 @@ impl ContextMigrate<'c'> {
 }
 
 impl ContextMigrate<'d'> {
-    async fn prompt_set_default(self, os: &mut Os) -> eyre::Result<(Option<usize>, Vec<Agent>)> {
+    async fn prompt_set_default(self, os: &mut Os) -> eyre::Result<(Option<String>, Vec<Agent>)> {
         let ContextMigrate { new_agents, .. } = self;
 
         let labels = new_agents.iter().map(|a| a.name.as_str()).collect::<Vec<_>>();
@@ -623,6 +693,7 @@ impl ContextMigrate<'d'> {
             .with_prompt(
                 "Set an agent as default. This is the agent that q chat will launch with unless specified otherwise.",
             )
+            .default(0)
             .items(&labels)
             .interact_on_opt(&dialoguer::console::Term::stdout())
         {
@@ -638,12 +709,13 @@ impl ContextMigrate<'d'> {
             Err(e) => bail!("Failed to choose an option: {e}"),
         };
 
-        let mut agent_to_load = None::<usize>;
+        let mut agent_to_load = None::<String>;
         if let Some(i) = selection {
             if let Some(name) = labels.get(i) {
                 if let Ok(value) = serde_json::to_value(name) {
                     if os.database.settings.set(Setting::ChatDefaultAgent, value).await.is_ok() {
-                        agent_to_load.replace(i);
+                        let chosen_name = (*name).to_string();
+                        agent_to_load.replace(chosen_name);
                     }
                 }
             }
@@ -710,7 +782,7 @@ fn validate_agent_name(name: &str) -> eyre::Result<()> {
     Ok(())
 }
 
-async fn migrate(os: &mut Os) -> eyre::Result<(Option<usize>, Vec<Agent>)> {
+async fn migrate(os: &mut Os) -> eyre::Result<(Option<String>, Vec<Agent>)> {
     ContextMigrate::<'a'>::scan(os)
         .await?
         .prompt_migrate()
@@ -719,94 +791,6 @@ async fn migrate(os: &mut Os) -> eyre::Result<(Option<usize>, Vec<Agent>)> {
         .await?
         .prompt_set_default(os)
         .await
-}
-
-/// Migration of context consists of the following:
-/// 1. Scan for global context config.
-/// 2. If it does not exist. Signal to the caller that no migration was done.
-/// 3. If it does, deserialize the legacy global config and merge it with the default agent, follow
-///    by persisting it on disk.
-async fn migrate_global_context(os: &Os, default_agent: &mut Agent) -> eyre::Result<bool> {
-    let legacy_global_config_path = directories::chat_global_context_path(os)?;
-    if !os.fs.exists(&legacy_global_config_path) {
-        return Ok(false);
-    }
-    let legacy_global_config = {
-        let content = os.fs.read(&legacy_global_config_path).await?;
-        serde_json::from_slice::<ContextConfig>(&content)?
-    };
-
-    default_agent.included_files.extend(legacy_global_config.paths);
-
-    let mut create_hooks = {
-        if default_agent.create_hooks.is_array() {
-            let existing_hooks = serde_json::from_value::<Vec<String>>(default_agent.create_hooks.clone())?;
-            existing_hooks
-                .into_iter()
-                .enumerate()
-                .fold(HashMap::<String, Hook>::new(), |mut acc, (i, command)| {
-                    acc.insert(
-                        format!("start_hook_{i}"),
-                        Hook::new_inline_hook(HookTrigger::ConversationStart, command),
-                    );
-                    acc
-                })
-        } else {
-            serde_json::from_value::<HashMap<String, Hook>>(default_agent.create_hooks.clone())?
-        }
-    };
-
-    let mut prompt_hooks = {
-        if default_agent.prompt_hooks.is_array() {
-            let existing_hooks = serde_json::from_value::<Vec<String>>(default_agent.prompt_hooks.clone())?;
-            existing_hooks
-                .into_iter()
-                .enumerate()
-                .fold(HashMap::<String, Hook>::new(), |mut acc, (i, command)| {
-                    acc.insert(
-                        format!("per_prompt_hook_{i}"),
-                        Hook::new_inline_hook(HookTrigger::PerPrompt, command),
-                    );
-                    acc
-                })
-        } else {
-            serde_json::from_value::<HashMap<String, Hook>>(default_agent.prompt_hooks.clone())?
-        }
-    };
-
-    // We don't want to override anything in user's config
-    // We need to return early if that is the case
-    for (name, hook) in legacy_global_config.hooks {
-        match hook.trigger {
-            HookTrigger::ConversationStart => create_hooks.insert(name, hook),
-            HookTrigger::PerPrompt => prompt_hooks.insert(name, hook),
-        };
-    }
-
-    let content = serde_json::to_string_pretty(default_agent)?;
-    let path = default_agent.path.as_ref().ok_or(eyre::eyre!(
-        "Failed to persist default agent. Associated path not found."
-    ))?;
-    os.fs.write(path, content.as_bytes()).await?;
-    let global_context_backup_path = legacy_global_config_path
-        .parent()
-        .ok_or(eyre::eyre!(
-            "Failed to persist default agent. Parent folder directory not found."
-        ))?
-        .join(format!(
-            "{}.bak",
-            legacy_global_config_path
-                .file_name()
-                .ok_or(eyre::eyre!(
-                    "Failed to persist default agent. Error retrieving legacy file name."
-                ))?
-                .to_string_lossy()
-        ));
-    os.fs
-        .rename(&legacy_global_config_path, global_context_backup_path)
-        .await?;
-
-    Ok(true)
 }
 
 #[cfg(test)]
