@@ -22,7 +22,7 @@ use crate::cli::chat::context::ProcessedTrustedCommands;
 pub mod dangerous_patterns;
 
 pub use dangerous_patterns::*;
-use crate::platform::Context;
+use crate::os::Os;
 
 // Platform-specific modules
 #[cfg(windows)]
@@ -47,7 +47,7 @@ pub struct ExecuteCommand {
 }
 
 impl ExecuteCommand {
-    pub fn requires_acceptance(&self, _ctx: &Context, trusted_commands: Option<&ProcessedTrustedCommands>) -> bool {
+    pub fn requires_acceptance(&self, _os: &Os, trusted_commands: Option<&ProcessedTrustedCommands>) -> bool {
         let Some(args) = shlex::split(&self.command) else {
             return true;
         };
@@ -154,18 +154,8 @@ impl ExecuteCommand {
         }
 
         // Add the summary if available
-        if let Some(summary) = &self.summary {
-            queue!(
-                output,
-                style::Print(CONTINUATION_LINE),
-                style::Print("\n"),
-                style::Print(PURPOSE_ARROW),
-                style::SetForegroundColor(Color::Blue),
-                style::Print("Purpose: "),
-                style::ResetColor,
-                style::Print(summary),
-                style::Print("\n"),
-            )?;
+        if let Some(ref summary) = self.summary {
+            super::display_purpose(Some(summary), output)?;
         }
 
         queue!(output, style::Print("\n"))?;
@@ -173,7 +163,7 @@ impl ExecuteCommand {
         Ok(())
     }
 
-    pub async fn validate(&mut self, _ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, _os: &Os) -> Result<()> {
         // TODO: probably some small amount of PATH checking
         Ok(())
     }
@@ -223,7 +213,7 @@ mod tests {
             ("type file.txt | del", true),
         ];
 
-        let ctx = Context::new();
+        let os = Os::new().await.unwrap();
         
         for (cmd, expected) in cmds {
             let tool = serde_json::from_value::<ExecuteCommand>(serde_json::json!({
@@ -231,7 +221,7 @@ mod tests {
             }))
             .unwrap();
             assert_eq!(
-                tool.requires_acceptance(&ctx, None),
+                tool.requires_acceptance(&os, None),
                 *expected,
                 "expected command: `{}` to have requires_acceptance: `{}`",
                 cmd,
@@ -244,7 +234,7 @@ mod tests {
     async fn test_requires_acceptance_with_trusted_commands() {
         use crate::cli::chat::context::{TrustedCommand, TrustedCommandsConfig, ProcessedTrustedCommands};
         
-        let ctx = Context::new();
+        let os = Os::new().await.unwrap();
         
         // Create trusted commands configuration
         let mut trusted_config = TrustedCommandsConfig::default();
@@ -279,7 +269,7 @@ mod tests {
             };
             
             assert_eq!(
-                tool.requires_acceptance(&ctx, Some(&processed_trusted)),
+                tool.requires_acceptance(&os, Some(&processed_trusted)),
                 *expected,
                 "expected command: `{}` to have requires_acceptance: `{}`",
                 cmd,

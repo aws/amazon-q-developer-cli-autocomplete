@@ -523,6 +523,24 @@ fn normalize_l2(v: &Tensor) -> Result<Tensor> {
     }
 }
 
+impl crate::embedding::BenchmarkableEmbedder for CandleTextEmbedder {
+    fn model_name(&self) -> String {
+        format!("Candle-{}", self.config.name)
+    }
+
+    fn embedding_dim(&self) -> usize {
+        self.config.config.hidden_size
+    }
+
+    fn embed_single(&self, text: &str) -> Vec<f32> {
+        self.embed(text).unwrap()
+    }
+
+    fn embed_batch(&self, texts: &[String]) -> Vec<Vec<f32>> {
+        self.embed_batch(texts).unwrap()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -781,22 +799,5 @@ mod tests {
                 // Don't fail the test if a model can't be loaded, just report it
             },
         }
-    }
-}
-impl crate::embedding::BenchmarkableEmbedder for CandleTextEmbedder {
-    fn model_name(&self) -> String {
-        format!("Candle-{}", self.config.name)
-    }
-
-    fn embedding_dim(&self) -> usize {
-        self.config.config.hidden_size
-    }
-
-    fn embed_single(&self, text: &str) -> Vec<f32> {
-        self.embed(text).unwrap()
-    }
-
-    fn embed_batch(&self, texts: &[String]) -> Vec<Vec<f32>> {
-        self.embed_batch(texts).unwrap()
     }
 }

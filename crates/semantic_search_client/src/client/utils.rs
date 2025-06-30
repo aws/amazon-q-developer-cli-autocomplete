@@ -59,7 +59,7 @@ where
     F: Fn(ProgressStatus) + Send + 'static,
 {
     // Notify progress: Getting file count
-    if let Some(ref callback) = progress_callback {
+    if let Some(callback) = progress_callback {
         callback(ProgressStatus::CountingFiles);
     }
 

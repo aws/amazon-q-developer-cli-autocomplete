@@ -239,7 +239,6 @@ pub async fn handle_incoming(conn: &mut UnixStream, buf: &mut BytesMut, sway_sta
             },
             ParseResult::Incomplete => {
                 conn.read_buf(buf).await.unwrap();
-                continue;
             },
             ParseResult::Error(err) => {
                 error!(%err, "Failed to parse sway message");

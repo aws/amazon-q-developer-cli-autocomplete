@@ -63,7 +63,7 @@ pub(crate) async fn update(
     let dmg_name = update
         .download_url
         .path_segments()
-        .and_then(|s| s.last())
+        .and_then(|mut s| s.next_back())
         .unwrap_or(APP_BUNDLE_NAME);
 
     let dmg_path = temp_dir.path().join(dmg_name);

@@ -24,24 +24,26 @@ use skim::prelude::*;
 use tempfile::NamedTempFile;
 
 use super::context::ContextManager;
-use crate::platform::Context;
+use crate::os::Os;
 
-pub fn select_profile_with_skim(ctx: &Context, context_manager: &ContextManager) -> Result<Option<String>> {
-    let profiles = context_manager.list_profiles_blocking(ctx)?;
+pub fn select_profile_with_skim(os: &Os, context_manager: &ContextManager) -> Result<Option<String>> {
+    let profiles = context_manager.list_profiles_blocking(os)?;
 
     launch_skim_selector(&profiles, "Select profile: ", false)
         .map(|selected| selected.and_then(|s| s.into_iter().next()))
 }
 
 pub struct SkimCommandSelector {
+    os: Os,
     context_manager: Arc<ContextManager>,
     tool_names: Vec<String>,
 }
 
 impl SkimCommandSelector {
     /// This allows the ConditionalEventHandler handle function to be bound to a KeyEvent.
-    pub fn new(context_manager: Arc<ContextManager>, tool_names: Vec<String>) -> Self {
+    pub fn new(os: Os, context_manager: Arc<ContextManager>, tool_names: Vec<String>) -> Self {
         Self {
+            os,
             context_manager,
             tool_names,
         }
@@ -49,18 +51,9 @@ impl SkimCommandSelector {
 }
 
 impl ConditionalEventHandler for SkimCommandSelector {
-    fn handle(
-        &self,
-        _evt: &rustyline::Event,
-        _n: RepeatCount,
-        _positive: bool,
-        _ctx: &EventContext<'_>,
-    ) -> Option<Cmd> {
-        // TODO: Remove this line... I hate traits
-        let context = Context::new();
-
+    fn handle(&self, _evt: &rustyline::Event, _n: RepeatCount, _positive: bool, _os: &EventContext<'_>) -> Option<Cmd> {
         // Launch skim command selector with the context manager if available
-        match select_command(&context, self.context_manager.as_ref(), &self.tool_names) {
+        match select_command(&self.os, self.context_manager.as_ref(), &self.tool_names) {
             Ok(Some(command)) => Some(Cmd::Insert(1, command)),
             _ => {
                 // If cancelled or error, do nothing
@@ -233,7 +226,7 @@ pub fn select_context_paths_with_skim(context_manager: &ContextManager) -> Resul
 }
 
 /// Launch the command selector and handle the selected command
-pub fn select_command(ctx: &Context, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
+pub fn select_command(os: &Os, context_manager: &ContextManager, tools: &[String]) -> Result<Option<String>> {
     let commands = get_available_commands();
 
     match launch_skim_selector(&commands, "Select command: ", false)? {
@@ -291,7 +284,7 @@ pub fn select_command(ctx: &Context, context_manager: &ContextManager, tools: &[
                 },
                 Some(cmd @ CommandType::Profile(_)) if cmd.needs_profile_selection() => {
                     // For profile operations that need a profile name, show profile selector
-                    match select_profile_with_skim(ctx, context_manager)? {
+                    match select_profile_with_skim(os, context_manager)? {
                         Some(profile) => {
                             let full_cmd = format!("{} {}", selected_command, profile);
                             Ok(Some(full_cmd))

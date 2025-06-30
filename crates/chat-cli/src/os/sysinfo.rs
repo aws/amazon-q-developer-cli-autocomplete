@@ -41,8 +41,8 @@ impl SysInfo {
         match &self.0 {
             Inner::Real => {
                 let system = sysinfo::System::new_all();
-                let is_running = system.processes_by_name(&OsString::from(name)).next().is_some();
-                is_running
+
+                system.processes_by_name(&OsString::from(name)).next().is_some()
             },
             Inner::Fake(fake) => fake.lock().unwrap().process_names.contains(name),
         }
