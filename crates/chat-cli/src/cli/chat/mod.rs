@@ -1427,7 +1427,6 @@ impl ChatSession {
             queue!(self.stderr, style::SetForegroundColor(Color::Magenta))?;
             queue!(self.stderr, style::SetForegroundColor(Color::Reset))?;
             queue!(self.stderr, cursor::Hide)?;
-            execute!(self.stderr, style::Print("\n"))?;
 
             if self.interactive {
                 self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
@@ -1631,10 +1630,8 @@ impl ChatSession {
             queue!(
                 self.stderr,
                 style::SetForegroundColor(Color::Reset),
-                terminal::Clear(terminal::ClearType::CurrentLine),
                 cursor::MoveToColumn(0),
                 cursor::Show,
-                cursor::MoveUp(1),
                 terminal::Clear(terminal::ClearType::CurrentLine),
             )?;
         }
