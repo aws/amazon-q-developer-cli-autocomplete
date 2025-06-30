@@ -30,6 +30,7 @@ use super::{
     sanitize_path_tool_arg,
 };
 use crate::cli::chat::CONTINUATION_LINE;
+use crate::cli::chat::tools::display_purpose;
 use crate::cli::chat::util::images::{
     handle_images_from_paths,
     is_supported_image_type,
@@ -41,8 +42,15 @@ const CHECKMARK: &str = "✔";
 const CROSS: &str = "✘";
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FsRead {
+    // For batch operations
+    pub operations: Option<Vec<FsReadOperation>>,
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "mode")]
-pub enum FsRead {
+pub enum FsReadOperation {
     Line(FsLine),
     Directory(FsDirectory),
     Search(FsSearch),
@@ -51,29 +59,156 @@ pub enum FsRead {
 
 impl FsRead {
     pub async fn validate(&mut self, os: &Os) -> Result<()> {
+        if let Some(operations) = &mut self.operations {
+            if operations.is_empty() {
+                bail!("At least one operation must be provided");
+            }
+
+            for op in operations {
+                op.validate(os).await?;
+            }
+            Ok(())
+        } else {
+            bail!("'operations' field must be provided")
+        }
+    }
+
+    pub async fn queue_description(&self, os: &Os, updates: &mut impl Write) -> Result<()> {
+        if let Some(operations) = &self.operations {
+            if operations.len() == 1 {
+                // Single operation - display without batch prefix
+                operations[0].queue_description(os, updates).await
+            } else {
+                // Multiple operations - display as batch
+                queue!(
+                    updates,
+                    style::Print("Batch fs_read operation with "),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print(operations.len()),
+                    style::ResetColor,
+                    style::Print(" operations:\n")
+                )?;
+
+                // Display purpose if available for batch operations
+                let _ = display_purpose(self.summary.as_ref(), updates);
+
+                for (i, op) in operations.iter().enumerate() {
+                    queue!(updates, style::Print(format!("\n↱ Operation {}: ", i + 1)))?;
+                    op.queue_description(os, updates).await?;
+                }
+                Ok(())
+            }
+        } else {
+            bail!("'operations' field must be provided")
+        }
+    }
+
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
+        if let Some(operations) = &self.operations {
+            if operations.len() == 1 {
+                // Single operation - return result directly
+                operations[0].invoke(os, updates).await
+            } else {
+                // Multiple operations - combine results
+                let mut combined_results = Vec::new();
+                let mut all_images = Vec::new();
+
+                let mut success_ops = 0usize;
+                let mut failed_ops = 0usize;
+
+                for (i, op) in operations.iter().enumerate() {
+                    match op.invoke(os, updates).await {
+                        Ok(result) => {
+                            success_ops += 1;
+
+                            match &result.output {
+                                OutputKind::Text(text) => {
+                                    combined_results.push(format!(
+                                        "=== Operation {} Result (Text) ===\n{}",
+                                        i + 1,
+                                        text
+                                    ));
+                                },
+                                OutputKind::Json(json) => {
+                                    combined_results.push(format!(
+                                        "=== Operation {} Result (Json) ===\n{}",
+                                        i + 1,
+                                        serde_json::to_string_pretty(json)?
+                                    ));
+                                },
+                                OutputKind::Images(images) => {
+                                    all_images.extend(images.clone());
+                                    combined_results.push(format!(
+                                        "=== Operation {} Result (Images) ===\n[{} images processed]",
+                                        i + 1,
+                                        images.len()
+                                    ));
+                                },
+                            }
+                        },
+
+                        Err(err) => {
+                            failed_ops += 1;
+                            combined_results.push(format!("=== Operation {} Error ===\n{}", i + 1, err));
+                        },
+                    }
+                }
+
+                super::queue_function_result(
+                    &format!(
+                        "Summary: {} operations processed, {} successful, {} failed",
+                        operations.len(),
+                        success_ops,
+                        failed_ops
+                    ),
+                    updates,
+                    false,
+                    true,
+                )?;
+
+                // If we have images, return them as the primary output
+                if !all_images.is_empty() {
+                    Ok(InvokeOutput {
+                        output: OutputKind::Images(all_images),
+                    })
+                } else {
+                    // Otherwise, return the combined text results
+                    Ok(InvokeOutput {
+                        output: OutputKind::Text(combined_results.join("\n\n")),
+                    })
+                }
+            }
+        } else {
+            bail!("'operations' field must be provided")
+        }
+    }
+}
+
+impl FsReadOperation {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         match self {
-            FsRead::Line(fs_line) => fs_line.validate(os).await,
-            FsRead::Directory(fs_directory) => fs_directory.validate(os).await,
-            FsRead::Search(fs_search) => fs_search.validate(os).await,
-            FsRead::Image(fs_image) => fs_image.validate(os).await,
+            FsReadOperation::Line(fs_line) => fs_line.validate(os).await,
+            FsReadOperation::Directory(fs_directory) => fs_directory.validate(os).await,
+            FsReadOperation::Search(fs_search) => fs_search.validate(os).await,
+            FsReadOperation::Image(fs_image) => fs_image.validate(os).await,
         }
     }
 
     pub async fn queue_description(&self, os: &Os, updates: &mut impl Write) -> Result<()> {
         match self {
-            FsRead::Line(fs_line) => fs_line.queue_description(os, updates).await,
-            FsRead::Directory(fs_directory) => fs_directory.queue_description(updates),
-            FsRead::Search(fs_search) => fs_search.queue_description(updates),
-            FsRead::Image(fs_image) => fs_image.queue_description(updates),
+            FsReadOperation::Line(fs_line) => fs_line.queue_description(os, updates).await,
+            FsReadOperation::Directory(fs_directory) => fs_directory.queue_description(updates),
+            FsReadOperation::Search(fs_search) => fs_search.queue_description(updates),
+            FsReadOperation::Image(fs_image) => fs_image.queue_description(updates),
         }
     }
 
     pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            FsRead::Line(fs_line) => fs_line.invoke(os, updates).await,
-            FsRead::Directory(fs_directory) => fs_directory.invoke(os, updates).await,
-            FsRead::Search(fs_search) => fs_search.invoke(os, updates).await,
-            FsRead::Image(fs_image) => fs_image.invoke(updates).await,
+            FsReadOperation::Line(fs_line) => fs_line.invoke(os, updates).await,
+            FsReadOperation::Directory(fs_directory) => fs_directory.invoke(os, updates).await,
+            FsReadOperation::Search(fs_search) => fs_search.invoke(os, updates).await,
+            FsReadOperation::Image(fs_image) => fs_image.invoke(updates).await,
         }
     }
 }

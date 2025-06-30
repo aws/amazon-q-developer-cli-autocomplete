@@ -370,6 +370,8 @@ const TRUST_ALL_TEXT: &str = color_print::cstr! {"<green!>All tools are now trus
 const TOOL_BULLET: &str = " ● ";
 const CONTINUATION_LINE: &str = " ⋮ ";
 const PURPOSE_ARROW: &str = " ↳ ";
+const SUCCESS_TICK: &str = " ✓ ";
+const ERROR_EXCLAMATION: &str = " ❗ ";
 
 /// Enum used to denote the origin of a tool use event
 enum ToolUseStatus {
