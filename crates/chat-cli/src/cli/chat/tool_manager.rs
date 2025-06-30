@@ -78,6 +78,7 @@ use crate::cli::chat::tools::execute::ExecuteCommand;
 use crate::cli::chat::tools::fs_read::FsRead;
 use crate::cli::chat::tools::fs_write::FsWrite;
 use crate::cli::chat::tools::gh_issue::GhIssue;
+use crate::cli::chat::tools::knowledge::Knowledge;
 use crate::cli::chat::tools::thinking::Thinking;
 use crate::cli::chat::tools::use_aws::UseAws;
 use crate::cli::chat::tools::{
@@ -85,14 +86,13 @@ use crate::cli::chat::tools::{
     ToolOrigin,
     ToolSpec,
 };
-use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::{
     JsonRpcResponse,
     Messenger,
     PromptGet,
 };
-use crate::platform::Context;
+use crate::os::Os;
 use crate::telemetry::TelemetryThread;
 use crate::util::directories::home_dir;
 
@@ -102,12 +102,12 @@ const NAMESPACE_DELIMITER: &str = "___";
 const VALID_TOOL_NAME: &str = "^[a-zA-Z][a-zA-Z0-9_]*$";
 const SPINNER_CHARS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
-pub fn workspace_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(ctx.env.current_dir()?.join(".amazonq").join("mcp.json"))
+pub fn workspace_mcp_config_path(os: &Os) -> eyre::Result<PathBuf> {
+    Ok(os.env.current_dir()?.join(".amazonq").join("mcp.json"))
 }
 
-pub fn global_mcp_config_path(ctx: &Context) -> eyre::Result<PathBuf> {
-    Ok(home_dir(ctx)?.join(".aws").join("amazonq").join("mcp.json"))
+pub fn global_mcp_config_path(os: &Os) -> eyre::Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("mcp.json"))
 }
 
 /// Messages used for communication between the tool initialization thread and the loading
@@ -156,7 +156,7 @@ pub struct McpServerConfig {
 }
 
 impl McpServerConfig {
-    pub async fn load_config(output: &mut impl Write) -> eyre::Result<Self> {
+    pub async fn load_config(stderr: &mut impl Write) -> eyre::Result<Self> {
         let mut cwd = std::env::current_dir()?;
         cwd.push(".amazonq/mcp.json");
         let expanded_path = shellexpand::tilde("~/.aws/amazonq/mcp.json");
@@ -165,12 +165,12 @@ impl McpServerConfig {
         let local_buf = tokio::fs::read(cwd).await.ok();
         let conf = match (global_buf, local_buf) {
             (Some(global_buf), Some(local_buf)) => {
-                let mut global_conf = Self::from_slice(&global_buf, output, "global")?;
-                let local_conf = Self::from_slice(&local_buf, output, "local")?;
+                let mut global_conf = Self::from_slice(&global_buf, stderr, "global")?;
+                let local_conf = Self::from_slice(&local_buf, stderr, "local")?;
                 for (server_name, config) in local_conf.mcp_servers {
                     if global_conf.mcp_servers.insert(server_name.clone(), config).is_some() {
                         queue!(
-                            output,
+                            stderr,
                             style::SetForegroundColor(style::Color::Yellow),
                             style::Print("WARNING: "),
                             style::ResetColor,
@@ -184,31 +184,32 @@ impl McpServerConfig {
                 }
                 global_conf
             },
-            (None, Some(local_buf)) => Self::from_slice(&local_buf, output, "local")?,
-            (Some(global_buf), None) => Self::from_slice(&global_buf, output, "global")?,
+            (None, Some(local_buf)) => Self::from_slice(&local_buf, stderr, "local")?,
+            (Some(global_buf), None) => Self::from_slice(&global_buf, stderr, "global")?,
             _ => Default::default(),
         };
-        output.flush()?;
+
+        stderr.flush()?;
         Ok(conf)
     }
 
-    pub async fn load_from_file(ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let contents = ctx.fs.read_to_string(path.as_ref()).await?;
+    pub async fn load_from_file(os: &Os, path: impl AsRef<Path>) -> eyre::Result<Self> {
+        let contents = os.fs.read_to_string(path.as_ref()).await?;
         Ok(serde_json::from_str(&contents)?)
     }
 
-    pub async fn save_to_file(&self, ctx: &Context, path: impl AsRef<Path>) -> eyre::Result<()> {
+    pub async fn save_to_file(&self, os: &Os, path: impl AsRef<Path>) -> eyre::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
-        ctx.fs.write(path.as_ref(), json).await?;
+        os.fs.write(path.as_ref(), json).await?;
         Ok(())
     }
 
-    fn from_slice(slice: &[u8], output: &mut impl Write, location: &str) -> eyre::Result<McpServerConfig> {
+    fn from_slice(slice: &[u8], stderr: &mut impl Write, location: &str) -> eyre::Result<McpServerConfig> {
         match serde_json::from_slice::<Self>(slice) {
             Ok(config) => Ok(config),
             Err(e) => {
                 queue!(
-                    output,
+                    stderr,
                     style::SetForegroundColor(style::Color::Yellow),
                     style::Print("WARNING: "),
                     style::ResetColor,
@@ -252,7 +253,7 @@ impl ToolManagerBuilder {
 
     pub async fn build(
         mut self,
-        telemetry: &TelemetryThread,
+        os: &mut Os,
         mut output: Box<dyn Write + Send + Sync + 'static>,
         interactive: bool,
     ) -> eyre::Result<ToolManager> {
@@ -413,7 +414,7 @@ impl ToolManagerBuilder {
         let pending = Arc::new(RwLock::new(HashSet::<String>::new()));
         let pending_clone = pending.clone();
         let (mut msg_rx, messenger_builder) = ServerMessengerBuilder::new(20);
-        let telemetry_clone = telemetry.clone();
+        let telemetry_clone = os.telemetry.clone();
         let notify = Arc::new(Notify::new());
         let notify_weak = Arc::downgrade(&notify);
         let load_record = Arc::new(Mutex::new(HashMap::<String, Vec<LoadingRecord>>::new()));
@@ -589,7 +590,7 @@ impl ToolManagerBuilder {
                 },
                 Err(e) => {
                     error!("Error initializing mcp client for server {}: {:?}", name, &e);
-                    telemetry
+                    os.telemetry
                         .send_mcp_server_init(conversation_id.clone(), Some(e.to_string()), 0)
                         .ok();
                     let _ = messenger.send_tools_list_result(Err(e)).await;
@@ -604,7 +605,7 @@ impl ToolManagerBuilder {
         // TODO: accommodate hot reload of mcp servers
         if let (Some(sender), Some(receiver)) = (sender, receiver) {
             let clients = clients.iter().fold(HashMap::new(), |mut acc, (n, c)| {
-                acc.insert(n.to_string(), Arc::downgrade(c));
+                acc.insert(n.clone(), Arc::downgrade(c));
                 acc
             });
             let prompts_clone = prompts.clone();
@@ -634,7 +635,7 @@ impl ToolManagerBuilder {
                                     return acc;
                                 };
                                 for (prompt_name, prompt_get) in prompt_gets.iter() {
-                                    acc.entry(prompt_name.to_string())
+                                    acc.entry(prompt_name.clone())
                                         .and_modify(|bundles| {
                                             bundles.push(PromptBundle {
                                                 server_name: server_name.to_owned(),
@@ -813,16 +814,19 @@ impl Clone for ToolManager {
 impl ToolManager {
     pub async fn load_tools(
         &mut self,
-        database: &Database,
-        output: &mut impl Write,
+        os: &mut Os,
+        stderr: &mut impl Write,
     ) -> eyre::Result<HashMap<String, ToolSpec>> {
         let tx = self.loading_status_sender.take();
         let notify = self.notify.take();
         self.schema = {
             let mut tool_specs =
                 serde_json::from_str::<HashMap<String, ToolSpec>>(include_str!("tools/tool_index.json"))?;
-            if !crate::cli::chat::tools::thinking::Thinking::is_enabled(database) {
+            if !crate::cli::chat::tools::thinking::Thinking::is_enabled(os) {
                 tool_specs.remove("thinking");
+            }
+            if !crate::cli::chat::tools::knowledge::Knowledge::is_enabled(os) {
+                tool_specs.remove("knowledge");
             }
 
             #[cfg(windows)]
@@ -875,14 +879,16 @@ impl ToolManager {
             // If there is no server loaded, we want to resolve immediately
             Box::pin(future::ready(()))
         } else if self.is_interactive {
-            let init_timeout = database
+            let init_timeout = os
+                .database
                 .settings
                 .get_int(Setting::McpInitTimeout)
                 .map_or(5000_u64, |s| s as u64);
             Box::pin(tokio::time::sleep(std::time::Duration::from_millis(init_timeout)))
         } else {
             // if it is non-interactive we will want to use the "mcp.noInteractiveTimeout"
-            let init_timeout = database
+            let init_timeout = os
+                .database
                 .settings
                 .get_int(Setting::McpNoInteractiveTimeout)
                 .map_or(30_000_u64, |s| s as u64);
@@ -901,7 +907,7 @@ impl ToolManager {
                 }
                 if !self.clients.is_empty() && !self.is_interactive {
                     let _ = queue!(
-                        output,
+                        stderr,
                         style::Print(
                             "Not all mcp servers loaded. Configure non-interactive timeout with q settings mcp.noInteractiveTimeout"
                         ),
@@ -935,7 +941,7 @@ impl ToolManager {
                 .any(|(_, records)| records.iter().any(|record| matches!(record, LoadingRecord::Err(_))))
         {
             queue!(
-                output,
+                stderr,
                 style::Print(
                     "One or more mcp server did not load correctly. See $TMPDIR/qlog/chat.log for more details."
                 ),
@@ -969,6 +975,7 @@ impl ToolManager {
             "use_aws" => Tool::UseAws(serde_json::from_value::<UseAws>(value.args).map_err(map_err)?),
             "report_issue" => Tool::GhIssue(serde_json::from_value::<GhIssue>(value.args).map_err(map_err)?),
             "thinking" => Tool::Thinking(serde_json::from_value::<Thinking>(value.args).map_err(map_err)?),
+            "knowledge" => Tool::Knowledge(serde_json::from_value::<Knowledge>(value.args).map_err(map_err)?),
             // Note that this name is namespaced with server_name{DELIMITER}tool_name
             name => {
                 // Note: tn_map also has tools that underwent no transformation. In otherwords, if
@@ -1149,7 +1156,7 @@ impl ToolManager {
                             .map_err(|e| GetPromptError::Synchronization(e.to_string()))?;
                         for (prompt_name, prompt_get) in prompt_gets.iter() {
                             prompts_wl
-                                .entry(prompt_name.to_string())
+                                .entry(prompt_name.clone())
                                 .and_modify(|bundles| {
                                     let mut is_modified = false;
                                     for bundle in &mut *bundles {
@@ -1217,7 +1224,6 @@ impl ToolManager {
                     has_retried = true;
                     self.refresh_prompts(&mut prompts_wl)?;
                     maybe_bundles = prompts_wl.get(&prompt_name);
-                    continue 'blk;
                 },
                 (_, _, true) => {
                     break 'blk Err(GetPromptError::PromptNotFound(prompt_name));
@@ -1236,7 +1242,7 @@ impl ToolManager {
                     return acc;
                 };
                 for (prompt_name, prompt_get) in prompt_gets.iter() {
-                    acc.entry(prompt_name.to_string())
+                    acc.entry(prompt_name.clone())
                         .and_modify(|bundles| {
                             bundles.push(PromptBundle {
                                 server_name: server_name.to_owned(),

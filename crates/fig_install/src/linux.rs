@@ -227,7 +227,7 @@ async fn update_full_ctx(
     let temp_dir = ctx.fs().create_tempdir().await?;
     let file_name = download_url
         .path_segments()
-        .and_then(|path| path.last())
+        .and_then(|mut path| path.next_back())
         .unwrap_or(PRODUCT_NAME);
     let download_path = temp_dir.path().join(file_name);
 

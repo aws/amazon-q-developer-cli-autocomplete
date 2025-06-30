@@ -3,23 +3,33 @@ pub mod execute;
 pub mod fs_read;
 pub mod fs_write;
 pub mod gh_issue;
+pub mod knowledge;
 pub mod thinking;
 pub mod use_aws;
 
-use std::collections::HashMap;
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 use std::io::Write;
 use std::path::{
     Path,
     PathBuf,
 };
 
-use crossterm::style::Stylize;
+use crossterm::queue;
+use crossterm::style::{
+    self,
+    Color,
+    Stylize,
+};
 use custom_tool::CustomTool;
 use execute::ExecuteCommand;
 use eyre::Result;
 use fs_read::FsRead;
 use fs_write::FsWrite;
 use gh_issue::GhIssue;
+use knowledge::Knowledge;
 use serde::{
     Deserialize,
     Serialize,
@@ -29,7 +39,7 @@ use use_aws::UseAws;
 
 use super::consts::MAX_TOOL_RESPONSE_SIZE;
 use super::util::images::RichImageBlocks;
-use crate::platform::Context;
+use crate::os::Os;
 
 /// Represents an executable tool use.
 #[allow(clippy::large_enum_variant)]
@@ -41,6 +51,7 @@ pub enum Tool {
     UseAws(UseAws),
     Custom(CustomTool),
     GhIssue(GhIssue),
+    Knowledge(Knowledge),
     Thinking(Thinking),
 }
 
@@ -57,13 +68,14 @@ impl Tool {
             Tool::UseAws(_) => "use_aws",
             Tool::Custom(custom_tool) => &custom_tool.name,
             Tool::GhIssue(_) => "gh_issue",
+            Tool::Knowledge(_) => "knowledge",
             Tool::Thinking(_) => "thinking (prerelease)",
         }
         .to_owned()
     }
 
     /// Whether or not the tool should prompt the user to accept before [Self::invoke] is called.
-    pub fn requires_acceptance(&self, _ctx: &Context) -> bool {
+    pub fn requires_acceptance(&self, _os: &Os) -> bool {
         match self {
             Tool::FsRead(_) => false,
             Tool::FsWrite(_) => true,
@@ -71,46 +83,50 @@ impl Tool {
             Tool::UseAws(use_aws) => use_aws.requires_acceptance(),
             Tool::Custom(_) => true,
             Tool::GhIssue(_) => false,
+            Tool::Knowledge(_) => false,
             Tool::Thinking(_) => false,
         }
     }
 
     /// Invokes the tool asynchronously
-    pub async fn invoke(&self, ctx: &Context, output: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, stdout: &mut impl Write) -> Result<InvokeOutput> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.invoke(ctx, output).await,
-            Tool::FsWrite(fs_write) => fs_write.invoke(ctx, output).await,
-            Tool::ExecuteCommand(execute_command) => execute_command.invoke(output).await,
-            Tool::UseAws(use_aws) => use_aws.invoke(ctx, output).await,
-            Tool::Custom(custom_tool) => custom_tool.invoke(ctx, output).await,
-            Tool::GhIssue(gh_issue) => gh_issue.invoke(ctx, output).await,
-            Tool::Thinking(think) => think.invoke(output).await,
+            Tool::FsRead(fs_read) => fs_read.invoke(os, stdout).await,
+            Tool::FsWrite(fs_write) => fs_write.invoke(os, stdout).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.invoke(stdout).await,
+            Tool::UseAws(use_aws) => use_aws.invoke(os, stdout).await,
+            Tool::Custom(custom_tool) => custom_tool.invoke(os, stdout).await,
+            Tool::GhIssue(gh_issue) => gh_issue.invoke(os, stdout).await,
+            Tool::Knowledge(knowledge) => knowledge.invoke(os, stdout).await,
+            Tool::Thinking(think) => think.invoke(stdout).await,
         }
     }
 
     /// Queues up a tool's intention in a human readable format
-    pub async fn queue_description(&self, ctx: &Context, output: &mut impl Write) -> Result<()> {
+    pub async fn queue_description(&self, os: &Os, output: &mut impl Write) -> Result<()> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.queue_description(ctx, output).await,
-            Tool::FsWrite(fs_write) => fs_write.queue_description(ctx, output),
+            Tool::FsRead(fs_read) => fs_read.queue_description(os, output).await,
+            Tool::FsWrite(fs_write) => fs_write.queue_description(os, output),
             Tool::ExecuteCommand(execute_command) => execute_command.queue_description(output),
             Tool::UseAws(use_aws) => use_aws.queue_description(output),
             Tool::Custom(custom_tool) => custom_tool.queue_description(output),
             Tool::GhIssue(gh_issue) => gh_issue.queue_description(output),
+            Tool::Knowledge(knowledge) => knowledge.queue_description(os, output).await,
             Tool::Thinking(thinking) => thinking.queue_description(output),
         }
     }
 
     /// Validates the tool with the arguments supplied
-    pub async fn validate(&mut self, ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, os: &Os) -> Result<()> {
         match self {
-            Tool::FsRead(fs_read) => fs_read.validate(ctx).await,
-            Tool::FsWrite(fs_write) => fs_write.validate(ctx).await,
-            Tool::ExecuteCommand(execute_command) => execute_command.validate(ctx).await,
-            Tool::UseAws(use_aws) => use_aws.validate(ctx).await,
-            Tool::Custom(custom_tool) => custom_tool.validate(ctx).await,
-            Tool::GhIssue(gh_issue) => gh_issue.validate(ctx).await,
-            Tool::Thinking(think) => think.validate(ctx).await,
+            Tool::FsRead(fs_read) => fs_read.validate(os).await,
+            Tool::FsWrite(fs_write) => fs_write.validate(os).await,
+            Tool::ExecuteCommand(execute_command) => execute_command.validate(os).await,
+            Tool::UseAws(use_aws) => use_aws.validate(os).await,
+            Tool::Custom(custom_tool) => custom_tool.validate(os).await,
+            Tool::GhIssue(gh_issue) => gh_issue.validate(os).await,
+            Tool::Knowledge(knowledge) => knowledge.validate(os).await,
+            Tool::Thinking(think) => think.validate(os).await,
         }
     }
 }
@@ -128,6 +144,8 @@ pub struct ToolPermissions {
     // We need this field for any stragglers
     pub trust_all: bool,
     pub permissions: HashMap<String, ToolPermission>,
+    // Store pending trust-tool patterns for MCP tools that may be loaded later
+    pub pending_trusted_tools: HashSet<String>,
 }
 
 impl ToolPermissions {
@@ -135,23 +153,29 @@ impl ToolPermissions {
         Self {
             trust_all: false,
             permissions: HashMap::with_capacity(capacity),
+            pending_trusted_tools: HashSet::new(),
         }
     }
 
-    pub fn is_trusted(&self, tool_name: &str) -> bool {
+    pub fn is_trusted(&mut self, tool_name: &str) -> bool {
+        // Check if we should trust from pending patterns first
+        if self.should_trust_from_pending(tool_name) {
+            self.trust_tool(tool_name);
+            self.pending_trusted_tools.remove(tool_name);
+        }
+
         self.trust_all || self.permissions.get(tool_name).is_some_and(|perm| perm.trusted)
     }
 
     /// Returns a label to describe the permission status for a given tool.
-    pub fn display_label(&self, tool_name: &str) -> String {
-        if self.has(tool_name) || self.trust_all {
-            if self.is_trusted(tool_name) {
-                format!("  {}", "trusted".dark_green().bold())
-            } else {
-                format!("  {}", "not trusted".dark_grey())
-            }
-        } else {
-            self.default_permission_label(tool_name)
+    pub fn display_label(&mut self, tool_name: &str) -> String {
+        let is_trusted = self.is_trusted(tool_name);
+        let has_setting = self.has(tool_name) || self.trust_all;
+
+        match (has_setting, is_trusted) {
+            (true, true) => format!("  {}", "trusted".dark_green().bold()),
+            (true, false) => format!("  {}", "not trusted".dark_grey()),
+            _ => self.default_permission_label(tool_name),
         }
     }
 
@@ -162,6 +186,7 @@ impl ToolPermissions {
 
     pub fn untrust_tool(&mut self, tool_name: &str) {
         self.trust_all = false;
+        self.pending_trusted_tools.remove(tool_name);
         self.permissions
             .insert(tool_name.to_string(), ToolPermission { trusted: false });
     }
@@ -169,14 +194,33 @@ impl ToolPermissions {
     pub fn reset(&mut self) {
         self.trust_all = false;
         self.permissions.clear();
+        self.pending_trusted_tools.clear();
     }
 
     pub fn reset_tool(&mut self, tool_name: &str) {
         self.trust_all = false;
         self.permissions.remove(tool_name);
+        self.pending_trusted_tools.remove(tool_name);
     }
 
-    pub fn has(&self, tool_name: &str) -> bool {
+    /// Add a pending trust pattern for tools that may be loaded later
+    pub fn add_pending_trust_tool(&mut self, pattern: String) {
+        self.pending_trusted_tools.insert(pattern);
+    }
+
+    /// Check if a tool should be trusted based on preceding trust declarations
+    pub fn should_trust_from_pending(&self, tool_name: &str) -> bool {
+        // Check for exact match
+        self.pending_trusted_tools.contains(tool_name)
+    }
+
+    pub fn has(&mut self, tool_name: &str) -> bool {
+        // Check if we should trust from pending tools first
+        if self.should_trust_from_pending(tool_name) {
+            self.trust_tool(tool_name);
+            self.pending_trusted_tools.remove(tool_name);
+        }
+
         self.permissions.contains_key(tool_name)
     }
 
@@ -192,6 +236,7 @@ impl ToolPermissions {
             "execute_cmd" => "trust read-only commands".dark_grey(),
             "use_aws" => "trust read-only commands".dark_grey(),
             "report_issue" => "trusted".dark_green().bold(),
+            "knowledge" => "trusted".dark_green().bold(),
             "thinking" => "trusted (prerelease)".dark_green().bold(),
             _ if self.trust_all => "trusted".dark_grey().bold(),
             _ => "not trusted".dark_grey(),
@@ -307,13 +352,13 @@ impl Default for OutputKind {
 ///
 /// Required since path arguments are defined by the model.
 #[allow(dead_code)]
-pub fn sanitize_path_tool_arg(ctx: &Context, path: impl AsRef<Path>) -> PathBuf {
+pub fn sanitize_path_tool_arg(os: &Os, path: impl AsRef<Path>) -> PathBuf {
     let mut res = PathBuf::new();
     // Expand `~` only if it is the first part.
     let mut path = path.as_ref().components();
     match path.next() {
         Some(p) if p.as_os_str() == "~" => {
-            res.push(ctx.env.home().unwrap_or_default());
+            res.push(os.env.home().unwrap_or_default());
         },
         Some(p) => res.push(p),
         None => return res,
@@ -323,7 +368,7 @@ pub fn sanitize_path_tool_arg(ctx: &Context, path: impl AsRef<Path>) -> PathBuf 
     }
     // For testing scenarios, we need to make sure paths are appropriately handled in chroot test
     // file systems since they are passed directly from the model.
-    ctx.fs.chroot_path(res)
+    os.fs.chroot_path(res)
 }
 
 /// Converts `path` to a relative path according to the current working directory `cwd`.
@@ -371,112 +416,27 @@ fn format_path(cwd: impl AsRef<Path>, path: impl AsRef<Path>) -> String {
         .unwrap_or(path.as_ref().to_string_lossy().to_string())
 }
 
-fn supports_truecolor(ctx: &Context) -> bool {
+fn supports_truecolor(os: &Os) -> bool {
     // Simple override to disable truecolor since shell_color doesn't use Context.
-    !ctx.env.get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
+    !os.env.get("Q_DISABLE_TRUECOLOR").is_ok_and(|s| !s.is_empty())
         && shell_color::get_color_support().contains(shell_color::ColorSupport::TERM24BIT)
 }
 
-/// Helper function to queue a summary display with consistent styling
-/// Only displays the summary if it exists (Some)
-///
-/// # Parameters
-/// * `summary` - Optional summary text to display
-/// * `updates` - The output to write to
-/// * `trailing_newlines` - Number of trailing newlines to add after the summary (defaults to 1)
-pub fn queue_summary(summary: Option<&str>, updates: &mut impl Write, trailing_newlines: Option<usize>) -> Result<()> {
-    if let Some(summary_text) = summary {
-        use crossterm::queue;
-        use crossterm::style::{
-            self,
-            Color,
-        };
-
+/// Helper function to display a purpose if available (for execute commands)
+pub fn display_purpose(purpose: Option<&String>, updates: &mut impl Write) -> Result<()> {
+    if let Some(purpose) = purpose {
         queue!(
             updates,
-            style::Print("\n"),
             style::Print(super::CONTINUATION_LINE),
             style::Print("\n"),
             style::Print(super::PURPOSE_ARROW),
             style::SetForegroundColor(Color::Blue),
             style::Print("Purpose: "),
             style::ResetColor,
-            style::Print(summary_text),
-            style::Print("\n"),
-        )?;
-
-        // Add any additional trailing newlines (default to 1 if not specified)
-        let newlines = trailing_newlines.unwrap_or(1);
-        for _ in 1..newlines {
-            queue!(updates, style::Print("\n"))?;
-        }
-    }
-
-    Ok(())
-}
-
-/// Helper function to format function results with consistent styling
-///
-/// # Parameters
-/// * `result` - The result text to display
-/// * `updates` - The output to write to
-/// * `is_error` - Whether this is an error message (changes formatting)
-/// * `use_bullet` - Whether to use a bullet point instead of a tick/exclamation
-pub fn queue_function_result(result: &str, updates: &mut impl Write, is_error: bool, use_bullet: bool) -> Result<()> {
-    use crossterm::queue;
-    use crossterm::style::{
-        self,
-        Color,
-    };
-
-    // Split the result into lines for proper formatting
-    let lines = result.lines().collect::<Vec<_>>();
-    let color = if is_error { Color::Red } else { Color::Reset };
-
-    queue!(updates, style::Print("\n"))?;
-
-    // Use appropriate symbol based on parameters
-    if let Some(first_line) = lines.first() {
-        // Select symbol: bullet for summaries, tick/exclamation for operations
-        let symbol = if is_error {
-            super::ERROR_EXCLAMATION
-        } else if use_bullet {
-            super::TOOL_BULLET
-        } else {
-            super::SUCCESS_TICK
-        };
-
-        // Set color to green for success ticks
-        let text_color = if is_error {
-            Color::Red
-        } else if !use_bullet {
-            Color::Green
-        } else {
-            Color::Reset
-        };
-
-        queue!(
-            updates,
-            style::SetForegroundColor(text_color),
-            style::Print(symbol),
-            style::ResetColor,
-            style::Print(first_line),
+            style::Print(purpose),
             style::Print("\n"),
         )?;
     }
-
-    // For any additional lines, indent them properly
-    for line in lines.iter().skip(1) {
-        queue!(
-            updates,
-            style::Print("   "), // Same indentation as the bullet
-            style::SetForegroundColor(color),
-            style::Print(line),
-            style::ResetColor,
-            style::Print("\n"),
-        )?;
-    }
-
     Ok(())
 }
 
@@ -484,27 +444,26 @@ pub fn queue_function_result(result: &str, updates: &mut impl Write, is_error: b
 mod tests {
     use std::path::MAIN_SEPARATOR;
 
-    use chat_cli::platform::ACTIVE_USER_HOME;
-
     use super::*;
+    use crate::os::ACTIVE_USER_HOME;
 
     #[tokio::test]
     async fn test_tilde_path_expansion() {
-        let ctx = Context::new();
+        let os = Os::new().await.unwrap();
 
-        let actual = sanitize_path_tool_arg(&ctx, "~");
-        let expected_home = ctx.env.home().unwrap_or_default();
-        assert_eq!(actual, ctx.fs.chroot_path(&expected_home), "tilde should expand");
-        let actual = sanitize_path_tool_arg(&ctx, "~/hello");
+        let actual = sanitize_path_tool_arg(&os, "~");
+        let expected_home = os.env.home().unwrap_or_default();
+        assert_eq!(actual, os.fs.chroot_path(&expected_home), "tilde should expand");
+        let actual = sanitize_path_tool_arg(&os, "~/hello");
         assert_eq!(
             actual,
-            ctx.fs.chroot_path(expected_home.join("hello")),
+            os.fs.chroot_path(expected_home.join("hello")),
             "tilde should expand"
         );
-        let actual = sanitize_path_tool_arg(&ctx, "/~");
+        let actual = sanitize_path_tool_arg(&os, "/~");
         assert_eq!(
             actual,
-            ctx.fs.chroot_path("/~"),
+            os.fs.chroot_path("/~"),
             "tilde should not expand when not the first component"
         );
     }
@@ -512,10 +471,10 @@ mod tests {
     #[tokio::test]
     async fn test_format_path() {
         async fn assert_paths(cwd: &str, path: &str, expected: &str) {
-            let ctx = Context::new();
-            let cwd = sanitize_path_tool_arg(&ctx, cwd);
-            let path = sanitize_path_tool_arg(&ctx, path);
-            let fs = ctx.fs;
+            let os = Os::new().await.unwrap();
+            let cwd = sanitize_path_tool_arg(&os, cwd);
+            let path = sanitize_path_tool_arg(&os, path);
+            let fs = os.fs;
             fs.create_dir_all(&cwd).await.unwrap();
             fs.create_dir_all(&path).await.unwrap();
 

@@ -59,6 +59,7 @@ mod tests {
                     model_name: "test-model".to_string(),
                     timeout: 30000,
                     base_dir: std::path::PathBuf::from("."),
+                    max_files: 1000, // Add missing max_files field
                 };
                 // Use a different approach that doesn't access private static
                 let _ = crate::config::init_config(&std::env::temp_dir());

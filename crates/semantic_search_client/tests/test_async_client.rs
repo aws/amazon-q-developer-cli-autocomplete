@@ -20,7 +20,6 @@ mod tests {
     async fn test_background_indexing_example() {
         if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
             println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-            assert!(true);
             return;
         }
         // Create a temp directory that will live for the duration of the test
@@ -81,7 +80,6 @@ mod tests {
     async fn test_background_indexing_with_progress() {
         if env::var("MEMORY_BANK_USE_REAL_EMBEDDERS").is_err() {
             println!("Skipping test: MEMORY_BANK_USE_REAL_EMBEDDERS not set");
-            assert!(true);
             return;
         }
         // Create a temp directory for our test files

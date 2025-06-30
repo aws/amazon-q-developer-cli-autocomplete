@@ -177,7 +177,7 @@ struct Migration {
     sql: &'static str,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Database {
     pool: Pool<SqliteConnectionManager>,
     pub settings: Settings,

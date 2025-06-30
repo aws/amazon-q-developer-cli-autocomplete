@@ -50,7 +50,7 @@ impl ToolsArgs {
             .unwrap_or(0);
 
         queue!(
-            session.output,
+            session.stderr,
             style::Print("\n"),
             style::SetAttribute(Attribute::Bold),
             style::Print({
@@ -100,7 +100,7 @@ impl ToolsArgs {
                 });
 
             let _ = queue!(
-                session.output,
+                session.stderr,
                 style::SetAttribute(Attribute::Bold),
                 style::Print(format!("{}:\n", origin)),
                 style::SetAttribute(Attribute::Reset),
@@ -112,7 +112,7 @@ impl ToolsArgs {
         let loading = session.conversation.tool_manager.pending_clients().await;
         if !loading.is_empty() {
             queue!(
-                session.output,
+                session.stderr,
                 style::SetAttribute(Attribute::Bold),
                 style::Print("Servers still loading"),
                 style::SetAttribute(Attribute::Reset),
@@ -120,12 +120,12 @@ impl ToolsArgs {
                 style::Print("▔".repeat(terminal_width)),
             )?;
             for client in loading {
-                queue!(session.output, style::Print(format!(" - {client}")), style::Print("\n"))?;
+                queue!(session.stderr, style::Print(format!(" - {client}")), style::Print("\n"))?;
             }
         }
 
         queue!(
-            session.output,
+            session.stderr,
             style::Print("\nTrusted tools will run without confirmation."),
             style::SetForegroundColor(Color::DarkGrey),
             style::Print(format!("\n{}\n", "* Default settings")),
@@ -152,9 +152,15 @@ pub enum ToolsSubcommand {
     /// Show the input schema for all available tools
     Schema,
     /// Trust a specific tool or tools for the session
-    Trust { tool_names: Vec<String> },
+    Trust {
+        #[arg(required = true)]
+        tool_names: Vec<String>,
+    },
     /// Revert a tool or tools to per-request confirmation
-    Untrust { tool_names: Vec<String> },
+    Untrust {
+        #[arg(required = true)]
+        tool_names: Vec<String>,
+    },
     /// Trust all tools (equivalent to deprecated /acceptall)
     TrustAll,
     /// Reset all tools to default permission levels
@@ -177,7 +183,7 @@ impl ToolsSubcommand {
             Self::Schema => {
                 let schema_json = serde_json::to_string_pretty(&session.conversation.tool_manager.schema)
                     .map_err(|e| ChatError::Custom(format!("Error converting tool schema to string: {e}").into()))?;
-                queue!(session.output, style::Print(schema_json), style::Print("\n"))?;
+                queue!(session.stderr, style::Print(schema_json), style::Print("\n"))?;
             },
             Self::Trust { tool_names } => {
                 let (valid_tools, invalid_tools): (Vec<String>, Vec<String>) = tool_names
@@ -186,7 +192,7 @@ impl ToolsSubcommand {
 
                 if !invalid_tools.is_empty() {
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!("\nCannot trust '{}', ", invalid_tools.join("', '"))),
                         if invalid_tools.len() > 1 {
@@ -200,12 +206,12 @@ impl ToolsSubcommand {
                 if !valid_tools.is_empty() {
                     valid_tools.iter().for_each(|t| session.tool_permissions.trust_tool(t));
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         if valid_tools.len() > 1 {
-                            style::Print(format!("\nTools '{}' are ", valid_tools.join("', '")))
+                            style::Print(format!("Tools '{}' are ", valid_tools.join("', '")))
                         } else {
-                            style::Print(format!("\nTool '{}' is ", valid_tools[0]))
+                            style::Print(format!("Tool '{}' is ", valid_tools[0]))
                         },
                         style::Print("now trusted. I will "),
                         style::SetAttribute(Attribute::Bold),
@@ -220,6 +226,7 @@ impl ToolsSubcommand {
                                 "this tool"
                             }
                         )),
+                        style::Print("\n"),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 }
@@ -231,7 +238,7 @@ impl ToolsSubcommand {
 
                 if !invalid_tools.is_empty() {
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!("\nCannot untrust '{}', ", invalid_tools.join("', '"))),
                         if invalid_tools.len() > 1 {
@@ -247,14 +254,14 @@ impl ToolsSubcommand {
                         .iter()
                         .for_each(|t| session.tool_permissions.untrust_tool(t));
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
                         if valid_tools.len() > 1 {
-                            style::Print(format!("\nTools '{}' are ", valid_tools.join("', '")))
+                            style::Print(format!("Tools '{}' are ", valid_tools.join("', '")))
                         } else {
-                            style::Print(format!("\nTool '{}' is ", valid_tools[0]))
+                            style::Print(format!("Tool '{}' is ", valid_tools[0]))
                         },
-                        style::Print("set to per-request confirmation."),
+                        style::Print("set to per-request confirmation.\n"),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 }
@@ -268,14 +275,14 @@ impl ToolsSubcommand {
                     .for_each(|FigTool::ToolSpecification(spec)| {
                         session.tool_permissions.trust_tool(spec.name.as_str());
                     });
-                queue!(session.output, style::Print(TRUST_ALL_TEXT),)?;
+                queue!(session.stderr, style::Print(TRUST_ALL_TEXT), style::Print("\n"))?;
             },
             Self::Reset => {
                 session.tool_permissions.reset();
                 queue!(
-                    session.output,
+                    session.stderr,
                     style::SetForegroundColor(Color::Green),
-                    style::Print("\nReset all tools to the default permission levels."),
+                    style::Print("Reset all tools to the default permission levels.\n"),
                     style::SetForegroundColor(Color::Reset),
                 )?;
             },
@@ -283,17 +290,17 @@ impl ToolsSubcommand {
                 if session.tool_permissions.has(&tool_name) || session.tool_permissions.trust_all {
                     session.tool_permissions.reset_tool(&tool_name);
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Green),
-                        style::Print(format!("\nReset tool '{}' to the default permission level.", tool_name)),
+                        style::Print(format!("Reset tool '{}' to the default permission level.\n", tool_name)),
                         style::SetForegroundColor(Color::Reset),
                     )?;
                 } else {
                     queue!(
-                        session.output,
+                        session.stderr,
                         style::SetForegroundColor(Color::Red),
                         style::Print(format!(
-                            "\nTool '{}' does not exist or is already in default settings.",
+                            "Tool '{}' does not exist or is already in default settings.\n",
                             tool_name
                         )),
                         style::SetForegroundColor(Color::Reset),
@@ -302,7 +309,7 @@ impl ToolsSubcommand {
             },
         };
 
-        session.output.flush()?;
+        session.stderr.flush()?;
 
         Ok(ChatState::PromptUser {
             skip_printing_tools: true,

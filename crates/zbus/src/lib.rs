@@ -925,13 +925,10 @@ mod tests {
         while let Some(msg) = stream.try_next().await? {
             let msg_header = msg.header();
 
-            match msg_header.message_type() {
-                zbus::message::Type::MethodCall => {
-                    connection.reply(&msg, &()).await?;
+            if msg_header.message_type() == zbus::message::Type::MethodCall {
+                connection.reply(&msg, &()).await?;
 
-                    break;
-                },
-                _ => continue,
+                break;
             }
         }
 

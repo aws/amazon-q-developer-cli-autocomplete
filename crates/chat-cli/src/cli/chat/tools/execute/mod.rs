@@ -14,11 +14,7 @@ use crate::cli::chat::tools::{
     OutputKind,
 };
 use crate::cli::chat::util::truncate_safe;
-use crate::cli::chat::{
-    CONTINUATION_LINE,
-    PURPOSE_ARROW,
-};
-use crate::platform::Context;
+use crate::os::Os;
 
 // Platform-specific modules
 #[cfg(windows)]
@@ -130,18 +126,8 @@ impl ExecuteCommand {
         )?;
 
         // Add the summary if available
-        if let Some(summary) = &self.summary {
-            queue!(
-                output,
-                style::Print(CONTINUATION_LINE),
-                style::Print("\n"),
-                style::Print(PURPOSE_ARROW),
-                style::SetForegroundColor(Color::Blue),
-                style::Print("Purpose: "),
-                style::ResetColor,
-                style::Print(summary),
-                style::Print("\n"),
-            )?;
+        if let Some(ref summary) = self.summary {
+            super::display_purpose(Some(summary), output)?;
         }
 
         queue!(output, style::Print("\n"))?;
@@ -149,7 +135,7 @@ impl ExecuteCommand {
         Ok(())
     }
 
-    pub async fn validate(&mut self, _ctx: &Context) -> Result<()> {
+    pub async fn validate(&mut self, _os: &Os) -> Result<()> {
         // TODO: probably some small amount of PATH checking
         Ok(())
     }

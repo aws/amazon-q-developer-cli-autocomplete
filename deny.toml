@@ -10,9 +10,6 @@ ignore = [
   # proc-macro-error is a transitive dependency of a number of dependencies, 
   # this is allowed for now til the ecosystem migrates away
   "RUSTSEC-2024-0370",
-  # instant is dependency of notify and tao, until those remove instant this
-  # will be allowed
-  "RUSTSEC-2024-0384",
   # blocked on portable-pty migrating away from serial
   "RUSTSEC-2017-0008",
   # gtk3-rs is used by tao/wry, we can not remove these til the migrate
@@ -53,6 +50,7 @@ allow = [
   "OpenSSL",
   "Unicode-3.0",
   "Zlib",
+  "CDLA-Permissive-2.0",
 ]
 
 [[licenses.clarify]]

@@ -169,9 +169,8 @@ pub fn process_directory(dir_path: &Path) -> Result<Vec<Value>> {
         }
 
         // Process the file
-        match process_file(path) {
-            Ok(mut items) => results.append(&mut items),
-            Err(_) => continue, // Skip files that fail to process
+        if let Ok(mut items) = process_file(path) {
+            results.append(&mut items);
         }
     }
 

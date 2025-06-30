@@ -14,7 +14,9 @@ use std::sync::{
     Mutex,
 };
 
-#[derive(Debug, Clone, Default)]
+use crate::os::ACTIVE_USER_HOME;
+
+#[derive(Debug, Clone)]
 pub struct Env(inner::Inner);
 
 mod inner {
@@ -25,9 +27,8 @@ mod inner {
         Mutex,
     };
 
-    #[derive(Debug, Clone, Default)]
+    #[derive(Debug, Clone)]
     pub(super) enum Inner {
-        #[default]
         Real,
         Fake(Arc<Mutex<Fake>>),
     }
@@ -38,21 +39,22 @@ mod inner {
         pub cwd: PathBuf,
         pub current_exe: PathBuf,
     }
-
-    impl Default for Fake {
-        fn default() -> Self {
-            Self {
-                vars: HashMap::default(),
-                cwd: PathBuf::from("/"),
-                current_exe: PathBuf::from("/current_exe"),
-            }
-        }
-    }
 }
 
 impl Env {
     pub fn new() -> Self {
-        Self::default()
+        if cfg!(test) {
+            match cfg!(windows) {
+                true => Env::from_slice(&[
+                    ("USERPROFILE", ACTIVE_USER_HOME),
+                    ("USERNAME", "testuser"),
+                    ("PATH", ""),
+                ]),
+                false => Env::from_slice(&[("HOME", ACTIVE_USER_HOME), ("USER", "testuser"), ("PATH", "")]),
+            }
+        } else {
+            Env(inner::Inner::Real)
+        }
     }
 
     /// Create a fake process environment from a slice of tuples.
@@ -61,7 +63,8 @@ impl Env {
         let map: HashMap<_, _> = vars.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
         Self(Inner::Fake(Arc::new(Mutex::new(inner::Fake {
             vars: map,
-            ..Default::default()
+            cwd: PathBuf::from("/"),
+            current_exe: PathBuf::from("/current_exe"),
         }))))
     }
 
@@ -100,15 +103,17 @@ impl Env {
     ///
     /// See [std::env::set_var] for the safety requirements.
     pub unsafe fn set_var(&self, key: impl AsRef<OsStr>, value: impl AsRef<OsStr>) {
-        use inner::Inner;
-        match &self.0 {
-            Inner::Real => std::env::set_var(key, value),
-            Inner::Fake(fake) => {
-                fake.lock().unwrap().vars.insert(
-                    key.as_ref().to_str().expect("key must be valid str").to_string(),
-                    value.as_ref().to_str().expect("key must be valid str").to_string(),
-                );
-            },
+        unsafe {
+            use inner::Inner;
+            match &self.0 {
+                Inner::Real => std::env::set_var(key, value),
+                Inner::Fake(fake) => {
+                    fake.lock().unwrap().vars.insert(
+                        key.as_ref().to_str().expect("key must be valid str").to_string(),
+                        value.as_ref().to_str().expect("key must be valid str").to_string(),
+                    );
+                },
+            }
         }
     }
 
@@ -155,20 +160,17 @@ impl Env {
     }
 }
 
+impl Default for Env {
+    fn default() -> Self {
+        Env::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
-
-    #[test]
-    fn test_new() {
-        let env = Env::new();
-        assert!(matches!(env, Env(inner::Inner::Real)));
-
-        let env = Env::default();
-        assert!(matches!(env, Env(inner::Inner::Real)));
-    }
 
     #[test]
     fn test_get() {

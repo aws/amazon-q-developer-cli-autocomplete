@@ -69,7 +69,7 @@ impl Spinner {
 
                     let line = components.iter().fold(String::new(), |mut acc, elem| {
                         acc.push_str(match elem {
-                            SpinnerComponent::Text(ref t) => t,
+                            SpinnerComponent::Text(t) => t,
                             SpinnerComponent::Spinner => &frame,
                         });
                         acc

@@ -22,10 +22,6 @@ use crate::cli::chat::consts::{
     MAX_IMAGE_SIZE,
     MAX_NUMBER_OF_IMAGES_PER_REQUEST,
 };
-use crate::platform::{
-    self,
-    Context,
-};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageMetadata {
@@ -43,8 +39,8 @@ pub type RichImageBlock = (ImageBlock, ImageMetadata);
 ///
 /// However, the model will just treat it as a normal space and return the wrong path string to the
 /// `fs_read` tool. This will lead to file-not-found errors.
-pub fn pre_process(ctx: &Context, path: &str) -> String {
-    if ctx.platform.os() == platform::Os::Mac && path.contains("Screenshot") {
+pub fn pre_process(path: &str) -> String {
+    if cfg!(target_os = "macos") && path.contains("Screenshot") {
         let mac_screenshot_regex =
             regex::Regex::new(r"Screenshot \d{4}-\d{2}-\d{2} at \d{1,2}\.\d{2}\.\d{2} [AP]M").unwrap();
         if mac_screenshot_regex.is_match(path) {
@@ -81,7 +77,7 @@ pub fn handle_images_from_paths(output: &mut impl Write, paths: &[String]) -> Ri
 
                 extracted_images.push((image_block, ImageMetadata {
                     filename,
-                    filepath: path.to_string(),
+                    filepath: path.clone(),
                     size: image_size,
                 }));
             }
@@ -151,7 +147,7 @@ pub fn handle_images_from_paths(output: &mut impl Write, paths: &[String]) -> Ri
 /// * `false` otherwise
 pub fn is_supported_image_type(maybe_file_path: &str) -> bool {
     let supported_image_types = ["jpg", "jpeg", "png", "gif", "webp"];
-    if let Some(extension) = maybe_file_path.split('.').last() {
+    if let Some(extension) = maybe_file_path.split('.').next_back() {
         return supported_image_types.contains(&extension.trim().to_lowercase().as_str());
     }
     false
@@ -188,17 +184,11 @@ pub fn get_image_block_from_file_path(maybe_file_path: &str) -> Option<ImageBloc
 
 #[cfg(test)]
 mod tests {
-
     use std::str::FromStr;
-    use std::sync::Arc;
 
     use bstr::ByteSlice;
 
     use super::*;
-    use crate::cli::chat::util::shared_writer::{
-        SharedWriter,
-        TestWriterWithSink,
-    };
 
     #[test]
     fn test_is_supported_image_type() {
@@ -236,9 +226,7 @@ mod tests {
         let image_path = temp_dir.path().join("test_image.jpg");
         std::fs::write(&image_path, b"fake_image_data").unwrap();
 
-        let mut output = SharedWriter::stdout();
-
-        let images = handle_images_from_paths(&mut output, &[image_path.to_string_lossy().to_string()]);
+        let images = handle_images_from_paths(&mut vec![], &[image_path.to_string_lossy().to_string()]);
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].1.filename, "test_image.jpg");
@@ -268,13 +256,9 @@ mod tests {
         let large_image_path = temp_dir.path().join("large_image.jpg");
         let large_image_size = MAX_IMAGE_SIZE + 1;
         std::fs::write(&large_image_path, vec![0; large_image_size]).unwrap();
-        let buf = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
-        let test_writer = TestWriterWithSink { sink: buf.clone() };
-        let mut output = SharedWriter::new(test_writer.clone());
-
+        let mut output = vec![];
         let images = handle_images_from_paths(&mut output, &[large_image_path.to_string_lossy().to_string()]);
-        let content = test_writer.get_content();
-        let output_str = content.to_str_lossy();
+        let output_str = output.to_str_lossy();
         print!("{}", output_str);
         assert!(output_str.contains("The following images are dropped due to exceeding size limit (10MB):"));
         assert!(output_str.contains("- large_image.jpg (10.00 MB)"));
@@ -292,9 +276,7 @@ mod tests {
             std::fs::write(&image_path, b"fake_image_data").unwrap();
         }
 
-        let mut output = SharedWriter::stdout();
-
-        let images = handle_images_from_paths(&mut output, &paths);
+        let images = handle_images_from_paths(&mut vec![], &paths);
 
         assert_eq!(images.len(), MAX_NUMBER_OF_IMAGES_PER_REQUEST);
     }

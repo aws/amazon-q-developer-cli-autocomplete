@@ -161,7 +161,7 @@ async fn kill_process(pid: i32) -> Result<()> {
         },
         Err(err) => {
             error!(%err, %pid, "Failed to send SIGINT");
-            Err(Error::new(ErrorKind::Other, format!("Failed to terminate existing process: {err}")).into())
+            Err(Error::other(format!("Failed to terminate existing process: {err}")).into())
         },
     }
 }

@@ -405,7 +405,7 @@ impl TranslateArgs {
 
             let question = question.trim().replace('\n', " ");
 
-            'generate_loop: loop {
+            loop {
                 let spinner_text = format!("  {} {} ", "Shell".bold(), "·".grey());
 
                 let mut spinner = Spinner::new(vec![
@@ -454,15 +454,15 @@ impl TranslateArgs {
                             .into_iter()
                             .filter_map(|action| match action.as_str() {
                                 "execute" => Some(DialogActions::Execute {
-                                    command: choice.to_string(),
+                                    command: choice.clone(),
                                     display: false,
                                 }),
                                 "edit" => Some(DialogActions::Edit {
-                                    command: choice.to_string(),
+                                    command: choice.clone(),
                                     display: false,
                                 }),
                                 "copy" => Some(DialogActions::Copy {
-                                    command: choice.to_string(),
+                                    command: choice.clone(),
                                     display: false,
                                 }),
                                 "regenerate" => Some(DialogActions::Regenerate),
@@ -519,16 +519,14 @@ impl TranslateArgs {
                             },
                             Some(DialogActions::Copy { command, .. }) => {
                                 if let Ok(mut clipboard) = Clipboard::new() {
-                                    match clipboard.set_text(command.to_string()) {
+                                    match clipboard.set_text(command.clone()) {
                                         Ok(_) => println!("Copied!"),
                                         Err(err) => eyre::bail!(err),
                                     }
                                 }
                                 break 'ask_loop;
                             },
-                            Some(DialogActions::Regenerate) => {
-                                continue 'generate_loop;
-                            },
+                            Some(DialogActions::Regenerate) => (),
                             Some(DialogActions::Ask) => {
                                 input = None;
                                 continue 'ask_loop;

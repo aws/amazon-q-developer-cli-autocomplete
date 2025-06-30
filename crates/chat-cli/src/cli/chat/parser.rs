@@ -15,8 +15,8 @@ use super::message::{
     AssistantMessage,
     AssistantToolUse,
 };
-use crate::api_client::clients::SendMessageOutput;
 use crate::api_client::model::ChatResponseStream;
+use crate::api_client::send_message_output::SendMessageOutput;
 use crate::telemetry::ReasonCode;
 
 #[derive(Debug, Error)]

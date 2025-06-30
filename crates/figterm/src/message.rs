@@ -1,4 +1,3 @@
-use std::iter::repeat;
 use std::path::{
     Path,
     PathBuf,
@@ -194,7 +193,7 @@ pub async fn process_figterm_request(
                     if buffer.ne(insertion_buffer) {
                         if buffer.starts_with(insertion_buffer) {
                             if let Some(len_diff) = buffer.len().checked_sub(insertion_buffer.len()) {
-                                insertion_string.extend(repeat('\x08').take(len_diff));
+                                insertion_string.extend(std::iter::repeat_n('\x08', len_diff));
                             }
                         } else if insertion_buffer.starts_with(&buffer) {
                             insertion_string.push_str(&insertion_buffer[buffer.len()..]);
