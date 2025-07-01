@@ -332,7 +332,7 @@ impl Agents {
             let Ok(path) = directories::chat_local_agent_dir() else {
                 break 'local Vec::<Agent>::new();
             };
-            let Ok(files) = tokio::fs::read_dir(path).await else {
+            let Ok(files) = os.fs.read_dir(path).await else {
                 break 'local Vec::<Agent>::new();
             };
             load_agents_from_entries(files).await
@@ -342,7 +342,7 @@ impl Agents {
             let Ok(path) = directories::chat_global_agent_path(os) else {
                 break 'global Vec::<Agent>::new();
             };
-            let files = match tokio::fs::read_dir(&path).await {
+            let files = match os.fs.read_dir(&path).await {
                 Ok(files) => files,
                 Err(e) => {
                     if matches!(e.kind(), io::ErrorKind::NotFound) {
@@ -358,6 +358,52 @@ impl Agents {
         .into_iter()
         .chain(new_agents)
         .collect::<Vec<_>>();
+
+        // Here we also want to make sure the example config is written to disk if it's not already
+        // there.
+        'example_config: {
+            let Ok(path) = directories::example_agent_config(os) else {
+                error!("Error obtaining example agent path.");
+                break 'example_config;
+            };
+            if os.fs.exists(&path) {
+                break 'example_config;
+            }
+
+            // At this point the agents dir would have been created. All we have to worry about is
+            // the creation of the example config
+            if let Err(e) = os.fs.create_new(&path).await {
+                error!("Error creating example agent config: {e}.");
+                break 'example_config;
+            }
+
+            let example_agent = Agent {
+                // This is less important than other fields since names are derived from the name
+                // of the config file and thus will not be persisted
+                name: "example".to_string(),
+                description: Some("This is an example agent config (and will not be loaded unless you change it to have .json extension)".to_string()),
+                tools: {
+                    NATIVE_TOOLS
+                        .iter()
+                        .copied()
+                        .map(str::to_string)
+                        .chain(vec![
+                            format!("@mcp_server_name{MCP_SERVER_TOOL_DELIMITER}mcp_tool_name"),
+                            "@mcp_server_name_without_tool_specification_to_include_all_tools".to_string(),
+                        ])
+                        .collect::<Vec<_>>()
+                },
+                ..Default::default()
+            };
+            let Ok(content) = serde_json::to_string_pretty(&example_agent) else {
+                error!("Error serializing example agent config");
+                break 'example_config;
+            };
+            if let Err(e) = os.fs.write(&path, &content).await {
+                error!("Error writing example agent config to file: {e}");
+                break 'example_config;
+            };
+        }
 
         let local_names = local_agents.iter().map(|a| a.name.as_str()).collect::<HashSet<&str>>();
         global_agents.retain(|a| {
@@ -533,9 +579,7 @@ impl ContextMigrate<'b'> {
 
         let labels = vec!["Yes", "No"];
         let selection: Option<_> = match Select::with_theme(&crate::util::dialoguer_theme())
-            .with_prompt(
-                "You have context and/or profiles that belong to a legacy config. Would you like to migrate them?",
-            )
+            .with_prompt("Legacy profiles detected. Would you like to migrate them?")
             .items(&labels)
             .default(1)
             .interact_on_opt(&dialoguer::console::Term::stdout())
@@ -683,6 +727,8 @@ impl ContextMigrate<'d'> {
             .map(|a| a.name.as_str())
             .chain(vec!["Let me do this on my own later"])
             .collect::<Vec<_>>();
+        // This yields 0 if it's negative, which is acceptable.
+        let later_idx = labels.len().saturating_sub(1);
         let selection: Option<_> = match Select::with_theme(&crate::util::dialoguer_theme())
             .with_prompt(
                 "Set an agent as default. This is the agent that q chat will launch with unless specified otherwise.",
@@ -705,11 +751,13 @@ impl ContextMigrate<'d'> {
 
         let mut agent_to_load = None::<String>;
         if let Some(i) = selection {
-            if let Some(name) = labels.get(i) {
-                if let Ok(value) = serde_json::to_value(name) {
-                    if os.database.settings.set(Setting::ChatDefaultAgent, value).await.is_ok() {
-                        let chosen_name = (*name).to_string();
-                        agent_to_load.replace(chosen_name);
+            if later_idx != i {
+                if let Some(name) = labels.get(i) {
+                    if let Ok(value) = serde_json::to_value(name) {
+                        if os.database.settings.set(Setting::ChatDefaultAgent, value).await.is_ok() {
+                            let chosen_name = (*name).to_string();
+                            agent_to_load.replace(chosen_name);
+                        }
                     }
                 }
             }
@@ -834,7 +882,7 @@ mod tests {
               ],
               "toolsSettings": {                     
                 "fs_write": { "allowedPaths": ["~/**"] },
-                "@git.git_status": { "git_user": "$GIT_USER" }
+                "@git/git_status": { "git_user": "$GIT_USER" }
               }
             }
         "#;

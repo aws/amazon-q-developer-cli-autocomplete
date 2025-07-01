@@ -129,6 +129,12 @@ pub fn logs_dir() -> Result<PathBuf> {
     }
 }
 
+/// Example agent config path
+pub fn example_agent_config(os: &Os) -> Result<PathBuf> {
+    let global_path = chat_global_agent_path(os)?;
+    Ok(global_path.join("agent_config.json.example"))
+}
+
 /// Legacy global MCP server config path
 pub fn chat_legacy_mcp_config(os: &Os) -> Result<PathBuf> {
     Ok(home_dir(os)?.join(".aws").join("amazonq").join("mcp.json"))
