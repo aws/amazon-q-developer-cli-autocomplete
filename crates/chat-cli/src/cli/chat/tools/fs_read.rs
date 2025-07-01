@@ -717,27 +717,48 @@ mod tests {
 
     #[test]
     fn test_fs_read_deser() {
-        serde_json::from_value::<FsRead>(serde_json::json!({ "path": "/test_file.txt", "mode": "Line" })).unwrap();
+        // Test single operations (wrapped in operations array)
         serde_json::from_value::<FsRead>(
-            serde_json::json!({ "path": "/test_file.txt", "mode": "Line", "end_line": 5 }),
+            serde_json::json!({ "operations": [{ "path": "/test_file.txt", "mode": "Line" }] }),
         )
         .unwrap();
         serde_json::from_value::<FsRead>(
-            serde_json::json!({ "path": "/test_file.txt", "mode": "Line", "start_line": -1 }),
+            serde_json::json!({ "operations": [{ "path": "/test_file.txt", "mode": "Line", "end_line": 5 }] }),
         )
         .unwrap();
         serde_json::from_value::<FsRead>(
-            serde_json::json!({ "path": "/test_file.txt", "mode": "Line", "start_line": None::<usize> }),
-        )
-        .unwrap();
-        serde_json::from_value::<FsRead>(serde_json::json!({ "path": "/", "mode": "Directory" })).unwrap();
-        serde_json::from_value::<FsRead>(
-            serde_json::json!({ "path": "/test_file.txt", "mode": "Directory", "depth": 2 }),
+            serde_json::json!({ "operations": [{ "path": "/test_file.txt", "mode": "Line", "start_line": -1 }]  }),
         )
         .unwrap();
         serde_json::from_value::<FsRead>(
-            serde_json::json!({ "path": "/test_file.txt", "mode": "Search", "pattern": "hello" }),
+            serde_json::json!({ "operations": [{ "path": "/test_file.txt", "mode": "Line", "start_line": None::<usize> }] }),
         )
+        .unwrap();
+        serde_json::from_value::<FsRead>(serde_json::json!({ "operations": [{ "path": "/", "mode": "Directory" }] }))
+            .unwrap();
+        serde_json::from_value::<FsRead>(
+            serde_json::json!({ "operations": [{ "path": "/test_file.txt", "mode": "Directory", "depth": 2 }] }),
+        )
+        .unwrap();
+        serde_json::from_value::<FsRead>(
+            serde_json::json!({ "operations": [{ "path": "/test_file.txt", "mode": "Search", "pattern": "hello" }] }),
+        )
+        .unwrap();
+        serde_json::from_value::<FsRead>(serde_json::json!({
+            "operations": [{ "image_paths": ["/img1.png", "/img2.jpg"], "mode": "Image" }]
+        }))
+        .unwrap();
+
+        // Test mixed batch operations
+        serde_json::from_value::<FsRead>(serde_json::json!({
+            "operations": [
+                { "path": "/file.txt", "mode": "Line" },
+                { "path": "/dir", "mode": "Directory", "depth": 1 },
+                { "path": "/log.txt", "mode": "Search", "pattern": "warning" },
+                { "image_paths": ["/photo.jpg"], "mode": "Image" }
+            ],
+            "purpose": "Comprehensive file analysis"
+        }))
         .unwrap();
     }
 
@@ -750,10 +771,11 @@ mod tests {
         macro_rules! assert_lines {
             ($start_line:expr, $end_line:expr, $expected:expr) => {
                 let v = serde_json::json!({
+                    "operations": [{
                     "path": TEST_FILE_PATH,
                     "mode": "Line",
                     "start_line": $start_line,
-                    "end_line": $end_line,
+                    "end_line": $end_line,}]
                 });
                 let output = serde_json::from_value::<FsRead>(v)
                     .unwrap()
@@ -783,11 +805,11 @@ mod tests {
         let os = setup_test_directory().await;
         let mut stdout = std::io::stdout();
         let v = serde_json::json!({
+            "operations": [{
             "path": TEST_FILE_PATH,
             "mode": "Line",
             "start_line": 100,
-            "end_line": None::<i32>,
-        });
+            "end_line": None::<i32>,}]});
         assert!(
             serde_json::from_value::<FsRead>(v)
                 .unwrap()
@@ -818,9 +840,10 @@ mod tests {
 
         // Testing without depth
         let v = serde_json::json!({
+            "operations": [{
             "mode": "Directory",
             "path": "/",
-        });
+        }]});
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
             .invoke(&os, &mut stdout)
@@ -835,9 +858,10 @@ mod tests {
 
         // Testing with depth level 1
         let v = serde_json::json!({
+            "operations": [{
             "mode": "Directory",
             "path": "/",
-            "depth": 1,
+            "depth": 1,}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -880,9 +904,10 @@ mod tests {
         }
 
         let matches = invoke_search!({
+            "operations": [{
             "mode": "Search",
             "path": TEST_FILE_PATH,
-            "pattern": "hello",
+            "pattern": "hello",}]
         });
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].line_number, 1);
@@ -907,8 +932,9 @@ mod tests {
         os.fs.write(binary_file_path, &binary_data).await.unwrap();
 
         let v = serde_json::json!({
+            "operations": [{
             "path": binary_file_path,
-            "mode": "Line"
+            "mode": "Line"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -938,8 +964,9 @@ mod tests {
         os.fs.write(latin1_file_path, &latin1_data).await.unwrap();
 
         let v = serde_json::json!({
+            "operations": [{
             "path": latin1_file_path,
-            "mode": "Line"
+            "mode": "Line"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -973,9 +1000,10 @@ mod tests {
         os.fs.write(mixed_file_path, &mixed_data).await.unwrap();
 
         let v = serde_json::json!({
+            "operations": [{
             "mode": "Search",
             "path": mixed_file_path,
-            "pattern": "hello"
+            "pattern": "hello"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -996,9 +1024,10 @@ mod tests {
         }
 
         let v = serde_json::json!({
+            "operations": [{
             "mode": "Search",
             "path": mixed_file_path,
-            "pattern": "goodbye"
+            "pattern": "goodbye"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -1033,8 +1062,9 @@ mod tests {
         os.fs.write(windows1252_file_path, &windows1252_data).await.unwrap();
 
         let v = serde_json::json!({
+            "operations": [{
             "path": windows1252_file_path,
-            "mode": "Line"
+            "mode": "Line"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -1071,9 +1101,10 @@ mod tests {
             .unwrap();
 
         let v = serde_json::json!({
+            "operations": [{
             "mode": "Search",
             "path": invalid_utf8_file_path,
-            "pattern": "caf"
+            "pattern": "caf"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -1101,8 +1132,9 @@ mod tests {
         os.fs.write(invalid_only_file_path, &invalid_only_data).await.unwrap();
 
         let v = serde_json::json!({
+            "operations": [{
             "path": invalid_only_file_path,
-            "mode": "Line"
+            "mode": "Line"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -1118,9 +1150,10 @@ mod tests {
         }
 
         let v = serde_json::json!({
+            "operations": [{
             "mode": "Search",
             "path": invalid_only_file_path,
-            "pattern": "test"
+            "pattern": "test"}]
         });
         let output = serde_json::from_value::<FsRead>(v)
             .unwrap()
@@ -1138,5 +1171,66 @@ mod tests {
         } else {
             panic!("expected Text output");
         }
+    }
+
+    #[tokio::test]
+    async fn test_fs_read_batch_mixed_operations() {
+        let os = setup_test_directory().await;
+        let mut stdout = Vec::new();
+
+        let v = serde_json::json!({
+            "operations": [
+                { "path": TEST_FILE_PATH, "mode": "Line", "start_line": 1, "end_line": 2 },
+                { "path": "/", "mode": "Directory" },
+                { "path": TEST_FILE_PATH, "mode": "Search", "pattern": "hello" }
+            ],
+            "purpose": "Test mixed text operations"
+        });
+
+        let output = serde_json::from_value::<FsRead>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+        print!("output {:?}", output);
+        // All text operations should return combined text
+        if let OutputKind::Text(text) = output.output {
+            // Check all operations are included
+            assert!(text.contains("=== Operation 1 Result (Text) ==="));
+            assert!(text.contains("=== Operation 2 Result (Text) ==="));
+            assert!(text.contains("=== Operation 3 Result (Text) ==="));
+
+            // Check operation 1 (Line mode)
+            assert!(text.contains("Hello world!"));
+            assert!(text.contains("This is line 2"));
+
+            // Check operation 2 (Directory mode)
+            assert!(text.contains("test_file.txt"));
+
+            // Check operation 3 (Search mode)
+            assert!(text.contains("\"line_number\":1"));
+        } else {
+            panic!("expected text output for batch operations");
+        }
+    }
+    #[tokio::test]
+    async fn test_fs_read_empty_operations() {
+        let os = Os::new().await.unwrap();
+
+        // Test empty operations array
+        let v = serde_json::json!({
+            "operations": []
+        });
+
+        let mut fs_read = serde_json::from_value::<FsRead>(v).unwrap();
+        let result = fs_read.validate(&os).await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("At least one operation must be provided")
+        );
     }
 }
