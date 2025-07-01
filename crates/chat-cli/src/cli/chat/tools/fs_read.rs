@@ -154,6 +154,12 @@ impl FsRead {
                     }
                 }
 
+                queue!(
+                    updates,
+                    style::Print("\n"),
+                    style::Print(CONTINUATION_LINE),
+                    style::Print("\n")
+                )?;
                 super::queue_function_result(
                     &format!(
                         "Summary: {} operations processed, {} successful, {} failed",
@@ -242,6 +248,7 @@ impl FsImage {
     pub async fn invoke(&self, updates: &mut impl Write) -> Result<InvokeOutput> {
         let pre_processed_paths: Vec<String> = self.image_paths.iter().map(|path| pre_process(path)).collect();
         let valid_images = handle_images_from_paths(updates, &pre_processed_paths);
+        super::queue_function_result(&format!("Successfully read image"), updates, false, false)?;
         Ok(InvokeOutput {
             output: OutputKind::Images(valid_images),
         })
@@ -250,9 +257,10 @@ impl FsImage {
     pub fn queue_description(&self, updates: &mut impl Write) -> Result<()> {
         queue!(
             updates,
-            style::Print("Reading images: \n"),
+            style::Print("Reading images: "),
             style::SetForegroundColor(Color::Green),
             style::Print(&self.image_paths.join("\n")),
+            style::Print("\n"),
             style::ResetColor,
         )?;
         Ok(())
@@ -323,7 +331,7 @@ impl FsLine {
         }
     }
 
-    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(os, &self.path);
         debug!(?path, "Reading");
         let file_bytes = os.fs.read(&path).await?;
@@ -361,6 +369,17 @@ impl FsLine {
 time. You tried to read {byte_count} bytes. Try executing with fewer lines specified."
             );
         }
+
+        super::queue_function_result(
+            &format!(
+                "Successfully read {} bytes from {}",
+                file_contents.len(),
+                &path.display()
+            ),
+            updates,
+            false,
+            false,
+        )?;
 
         Ok(InvokeOutput {
             output: OutputKind::Text(file_contents),
@@ -415,7 +434,6 @@ impl FsSearch {
             style::SetForegroundColor(Color::Green),
             style::Print(&self.pattern.to_lowercase()),
             style::ResetColor,
-            style::Print("\n"),
         )?;
         Ok(())
     }
@@ -455,36 +473,17 @@ impl FsSearch {
                 });
             }
         }
-        let match_text = if total_matches == 1 {
-            "1 match".to_string()
-        } else {
-            format!("{} matches", total_matches)
-        };
 
-        let color = if total_matches == 0 {
-            Color::Yellow
-        } else {
-            Color::Green
-        };
-
-        let result = if total_matches == 0 {
-            CROSS.yellow()
-        } else {
-            CHECKMARK.green()
-        };
-
-        queue!(
+        super::queue_function_result(
+            &format!(
+                "Found {} matches for pattern '{}' in {}",
+                total_matches,
+                pattern,
+                &file_path.display()
+            ),
             updates,
-            style::SetForegroundColor(Color::Yellow),
-            style::ResetColor,
-            style::Print(CONTINUATION_LINE),
-            style::Print("\n"),
-            style::Print(" "),
-            style::Print(result),
-            style::Print(" Found: "),
-            style::SetForegroundColor(color),
-            style::Print(match_text),
-            style::ResetColor,
+            false,
+            false,
         )?;
 
         Ok(InvokeOutput {
@@ -535,13 +534,13 @@ impl FsDirectory {
         )?)
     }
 
-    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(os, &self.path);
         let max_depth = self.depth();
         debug!(?path, max_depth, "Reading directory at path with depth");
         let mut result = Vec::new();
         let mut dir_queue = VecDeque::new();
-        dir_queue.push_back((path, 0));
+        dir_queue.push_back((path.clone(), 0));
         while let Some((path, depth)) = dir_queue.pop_front() {
             if depth > max_depth {
                 break;
@@ -618,6 +617,17 @@ impl FsDirectory {
                 "This tool only supports reading up to {MAX_TOOL_RESPONSE_SIZE} bytes at a time. You tried to read {byte_count} bytes ({file_count} files). Try executing with fewer lines specified."
             );
         }
+
+        super::queue_function_result(
+            &format!(
+                "Successfully read directory {} ({} entries)",
+                &path.display(),
+                file_count
+            ),
+            updates,
+            false,
+            false,
+        )?;
 
         Ok(InvokeOutput {
             output: OutputKind::Text(result),
