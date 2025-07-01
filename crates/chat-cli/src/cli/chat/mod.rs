@@ -24,7 +24,7 @@ use std::collections::{
     HashSet,
     VecDeque,
 };
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -181,8 +181,26 @@ pub struct ChatArgs {
 
 impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
-        if self.non_interactive && self.input.is_none() {
-            bail!("Input must be supplied when running in non-interactive mode");
+        let mut input = self.input;
+        
+        if self.non_interactive && input.is_none() {
+            if atty::isnt(atty::Stream::Stdin) {
+                let mut buffer = String::new();
+                match std::io::stdin().read_to_string(&mut buffer) {
+                    Ok(_) => {
+                        if !buffer.trim().is_empty() {
+                            input = Some(buffer.trim().to_string());
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Error reading from stdin: {}", e);
+                    }
+                }
+            }
+            
+            if input.is_none() {
+                bail!("Input must be supplied when running in non-interactive mode");
+            }
         }
 
         let stdout = std::io::stdout();
@@ -289,7 +307,7 @@ impl ChatArgs {
             stdout,
             stderr,
             &conversation_id,
-            self.input,
+            input,
             InputSource::new(os, prompt_request_sender, prompt_response_receiver)?,
             self.resume,
             || terminal::window_size().map(|s| s.columns.into()).ok(),
