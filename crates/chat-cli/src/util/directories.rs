@@ -129,6 +129,11 @@ pub fn logs_dir() -> Result<PathBuf> {
     }
 }
 
+/// Legacy global MCP server config path
+pub fn chat_legacy_mcp_config(os: &Os) -> Result<PathBuf> {
+    Ok(home_dir(os)?.join(".aws").join("amazonq").join("mcp.json"))
+}
+
 /// The directory to the directory containing global agents
 pub fn chat_global_agent_path(os: &Os) -> Result<PathBuf> {
     Ok(home_dir(os)?.join(".aws").join("amazonq").join("agents"))

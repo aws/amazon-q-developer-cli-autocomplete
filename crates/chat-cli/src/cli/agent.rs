@@ -61,32 +61,22 @@ pub struct McpServerConfig {
 
 impl McpServerConfig {
     pub async fn load_from_file(os: &Os, path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let contents = os.fs.read_to_string(path.as_ref()).await?;
-        Ok(serde_json::from_str(&contents)?)
+        let contents = os.fs.read(path.as_ref()).await?;
+        let value = serde_json::from_slice::<serde_json::Value>(&contents)?;
+        // We need to extract mcp_servers field from the value because we have annotated
+        // [McpServerConfig] with transparent. Transparent was added because we want to preserve
+        // the type in agent.
+        let config = value
+            .get("mcpServers")
+            .cloned()
+            .ok_or(eyre::eyre!("No mcp servers found in config"))?;
+        Ok(serde_json::from_value(config)?)
     }
 
     pub async fn save_to_file(&self, os: &Os, path: impl AsRef<Path>) -> eyre::Result<()> {
         let json = serde_json::to_string_pretty(self)?;
         os.fs.write(path.as_ref(), json).await?;
         Ok(())
-    }
-
-    #[allow(dead_code)]
-    fn from_slice(slice: &[u8], output: &mut impl Write, location: &str) -> eyre::Result<McpServerConfig> {
-        match serde_json::from_slice::<Self>(slice) {
-            Ok(config) => Ok(config),
-            Err(e) => {
-                queue!(
-                    output,
-                    style::SetForegroundColor(style::Color::Yellow),
-                    style::Print("WARNING: "),
-                    style::ResetColor,
-                    style::Print(format!("Error reading {location} mcp config: {e}\n")),
-                    style::Print("Please check to make sure config is correct. Discarding.\n"),
-                )?;
-                Ok(McpServerConfig::default())
-            },
-        }
     }
 }
 
@@ -453,6 +443,7 @@ impl Agents {
 struct ContextMigrate<const S: char> {
     legacy_global_context: Option<ContextConfig>,
     legacy_profiles: HashMap<String, ContextConfig>,
+    mcp_servers: Option<McpServerConfig>,
     new_agents: Vec<Agent>,
 }
 
@@ -503,10 +494,26 @@ impl ContextMigrate<'a'> {
             profiles
         };
 
+        let mcp_servers = {
+            let config_path = directories::chat_legacy_mcp_config(os)?;
+            if os.fs.exists(&config_path) {
+                match McpServerConfig::load_from_file(os, config_path).await {
+                    Ok(config) => Some(config),
+                    Err(e) => {
+                        error!("Malformed legacy global mcp config detected: {e}. Skipping mcp migration.");
+                        None
+                    },
+                }
+            } else {
+                None
+            }
+        };
+
         if legacy_global_context.is_some() || !legacy_profiles.is_empty() {
             Ok(ContextMigrate {
                 legacy_global_context,
                 legacy_profiles,
+                mcp_servers,
                 new_agents: vec![],
             })
         } else {
@@ -520,6 +527,7 @@ impl ContextMigrate<'b'> {
         let ContextMigrate {
             legacy_global_context,
             legacy_profiles,
+            mcp_servers,
             new_agents,
         } = self;
 
@@ -548,6 +556,7 @@ impl ContextMigrate<'b'> {
             Ok(ContextMigrate {
                 legacy_global_context,
                 legacy_profiles,
+                mcp_servers,
                 new_agents,
             })
         } else {
@@ -565,6 +574,7 @@ impl ContextMigrate<'c'> {
         let ContextMigrate {
             legacy_global_context,
             mut legacy_profiles,
+            mcp_servers,
             mut new_agents,
         } = self;
 
@@ -587,6 +597,7 @@ impl ContextMigrate<'c'> {
                 included_files: context.paths,
                 create_hooks: serde_json::to_value(create_hooks).unwrap_or(serde_json::json!({})),
                 prompt_hooks: serde_json::to_value(prompt_hooks).unwrap_or(serde_json::json!({})),
+                mcp_servers: mcp_servers.clone().unwrap_or_default(),
                 ..Default::default()
             });
         }
@@ -610,6 +621,7 @@ impl ContextMigrate<'c'> {
                 included_files: context.paths,
                 create_hooks: serde_json::to_value(create_hooks).unwrap_or(serde_json::json!({})),
                 prompt_hooks: serde_json::to_value(prompt_hooks).unwrap_or(serde_json::json!({})),
+                mcp_servers: mcp_servers.clone().unwrap_or_default(),
                 ..Default::default()
             });
         }
@@ -656,6 +668,7 @@ impl ContextMigrate<'c'> {
         Ok(ContextMigrate {
             legacy_global_context: None,
             legacy_profiles,
+            mcp_servers: None,
             new_agents,
         })
     }
