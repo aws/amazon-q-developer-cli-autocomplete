@@ -24,7 +24,7 @@ use std::collections::{
     HashSet,
     VecDeque,
 };
-use std::io::{Read, Write};
+use std::io::{Read, Write, IsTerminal};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -184,7 +184,7 @@ impl ChatArgs {
         let mut input = self.input;
         
         if self.non_interactive && input.is_none() {
-            if atty::isnt(atty::Stream::Stdin) {
+            if !std::io::stdin().is_terminal() {
                 let mut buffer = String::new();
                 match std::io::stdin().read_to_string(&mut buffer) {
                     Ok(_) => {
