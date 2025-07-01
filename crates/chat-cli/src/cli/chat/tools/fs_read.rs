@@ -1192,7 +1192,6 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        print!("output {:?}", output);
         // All text operations should return combined text
         if let OutputKind::Text(text) = output.output {
             // Check all operations are included
