@@ -153,8 +153,8 @@ pub struct ChatArgs {
     #[arg(short, long)]
     pub resume: bool,
     /// Context profile to use
-    #[arg(long = "profile")]
-    pub profile: Option<String>,
+    #[arg(long = "agent", alias = "profile")]
+    pub agent: Option<String>,
     /// Current model to use
     #[arg(long = "model")]
     pub model: Option<String>,
@@ -178,13 +178,21 @@ impl ChatArgs {
             bail!("Input must be supplied when running in non-interactive mode");
         }
 
+        let args: Vec<String> = std::env::args().collect();
+        if args
+            .iter()
+            .any(|arg| arg == "--profile" || arg.starts_with("--profile="))
+        {
+            eprintln!("Warning: --profile is deprecated, use --agent instead");
+        }
+
         let stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
 
         let agents = {
             let mut default_agent_name = None::<String>;
-            let agent_name = if let Some(profile) = self.profile.as_deref() {
-                Some(profile)
+            let agent_name = if let Some(agent) = self.agent.as_deref() {
+                Some(agent)
             } else if let Some(agent) = os.database.settings.get_string(Setting::ChatDefaultAgent) {
                 default_agent_name.replace(agent);
                 default_agent_name.as_deref()
@@ -194,7 +202,7 @@ impl ChatArgs {
             let mut agents = Agents::load(os, agent_name, self.non_interactive, &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
-            if let Some(name) = self.profile.as_ref() {
+            if let Some(name) = self.agent.as_ref() {
                 match agents.switch(name) {
                     Ok(agent) if !agent.mcp_servers.mcp_servers.is_empty() => {
                         if !self.non_interactive

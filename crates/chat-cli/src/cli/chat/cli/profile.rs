@@ -17,15 +17,16 @@ use crate::util::directories::chat_global_agent_path;
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
 #[command(
-    before_long_help = "Profiles allow you to organize and manage different sets of context files for different projects or tasks.
+    before_long_help = "Agents allow you to organize and manage different sets of context files for different projects or tasks.
 
 Notes
-• The \"global\" profile contains context files that are available in all profiles
-• The \"default\" profile is used when no profile is specified
-• You can switch between profiles to work on different projects
-• Each profile maintains its own set of context files"
+• Launch q chat with a specific agent with --agent
+• Construct an agent under ~/.aws/amazonq/agents/ (accessible globally) or cwd/.aws/amazonq/agents (accessible in workspace)
+• See example config under global directory
+• Set default agent to assume with settings by running \"q settings chat.defaultAgent agent_name\"
+• Each agent maintains its own set of context and customizations"
 )]
-pub enum ProfileSubcommand {
+pub enum AgentSubcommand {
     /// List all available profiles
     List,
     /// Create a new profile with the specified name
@@ -38,7 +39,7 @@ pub enum ProfileSubcommand {
     Rename { old_name: String, new_name: String },
 }
 
-impl ProfileSubcommand {
+impl AgentSubcommand {
     pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let agents = &session.conversation.agents;
 
