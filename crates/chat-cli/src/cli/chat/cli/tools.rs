@@ -110,6 +110,7 @@ impl ToolsArgs {
                 })
                 .collect::<BTreeSet<_>>();
 
+            tracing::error!("## perm: command called");
             let to_display = sorted_tools.iter().fold(String::new(), |mut acc, tool_name| {
                 let width = longest - tool_name.len() + 4;
                 acc.push_str(
@@ -356,11 +357,22 @@ impl ToolsSubcommand {
                     {
                         active_agent.allowed_tools = orig_agent.allowed_tools;
                     }
+                } else if session
+                    .conversation
+                    .agents
+                    .get_active()
+                    .is_some_and(|a| a.name.as_str() == "default")
+                {
+                    // We only want to reset the tool permission and nothing else
+                    if let Some(active_agent) = session.conversation.agents.get_active_mut() {
+                        active_agent.allowed_tools = Default::default();
+                        active_agent.tools_settings = Default::default();
+                    }
                 }
                 queue!(
                     session.stderr,
                     style::SetForegroundColor(Color::Green),
-                    style::Print("\nReset all tools to the permission levels as defined in persona."),
+                    style::Print("\nReset all tools to the permission levels as defined in agent."),
                     style::SetForegroundColor(Color::Reset),
                 )?;
             },
