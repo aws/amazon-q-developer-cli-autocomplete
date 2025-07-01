@@ -180,7 +180,7 @@ pub struct ChatArgs {
 }
 
 impl ChatArgs {
-    pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
+    pub async fn execute(mut self, os: &mut Os) -> Result<ExitCode> {
         let mut input = self.input;
 
         if self.non_interactive && input.is_none() {
