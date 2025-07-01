@@ -448,41 +448,22 @@ pub fn display_purpose(purpose: Option<&String>, updates: &mut impl Write) -> Re
 /// * `is_error` - Whether this is an error message (changes formatting)
 /// * `use_bullet` - Whether to use a bullet point instead of a tick/exclamation
 pub fn queue_function_result(result: &str, updates: &mut impl Write, is_error: bool, use_bullet: bool) -> Result<()> {
-    use crossterm::queue;
-    use crossterm::style::{
-        self,
-        Color,
-    };
-
-    // Split the result into lines for proper formatting
     let lines = result.lines().collect::<Vec<_>>();
-    let color = if is_error { Color::Red } else { Color::Reset };
+
+    // Determine symbol and color
+    let (symbol, color) = match (is_error, use_bullet) {
+        (true, _) => (super::ERROR_EXCLAMATION, Color::Red),
+        (false, true) => (super::TOOL_BULLET, Color::Reset),
+        (false, false) => (super::SUCCESS_TICK, Color::Green),
+    };
 
     queue!(updates, style::Print("\n"))?;
 
-    // Use appropriate symbol based on parameters
+    // Print first line with symbol
     if let Some(first_line) = lines.first() {
-        // Select symbol: bullet for summaries, tick/exclamation for operations
-        let symbol = if is_error {
-            super::ERROR_EXCLAMATION
-        } else if use_bullet {
-            super::TOOL_BULLET
-        } else {
-            super::SUCCESS_TICK
-        };
-
-        // Set color to green for success ticks
-        let text_color = if is_error {
-            Color::Red
-        } else if !use_bullet {
-            Color::Green
-        } else {
-            Color::Reset
-        };
-
         queue!(
             updates,
-            style::SetForegroundColor(text_color),
+            style::SetForegroundColor(color),
             style::Print(symbol),
             style::ResetColor,
             style::Print(first_line),
@@ -490,14 +471,12 @@ pub fn queue_function_result(result: &str, updates: &mut impl Write, is_error: b
         )?;
     }
 
-    // For any additional lines, indent them properly
+    // Print remaining lines with indentation
     for line in lines.iter().skip(1) {
         queue!(
             updates,
-            style::Print("   "), // Same indentation as the bullet
-            style::SetForegroundColor(color),
+            style::Print("   "), // 3 spaces for alignment
             style::Print(line),
-            style::ResetColor,
             style::Print("\n"),
         )?;
     }
