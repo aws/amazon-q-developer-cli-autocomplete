@@ -608,13 +608,10 @@ fn qchat_path() -> Result<PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn qchat_path() -> Result<PathBuf> {
-    Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/chat_cli"))
+    use fig_util::consts::CHAT_BINARY_NAME;
+    use macos_utils::bundle::get_bundle_path_for_executable;
 
-    // use fig_util::consts::CHAT_BINARY_NAME;
-    // use macos_utils::bundle::get_bundle_path_for_executable;
-
-    // Ok(get_bundle_path_for_executable(CHAT_BINARY_NAME).unwrap_or(home_local_bin()?.
-    // join(CHAT_BINARY_NAME)))
+    Ok(get_bundle_path_for_executable(CHAT_BINARY_NAME).unwrap_or(home_local_bin()?.join(CHAT_BINARY_NAME)))
 }
 
 #[cfg(test)]
