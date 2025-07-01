@@ -1523,6 +1523,10 @@ impl ChatSession {
                         OutputKind::Images(ref image) => {
                             image_blocks.extend(image.clone());
                         },
+                        OutputKind::Mixed { ref text, ref images } => {
+                            debug!("Output is Mixed: text = {:?}, images = {}", text, images.len());
+                            image_blocks.extend(images.clone());
+                        },
                     }
 
                     debug!("tool result output: {:#?}", result);

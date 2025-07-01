@@ -6,7 +6,6 @@ use crossterm::queue;
 use crossterm::style::{
     self,
     Color,
-    Stylize,
 };
 use eyre::{
     Result,
@@ -37,9 +36,6 @@ use crate::cli::chat::util::images::{
     pre_process,
 };
 use crate::os::Os;
-
-const CHECKMARK: &str = "✔";
-const CROSS: &str = "✘";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct FsRead {
@@ -112,7 +108,7 @@ impl FsRead {
                 // Multiple operations - combine results
                 let mut combined_results = Vec::new();
                 let mut all_images = Vec::new();
-
+                let mut has_non_image_ops = false;
                 let mut success_ops = 0usize;
                 let mut failed_ops = 0usize;
 
@@ -128,6 +124,7 @@ impl FsRead {
                                         i + 1,
                                         text
                                     ));
+                                    has_non_image_ops = true;
                                 },
                                 OutputKind::Json(json) => {
                                     combined_results.push(format!(
@@ -135,6 +132,7 @@ impl FsRead {
                                         i + 1,
                                         serde_json::to_string_pretty(json)?
                                     ));
+                                    has_non_image_ops = true;
                                 },
                                 OutputKind::Images(images) => {
                                     all_images.extend(images.clone());
@@ -144,6 +142,9 @@ impl FsRead {
                                         images.len()
                                     ));
                                 },
+                                // This branch won't be reached because single operation execution never returns a Mixed
+                                // result
+                                OutputKind::Mixed { text: _, images: _ } => {},
                             }
                         },
 
@@ -172,15 +173,23 @@ impl FsRead {
                     true,
                 )?;
 
-                // If we have images, return them as the primary output
-                if !all_images.is_empty() {
+                let combined_text = combined_results.join("\n\n");
+
+                if !all_images.is_empty() && has_non_image_ops {
+                    queue!(updates, style::Print("\nherherherherherh"),)?;
+                    Ok(InvokeOutput {
+                        output: OutputKind::Mixed {
+                            text: combined_text,
+                            images: all_images,
+                        },
+                    })
+                } else if !all_images.is_empty() {
                     Ok(InvokeOutput {
                         output: OutputKind::Images(all_images),
                     })
                 } else {
-                    // Otherwise, return the combined text results
                     Ok(InvokeOutput {
-                        output: OutputKind::Text(combined_results.join("\n\n")),
+                        output: OutputKind::Text(combined_text),
                     })
                 }
             }
@@ -248,7 +257,7 @@ impl FsImage {
     pub async fn invoke(&self, updates: &mut impl Write) -> Result<InvokeOutput> {
         let pre_processed_paths: Vec<String> = self.image_paths.iter().map(|path| pre_process(path)).collect();
         let valid_images = handle_images_from_paths(updates, &pre_processed_paths);
-        super::queue_function_result(&format!("Successfully read image"), updates, false, false)?;
+        super::queue_function_result("Successfully read image", updates, false, false)?;
         Ok(InvokeOutput {
             output: OutputKind::Images(valid_images),
         })
