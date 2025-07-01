@@ -24,7 +24,11 @@ use std::collections::{
     HashSet,
     VecDeque,
 };
-use std::io::Write;
+use std::io::{
+    IsTerminal,
+    Read,
+    Write,
+};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -144,11 +148,14 @@ pub const EXTRA_HELP: &str = color_print::cstr! {"
 <black!>You can now configure the Amazon Q CLI to use MCP servers. \nLearn how: https://docs.aws.amazon.com/en_us/amazonq/latest/qdeveloper-ug/command-line-mcp.html</black!>
 
 <cyan,em>Tips:</cyan,em>
-<em>!{command}</em>            <black!>Quickly execute a command in your current session</black!>
-<em>Ctrl(^) + j</em>           <black!>Insert new-line to provide multi-line prompt. Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
-<em>Ctrl(^) + s</em>           <black!>Fuzzy search commands and context files. Use Tab to select multiple items.</black!>
-                      <black!>Change the keybind to ctrl+x with: q settings chat.skimCommandKey x (where x is any key)</black!>
-<em>chat.editMode</em>         <black!>Set editing mode (vim or emacs) using: q settings chat.editMode vi/emacs</black!>
+<em>!{command}</em>          <black!>Quickly execute a command in your current session</black!>
+<em>Ctrl(^) + j</em>         <black!>Insert new-line to provide multi-line prompt</black!>
+                    <black!>Alternatively, [Alt(⌥) + Enter(⏎)]</black!>
+<em>Ctrl(^) + s</em>         <black!>Fuzzy search commands and context files</black!>
+                    <black!>Use Tab to select multiple items</black!>
+                    <black!>Change the keybind using: q settings chat.skimCommandKey x</black!>
+<em>chat.editMode</em>       <black!>The prompt editing mode (vim or emacs)</black!>
+                    <black!>Change using: q settings chat.skimCommandKey x</black!>
 "};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Args)]
@@ -178,8 +185,26 @@ pub struct ChatArgs {
 
 impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
-        if self.non_interactive && self.input.is_none() {
-            bail!("Input must be supplied when running in non-interactive mode");
+        let mut input = self.input;
+
+        if self.non_interactive && input.is_none() {
+            if !std::io::stdin().is_terminal() {
+                let mut buffer = String::new();
+                match std::io::stdin().read_to_string(&mut buffer) {
+                    Ok(_) => {
+                        if !buffer.trim().is_empty() {
+                            input = Some(buffer.trim().to_string());
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!("Error reading from stdin: {}", e);
+                    },
+                }
+            }
+
+            if input.is_none() {
+                bail!("Input must be supplied when running in non-interactive mode");
+            }
         }
 
         let stdout = std::io::stdout();
@@ -286,7 +311,7 @@ impl ChatArgs {
             stdout,
             stderr,
             &conversation_id,
-            self.input,
+            input,
             InputSource::new(os, prompt_request_sender, prompt_response_receiver)?,
             self.resume,
             || terminal::window_size().map(|s| s.columns.into()).ok(),
@@ -353,13 +378,10 @@ const ROTATING_TIPS: [&str; 16] = [
 
 const GREETING_BREAK_POINT: usize = 80;
 
-const POPULAR_SHORTCUTS: &str = color_print::cstr! {
-"<black!><green!>/help</green!> all commands                      <em>•</em>  <green!>ctrl + j</green!> new lines
-<green!>ctrl + s</green!> fuzzy search                   <em>•</em>  <green!>ctrl + f</green!> accept completion</black!>"};
+const POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands  <em>•</em>  <green!>ctrl + j</green!> new lines  <em>•</em>  <green!>ctrl + s</green!> fuzzy search</black!>"};
 const SMALL_SCREEN_POPULAR_SHORTCUTS: &str = color_print::cstr! {"<black!><green!>/help</green!> all commands
 <green!>ctrl + j</green!> new lines
 <green!>ctrl + s</green!> fuzzy search
-<green!>ctrl + f</green!> accept completion
 </black!>"};
 
 const RESPONSE_TIMEOUT_CONTENT: &str = "Response timed out - message took too long to generate";
@@ -1248,19 +1270,8 @@ impl ChatSession {
         let input = user_input.trim();
 
         // handle image path
-        if input.starts_with('/') {
-            if let Some(after_slash) = input.strip_prefix('/') {
-                let looks_like_path = after_slash.contains(MAIN_SEPARATOR)
-                    || after_slash.contains('/')
-                    || after_slash.contains('\\')
-                    || after_slash.contains('.');
-
-                if looks_like_path {
-                    return Ok(ChatState::HandleInput {
-                        input: after_slash.to_string(),
-                    });
-                }
-            }
+        if let Some(chat_state) = does_input_reference_file(input) {
+            return Ok(chat_state);
         }
         if let Some(mut args) = input.strip_prefix("/").and_then(shlex::split) {
             // Required for printing errors correctly.
@@ -1427,7 +1438,6 @@ impl ChatSession {
             queue!(self.stderr, style::SetForegroundColor(Color::Magenta))?;
             queue!(self.stderr, style::SetForegroundColor(Color::Reset))?;
             queue!(self.stderr, cursor::Hide)?;
-            execute!(self.stderr, style::Print("\n"))?;
 
             if self.interactive {
                 self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
@@ -1631,10 +1641,8 @@ impl ChatSession {
             queue!(
                 self.stderr,
                 style::SetForegroundColor(Color::Reset),
-                terminal::Clear(terminal::ClearType::CurrentLine),
                 cursor::MoveToColumn(0),
                 cursor::Show,
-                cursor::MoveUp(1),
                 terminal::Clear(terminal::ClearType::CurrentLine),
             )?;
         }
@@ -1651,15 +1659,11 @@ impl ChatSession {
                             tool_name_being_recvd = Some(name);
                         },
                         parser::ResponseEvent::AssistantText(text) => {
-                            // Add Q response prefix before the first assistant text
+                            // Add Q response prefix before the first assistant text.
+                            // This must be markdown - using a code tick, which is printed
+                            // as green.
                             if !response_prefix_printed && !text.trim().is_empty() {
-                                // Print the Q response prefix with cyan color
-                                execute!(
-                                    self.stdout,
-                                    style::SetForegroundColor(Color::Cyan),
-                                    style::Print("> "),
-                                    style::SetForegroundColor(Color::Reset)
-                                )?;
+                                buf.push_str("`>` ");
                                 response_prefix_printed = true;
                             }
                             buf.push_str(&text);
@@ -2244,6 +2248,25 @@ where
     result
 }
 
+/// Checks if an input may be referencing a file and should not be handled as a typical slash
+/// command. If true, then return [Option::Some<ChatState>], otherwise [Option::None].
+fn does_input_reference_file(input: &str) -> Option<ChatState> {
+    let after_slash = input.strip_prefix("/")?;
+
+    if let Some(first) = shlex::split(after_slash).unwrap_or_default().first() {
+        let looks_like_path =
+            first.contains(MAIN_SEPARATOR) || first.contains('/') || first.contains('\\') || first.contains('.');
+
+        if looks_like_path {
+            return Some(ChatState::HandleInput {
+                input: after_slash.to_string(),
+            });
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2655,5 +2678,22 @@ mod tests {
         .spawn(&mut os)
         .await
         .unwrap();
+    }
+
+    #[test]
+    fn test_does_input_reference_file() {
+        let tests = &[
+            (
+                r"/Users/user/Desktop/Screenshot\ 2025-06-30\ at\ 2.13.34 PM.png read this image for me",
+                true,
+            ),
+            ("/path/to/file.json", true),
+            ("/save output.json", false),
+            ("~/does/not/start/with/slash", false),
+        ];
+        for (input, expected) in tests {
+            let actual = does_input_reference_file(input).is_some();
+            assert_eq!(actual, *expected, "expected {} for input {}", expected, input);
+        }
     }
 }

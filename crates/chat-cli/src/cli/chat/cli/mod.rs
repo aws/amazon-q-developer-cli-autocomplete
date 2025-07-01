@@ -55,7 +55,7 @@ pub enum SlashCommand {
     Context(ContextSubcommand),
     /// (Beta) Manage knowledge base for persistent context storage. Requires "q settings
     /// chat.enableKnowledge true"
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Knowledge(KnowledgeSubcommand),
     /// Open $EDITOR (defaults to vi) to compose a prompt
     #[command(name = "editor")]

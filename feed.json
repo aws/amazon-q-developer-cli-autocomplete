@@ -12,17 +12,13 @@
     },
     {
       "type": "release",
-      "date": "2025-06-27",
+      "date": "2025-06-30",
       "version": "1.12.2",
       "title": "Version 1.12.2",
       "changes": [
         {
           "type": "added",
-          "description": "(Beta) The `/knowledge` command in `q chat`, a knowledge base with semantic search capabilities. Enable it with `q settings chat.enableKnowledge true` - [#101](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/101)"
-        },
-        {
-          "type": "added",
-          "description": "Autocompletion with ghost text in `q chat` - [#288](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/288)"
+          "description": "Autocompletion with ghost text in `q chat`. Accept completions using right arrow or `Ctrl + f` - [#288](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/288)"
         },
         {
           "type": "added",
