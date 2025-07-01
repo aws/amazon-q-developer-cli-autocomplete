@@ -48,41 +48,41 @@
                   "Search",
                   "Image"
                 ],
-                "description": "The operation mode"
+                "description": "The operation mode to run in: `Line`, `Directory`, `Search`. `Line` and `Search` are only for text files, and `Directory` is only for directories. `Image` is for image files, in this mode `image_paths` is required."
               },
               "path": {
                 "type": "string",
-                "description": "Path to file or directory (required for Line, Directory, Search modes)"
+                "description": "Path to the file or directory. The path should be absolute, or otherwise start with ~ for the user's home (required for Line, Directory, Search modes)."
               },
               "image_paths": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "description": "Paths to images (required for Image mode)"
+                "description": "List of paths to the images. This is currently supported by the Image mode."
               },
               "start_line": {
                 "type": "integer",
-                "description": "Starting line number (optional for Line mode)",
+                "description": "Starting line number (optional, for Line mode). A negative index represents a line number starting from the end of the file.",
                 "default": 1
               },
               "end_line": {
                 "type": "integer",
-                "description": "Ending line number (optional for Line mode)",
+                "description": "Ending line number (optional, for Line mode). A negative index represents a line number starting from the end of the file.",
                 "default": -1
               },
               "pattern": {
                 "type": "string",
-                "description": "Search pattern (required for Search mode)"
+                "description": "Pattern to search for (required, for Search mode). Case insensitive. The pattern matching is performed per line."
               },
               "context_lines": {
                 "type": "integer",
-                "description": "Context lines around matches (optional for Search mode)",
+                "description": "Number of context lines around search results (optional, for Search mode)",
                 "default": 2
               },
               "depth": {
                 "type": "integer",
-                "description": "Directory traversal depth (optional for Directory mode)",
+                "description": "Depth of a recursive directory listing (optional, for Directory mode)",
                 "default": 0
               }
             },
