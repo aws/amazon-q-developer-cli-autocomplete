@@ -177,6 +177,9 @@ pub struct ChatArgs {
     pub non_interactive: bool,
     /// The first question to ask
     pub input: Option<String>,
+    /// Run migration of legacy profiles to agents if applicable
+    #[arg(long)]
+    pub migrate: bool,
 }
 
 impl ChatArgs {
@@ -224,7 +227,8 @@ impl ChatArgs {
             } else {
                 None
             };
-            let mut agents = Agents::load(os, agent_name, self.non_interactive, &mut stderr).await;
+            let skip_migration = self.non_interactive || !self.migrate;
+            let mut agents = Agents::load(os, agent_name, skip_migration, &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
             if let Some(name) = self.agent.as_ref() {
