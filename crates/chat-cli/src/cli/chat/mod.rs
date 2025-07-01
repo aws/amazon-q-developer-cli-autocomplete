@@ -24,7 +24,11 @@ use std::collections::{
     HashSet,
     VecDeque,
 };
-use std::io::{Read, Write, IsTerminal};
+use std::io::{
+    IsTerminal,
+    Read,
+    Write,
+};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -182,7 +186,7 @@ pub struct ChatArgs {
 impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
         let mut input = self.input;
-        
+
         if self.non_interactive && input.is_none() {
             if !std::io::stdin().is_terminal() {
                 let mut buffer = String::new();
@@ -194,10 +198,10 @@ impl ChatArgs {
                     },
                     Err(e) => {
                         eprintln!("Error reading from stdin: {}", e);
-                    }
+                    },
                 }
             }
-            
+
             if input.is_none() {
                 bail!("Input must be supplied when running in non-interactive mode");
             }
