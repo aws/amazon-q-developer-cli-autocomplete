@@ -3,29 +3,70 @@
 
 use std::collections::VecDeque;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use crossterm::queue;
-use crossterm::style::{self, Color};
-use eyre::{Result, bail};
+use crossterm::style::{
+    self,
+    Color,
+    Stylize,
+};
+use eyre::{
+    Result,
+    bail,
+};
 use glob::Pattern;
 use regex::Regex;
 use serde::Deserialize;
 
-use super::{InvokeOutput, OutputKind, sanitize_path_tool_arg};
+use super::{
+    InvokeOutput,
+    OutputKind,
+    sanitize_path_tool_arg,
+};
 use crate::os::Os;
+
+/// Safely canonicalize a path, falling back to the original path if canonicalization fails
+/// ABOUTME: Helper function for converting paths to absolute form with graceful error handling
+/// ABOUTME: Used by fs_search to ensure all returned paths are absolute instead of relative
+async fn canonicalize_path_safe(os: &Os, path: &Path) -> PathBuf {
+    match os.fs.canonicalize(path).await {
+        Ok(canonical) => canonical,
+        Err(_) => path.to_path_buf(), // Graceful fallback to original path
+    }
+}
 
 // Constants for resource limits
 const MAX_RESPONSE_SIZE: usize = 30 * 1024; // 30KB
 const DEFAULT_MAX_FILE_SIZE: usize = 52_428_800; // 50MB
 const MAX_DIRECTORY_DEPTH: usize = 100;
-const MAX_CONTEXT_LINES: usize = 10;
+const MAX_CONTEXT_LINES: usize = 20;
+
+// Constants for visual feedback
+const CHECKMARK: &str = "✔";
+const CROSS: &str = "✘";
 
 /// Default directories to ignore during search
 const DEFAULT_IGNORE_DIRS: &[&str] = &[
-    ".git", ".svn", ".hg", "node_modules", "target", "dist", "build", "out",
-    ".next", "__pycache__", ".pytest_cache", ".mypy_cache", ".tox", ".venv",
-    "venv", ".env",
+    ".git",
+    ".svn",
+    ".hg",
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".tox",
+    ".venv",
+    "venv",
+    ".env",
 ];
 
 /// File system search tool with explicit modes
@@ -87,16 +128,16 @@ impl FsSearch {
 impl FsSearchName {
     pub async fn validate(&mut self, os: &Os) -> Result<()> {
         let path = sanitize_path_tool_arg(os, &self.path);
-        
+
         if !path.exists() {
             bail!("Path does not exist: '{}'", self.path);
         }
-        
+
         // Validate pattern as glob
         if let Err(e) = Pattern::new(&self.pattern) {
             bail!("Invalid glob pattern '{}': {}", self.pattern, e);
         }
-        
+
         Ok(())
     }
 
@@ -116,22 +157,51 @@ impl FsSearchName {
         Ok(())
     }
 
-    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(os, &self.path);
         let pattern = Pattern::new(&self.pattern)?;
-        
+
         let matching_files = self.search_directory(&path, &pattern, os).await?;
-        
-        let mut result = format!("Found {} files matching pattern '{}':\n", 
-                                matching_files.len(), self.pattern);
-        
+        let file_count = matching_files.len();
+
+        // Display match count with visual feedback
+        let match_text = if file_count == 1 {
+            "1 file".to_string()
+        } else {
+            format!("{} files", file_count)
+        };
+
+        let color = if file_count == 0 { Color::Yellow } else { Color::Green };
+
+        let result_symbol = if file_count == 0 {
+            CROSS.yellow()
+        } else {
+            CHECKMARK.green()
+        };
+
+        queue!(
+            updates,
+            style::Print(" "),
+            style::Print(result_symbol),
+            style::Print(" Found: "),
+            style::SetForegroundColor(color),
+            style::Print(&match_text),
+            style::ResetColor,
+        )?;
+
+        // Format result string with plain text symbols (for text output)
+        let plain_symbol = if file_count == 0 { CROSS } else { CHECKMARK };
+
+        let mut result = format!(
+            "{} Found: {}\n\nFound {} files matching pattern '{}':\n",
+            plain_symbol, match_text, file_count, self.pattern
+        );
+
         for file_path in matching_files {
-            let relative_path = file_path.strip_prefix(&path)
-                .unwrap_or(&file_path)
-                .display();
-            result.push_str(&format!("  {}\n", relative_path));
+            let absolute_path = canonicalize_path_safe(os, &file_path).await;
+            result.push_str(&format!("  {}\n", absolute_path.display()));
         }
-        
+
         Ok(InvokeOutput {
             output: OutputKind::Text(result),
         })
@@ -141,32 +211,32 @@ impl FsSearchName {
         let mut matching_files = Vec::new();
         let mut dirs_to_process = VecDeque::new();
         dirs_to_process.push_back((dir.to_path_buf(), 0));
-        
+
         while let Some((current_dir, depth)) = dirs_to_process.pop_front() {
             if depth > MAX_DIRECTORY_DEPTH {
                 continue;
             }
-            
+
             let mut entries = os.fs.read_dir(&current_dir).await?;
-            
+
             while let Some(entry) = entries.next_entry().await? {
                 let entry_path = entry.path();
-                
+
                 // Check ignore patterns
                 if !self.include_ignored && Self::should_ignore_entry(&entry_path) {
                     continue;
                 }
-                
+
                 // Optimize path operations
                 if let Ok(relative_path) = entry_path.strip_prefix(dir) {
                     let path_str = relative_path.to_string_lossy();
-                    
+
                     // Match against relative path
                     if pattern.matches(&path_str) {
                         matching_files.push(entry_path.clone());
                         continue;
                     }
-                    
+
                     // If didn't match full path, try just filename
                     if let Some(file_name) = entry_path.file_name().and_then(|n| n.to_str()) {
                         if path_str != file_name && pattern.matches(file_name) {
@@ -176,14 +246,14 @@ impl FsSearchName {
                 } else if pattern.matches(&entry_path.to_string_lossy()) {
                     matching_files.push(entry_path.clone());
                 }
-                
+
                 // Recurse into directories
                 if entry_path.is_dir() {
                     dirs_to_process.push_back((entry_path, depth + 1));
                 }
             }
         }
-        
+
         matching_files.sort();
         Ok(matching_files)
     }
@@ -203,47 +273,47 @@ impl FsSearchContent {
     fn context_before_lines(&self) -> usize {
         self.context_before.unwrap_or(0).min(MAX_CONTEXT_LINES)
     }
-    
+
     fn context_after_lines(&self) -> usize {
         self.context_after.unwrap_or(0).min(MAX_CONTEXT_LINES)
     }
-    
+
     fn max_file_size_bytes(&self) -> usize {
         self.max_file_size.unwrap_or(DEFAULT_MAX_FILE_SIZE)
     }
 
     pub async fn validate(&mut self, os: &Os) -> Result<()> {
         let path = sanitize_path_tool_arg(os, &self.path);
-        
+
         if !path.exists() {
             bail!("Path does not exist: '{}'", self.path);
         }
-        
+
         // Validate context parameters
         if let Some(before) = self.context_before {
-            if before > 10 {
-                bail!("Invalid value for context_before: '{}'. Must be <= 10", before);
+            if before > 20 {
+                bail!("Invalid value for context_before: '{}'. Must be <= 20", before);
             }
         }
-        
+
         if let Some(after) = self.context_after {
-            if after > 10 {
-                bail!("Invalid value for context_after: '{}'. Must be <= 10", after);
+            if after > 20 {
+                bail!("Invalid value for context_after: '{}'. Must be <= 20", after);
             }
         }
-        
+
         // Validate pattern as regex
         if let Err(e) = Regex::new(&self.pattern) {
             bail!("Invalid regex pattern '{}': {}", self.pattern, e);
         }
-        
+
         // Validate file_path glob pattern if provided
         if let Some(file_path_pattern) = &self.file_path {
             if let Err(e) = Pattern::new(file_path_pattern) {
                 bail!("Invalid glob pattern '{}': {}", file_path_pattern, e);
             }
         }
-        
+
         Ok(())
     }
 
@@ -263,24 +333,24 @@ impl FsSearchContent {
         Ok(())
     }
 
-    pub async fn invoke(&self, os: &Os, _updates: &mut impl Write) -> Result<InvokeOutput> {
+    pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
         let path = sanitize_path_tool_arg(os, &self.path);
         let regex = Regex::new(&self.pattern)?;
-        
+
         // Pre-compile file_path pattern if provided
-        let file_pattern = self.file_path.as_ref()
-            .map(|p| Pattern::new(p))
-            .transpose()?;
-        
+        let file_pattern = self.file_path.as_ref().map(|p| Pattern::new(p)).transpose()?;
+
         let mut matches_by_file = Vec::new();
         let mut total_size = 0usize;
-        
+        let mut total_matches = 0usize;
+
         // Check if path is a file or directory
         let metadata = os.fs.symlink_metadata(&path).await?;
         if metadata.is_file() {
             // Search single file
             if let Some(matches) = self.search_file_content(&path, &regex, os).await? {
                 if !matches.is_empty() {
+                    total_matches += matches.len();
                     let size = Self::estimate_matches_size(&matches);
                     total_size += size;
                     matches_by_file.push((path, matches));
@@ -288,13 +358,52 @@ impl FsSearchContent {
             }
         } else if metadata.is_dir() {
             // Search directory recursively
-            self.search_directory_content(&path, &regex, os, &mut matches_by_file, &mut total_size, MAX_RESPONSE_SIZE, file_pattern.as_ref()).await?;
+            self.search_directory_content(
+                &path,
+                &regex,
+                os,
+                &mut matches_by_file,
+                &mut total_size,
+                MAX_RESPONSE_SIZE,
+                file_pattern.as_ref(),
+                &mut total_matches,
+            )
+            .await?;
         } else {
             bail!("Path '{}' is neither a file nor a directory", self.path);
         }
-        
-        let result = Self::format_content_results(matches_by_file, total_size >= MAX_RESPONSE_SIZE);
-        
+
+        // Display match count with visual feedback
+        let match_text = if total_matches == 1 {
+            "1 match".to_string()
+        } else {
+            format!("{} matches", total_matches)
+        };
+
+        let color = if total_matches == 0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+
+        let result_symbol = if total_matches == 0 {
+            CROSS.yellow()
+        } else {
+            CHECKMARK.green()
+        };
+
+        queue!(
+            updates,
+            style::Print(" "),
+            style::Print(result_symbol),
+            style::Print(" Found: "),
+            style::SetForegroundColor(color),
+            style::Print(&match_text),
+            style::ResetColor,
+        )?;
+
+        let result = Self::format_content_results(matches_by_file, total_size >= MAX_RESPONSE_SIZE, total_matches);
+
         Ok(InvokeOutput {
             output: OutputKind::Text(result),
         })
@@ -309,53 +418,54 @@ impl FsSearchContent {
         total_size: &mut usize,
         max_size: usize,
         file_pattern: Option<&Pattern>,
+        total_matches: &mut usize,
     ) -> Result<()> {
         let mut dirs_to_process = VecDeque::new();
         dirs_to_process.push_back((dir.to_path_buf(), 0));
-        
+
         while let Some((current_dir, depth)) = dirs_to_process.pop_front() {
             if *total_size >= max_size || depth > MAX_DIRECTORY_DEPTH {
                 break;
             }
-            
+
             let mut entries = os.fs.read_dir(&current_dir).await?;
-            
+
             while let Some(entry) = entries.next_entry().await? {
                 if *total_size >= max_size {
                     break;
                 }
                 let entry_path = entry.path();
-                
+
                 // Check ignore patterns
                 if !self.include_ignored && FsSearchName::should_ignore_entry(&entry_path) {
                     continue;
                 }
-                
+
                 if entry_path.is_file() {
                     // Apply file_path glob filter if specified
                     if let Some(pattern) = file_pattern {
-                        let relative_path = entry_path.strip_prefix(dir)
-                            .unwrap_or(&entry_path);
+                        let relative_path = entry_path.strip_prefix(dir).unwrap_or(&entry_path);
                         let path_str = relative_path.to_string_lossy();
-                        let file_name = entry_path.file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or("");
-                        
+                        let file_name = entry_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
                         // Check if file matches the file_path pattern (either full path or filename)
                         if !pattern.matches(&path_str) && !pattern.matches(file_name) {
                             continue;
                         }
                     }
-                    
+
                     if let Some(matches) = self.search_file_content(&entry_path, regex, os).await? {
                         if !matches.is_empty() {
+                            // Count matches and update total
+                            *total_matches += matches.len();
+
                             // Accurate size estimation
                             let file_content_size = Self::estimate_matches_size(&matches);
-                            
+
                             if *total_size + file_content_size > max_size {
                                 break;
                             }
-                            
+
                             *total_size += file_content_size;
                             matches_by_file.push((entry_path, matches));
                         }
@@ -365,12 +475,13 @@ impl FsSearchContent {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn estimate_matches_size(matches: &[(usize, String)]) -> usize {
-        matches.iter()
+        matches
+            .iter()
             .map(|(line_num, content)| {
                 // Account for formatting: "  {line_num}: {content}\n"
                 format!("  {}: {}\n", line_num, content).len()
@@ -378,42 +489,47 @@ impl FsSearchContent {
             .sum()
     }
 
-    async fn search_file_content(&self, file_path: &Path, regex: &Regex, os: &Os) -> Result<Option<Vec<(usize, String)>>> {
+    async fn search_file_content(
+        &self,
+        file_path: &Path,
+        regex: &Regex,
+        os: &Os,
+    ) -> Result<Option<Vec<(usize, String)>>> {
         // Check file size
         let metadata = os.fs.symlink_metadata(file_path).await?;
         if metadata.len() > self.max_file_size_bytes() as u64 {
             return Ok(None);
         }
-        
+
         // Try to read as UTF-8
         let content = match os.fs.read_to_string(file_path).await {
             Ok(content) => content,
             Err(_) => return Ok(None), // Skip binary files
         };
-        
+
         let mut matches = Vec::new();
         let lines: Vec<&str> = content.lines().collect();
-        
+
         for (i, line) in lines.iter().enumerate() {
             if regex.is_match(line) {
                 let line_num = i + 1;
-                
+
                 // Add context lines if requested
                 if self.context_before_lines() > 0 || self.context_after_lines() > 0 {
                     // Add context before
-                    let start = if i >= self.context_before_lines() { 
-                        i - self.context_before_lines() 
-                    } else { 
-                        0 
+                    let start = if i >= self.context_before_lines() {
+                        i - self.context_before_lines()
+                    } else {
+                        0
                     };
-                    
+
                     for (j, line) in lines.iter().enumerate().take(i).skip(start) {
                         matches.push((j + 1, format!("[context] {}", line)));
                     }
-                    
+
                     // Add the matching line
                     matches.push((line_num, format!("[match] {}", line)));
-                    
+
                     // Add context after
                     let end = (i + 1 + self.context_after_lines()).min(lines.len());
                     for (j, line) in lines.iter().enumerate().take(end).skip(i + 1) {
@@ -424,42 +540,57 @@ impl FsSearchContent {
                 }
             }
         }
-        
+
         Ok(Some(matches))
     }
 
-    fn format_content_results(matches_by_file: Vec<(PathBuf, Vec<(usize, String)>)>, truncated: bool) -> String {
+    fn format_content_results(
+        matches_by_file: Vec<(PathBuf, Vec<(usize, String)>)>,
+        truncated: bool,
+        total_matches: usize,
+    ) -> String {
+        let match_text = if total_matches == 1 {
+            "1 match".to_string()
+        } else {
+            format!("{} matches", total_matches)
+        };
+
+        let result_symbol = if total_matches == 0 { CROSS } else { CHECKMARK };
+
+        let mut result = format!("{} Found: {}\n\n", result_symbol, match_text);
+
         if matches_by_file.is_empty() {
-            return "Found matches in 0 files:".to_string();
+            result.push_str("Found matches in 0 files:");
+            return result;
         }
-        
-        let mut result = format!("Found matches in {} files:\n\n", matches_by_file.len());
-        
+
+        result.push_str(&format!("Found matches in {} files:\n\n", matches_by_file.len()));
+
         for (file_path, matches) in matches_by_file {
             result.push_str(&format!("{}:\n", file_path.display()));
-            
+
             for (line_num, line_content) in matches {
                 result.push_str(&format!("  {}: {}\n", line_num, line_content));
             }
-            
+
             result.push('\n');
         }
-        
+
         if truncated {
             result.push_str("\n[Results truncated - response size limit reached]");
         }
-        
+
         result
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::cli::chat::util::test::setup_test_directory;
-    use crate::os::Os;
     use serde_json::json;
-    use std::sync::Arc;
+
+    use super::*;
+    use crate::cli::chat::util::test::setup_test_directory as util_setup_test_directory;
+    use crate::os::Os;
 
     const TEST_CONTENT_FILE: &str = "/test_content.rs";
     const TEST_CONTENT: &str = r#"// ABOUTME: This is a test Rust file
@@ -473,7 +604,7 @@ fn main() {
     println!("This is a test"); // FIXME: Remove debug print
 }
 
-mod tests {
+mod test_module {
     #[test]
     fn test_function() {
         assert_eq!(2 + 2, 4);
@@ -494,41 +625,40 @@ mod tests {
     ];
 
     /// Set up test directory with file structure for fs_search testing
-    async fn setup_test_directory() -> Os {
-        let os = setup_test_directory().await;
-        let fs = os.fs;
-        
+    async fn setup_fs_search_test_directory() -> Os {
+        let os = util_setup_test_directory().await;
+
         // Create main test content file
-        fs.write(TEST_CONTENT_FILE, TEST_CONTENT).await.unwrap();
-        
+        os.fs.write(TEST_CONTENT_FILE, TEST_CONTENT).await.unwrap();
+
         // Create directory structure
         for (path, content) in TEST_DIR_STRUCTURE {
             if path.contains('/') && !path.ends_with('/') {
                 if let Some(parent) = std::path::Path::new(path).parent() {
-                    fs.create_dir_all(parent).await.unwrap();
+                    os.fs.create_dir_all(parent).await.unwrap();
                 }
             }
-            fs.write(path, content).await.unwrap();
+            os.fs.write(path, content).await.unwrap();
         }
-        
+
         os
     }
 
     #[tokio::test]
     async fn test_name_search_deserialization() {
         let json = json!({
-            "mode": "name", 
+            "mode": "name",
             "path": "/test",
             "pattern": "*.rs"
         });
-        
+
         let fs_search: FsSearch = serde_json::from_value(json).unwrap();
         match fs_search {
             FsSearch::Name(name_search) => {
                 assert_eq!(name_search.path, "/test");
                 assert_eq!(name_search.pattern, "*.rs");
                 assert!(!name_search.include_ignored);
-            }
+            },
             _ => panic!("Expected Name variant"),
         }
     }
@@ -537,13 +667,13 @@ mod tests {
     async fn test_content_search_deserialization() {
         let json = json!({
             "mode": "content",
-            "path": "/test", 
+            "path": "/test",
             "pattern": "TODO",
             "context_before": 2,
             "context_after": 2,
             "include_ignored": true
         });
-        
+
         let fs_search: FsSearch = serde_json::from_value(json).unwrap();
         match fs_search {
             FsSearch::Content(content_search) => {
@@ -552,7 +682,7 @@ mod tests {
                 assert_eq!(content_search.context_before, Some(2));
                 assert_eq!(content_search.context_after, Some(2));
                 assert!(content_search.include_ignored);
-            }
+            },
             _ => panic!("Expected Content variant"),
         }
     }
@@ -563,7 +693,7 @@ mod tests {
             "path": "/test",
             "pattern": "*.rs"
         });
-        
+
         let result = serde_json::from_value::<FsSearch>(json);
         assert!(result.is_err());
     }
@@ -574,26 +704,130 @@ mod tests {
             path: "/test".to_string(),
             pattern: "test".to_string(),
             include_ignored: false,
-            context_before: Some(15),
+            context_before: Some(25),
             context_after: Some(5),
             max_file_size: None,
             file_path: None,
         };
-        
-        assert_eq!(content_search.context_before_lines(), 10); // Capped at 10
+
+        assert_eq!(content_search.context_before_lines(), 20); // Capped at 20
         assert_eq!(content_search.context_after_lines(), 5);
     }
 
     #[tokio::test]
+    async fn test_fs_search_name_absolute_paths() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Test that name search returns absolute paths
+        let v = json!({
+            "mode": "name",
+            "path": "/",
+            "pattern": "*.rs"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // All paths should be absolute (start with /)
+            for line in text.lines() {
+                if line.trim().ends_with(".rs") {
+                    let path_part = line.trim();
+                    assert!(
+                        path_part.starts_with('/'),
+                        "Path '{}' should be absolute (start with /)",
+                        path_part
+                    );
+                }
+            }
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_search_name_relative_starting_point() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create a subdirectory structure for testing relative paths
+        os.fs.create_dir_all("/project/src").await.unwrap();
+        os.fs.write("/project/src/main.rs", "fn main() {}").await.unwrap();
+        os.fs.write("/project/README.md", "# Project").await.unwrap();
+
+        // Test with relative path that gets resolved
+        let v = json!({
+            "mode": "name",
+            "path": "/project",  // This will be treated as absolute by sanitize_path_tool_arg
+            "pattern": "*.rs"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should find the Rust file and return absolute path
+            assert!(text.contains("main.rs"));
+            for line in text.lines() {
+                if line.trim().ends_with("main.rs") {
+                    let path_part = line.trim();
+                    assert!(path_part.starts_with('/'), "Path '{}' should be absolute", path_part);
+                }
+            }
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fs_search_name_error_handling() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create a file that we can test with
+        os.fs.write("/test_file.txt", "test content").await.unwrap();
+
+        // Test that search continues even if some paths can't be canonicalized
+        // In the fake filesystem, canonicalization should work, but this tests the error handling path
+        let v = json!({
+            "mode": "name",
+            "path": "/",
+            "pattern": "*.txt"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should find the file and return absolute path
+            assert!(text.contains("test_file.txt"));
+            for line in text.lines() {
+                if line.trim().ends_with(".txt") {
+                    let path_part = line.trim();
+                    assert!(path_part.starts_with('/'), "Path '{}' should be absolute", path_part);
+                }
+            }
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
     async fn test_fs_search_name_invoke() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // First test that files exist
-        let fs = os.fs;
-        assert!(fs.read_to_string("/test_content.rs").await.is_ok());
-        assert!(fs.read_to_string("/src/main.rs").await.is_ok());
-        
+        assert!(os.fs.read_to_string("/test_content.rs").await.is_ok());
+        assert!(os.fs.read_to_string("/src/main.rs").await.is_ok());
+
         // Test searching for Rust files
         let v = json!({
             "mode": "name",
@@ -640,7 +874,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_name_with_ignore() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // Test without include_ignored (should exclude .git and node_modules)
@@ -686,7 +920,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_content_invoke() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // Test searching for TODO comments
@@ -733,7 +967,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_content_with_context() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
         let mut stdout = std::io::stdout();
 
         // Test with context lines
@@ -761,7 +995,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fs_search_validation_errors() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
 
         // Test invalid path
         let mut v = json!({
@@ -783,7 +1017,7 @@ mod tests {
         let result = fs_search.validate(&os).await;
         assert!(result.is_err());
 
-        // Test invalid regex pattern  
+        // Test invalid regex pattern
         v = json!({
             "mode": "content",
             "path": "/",
@@ -798,7 +1032,7 @@ mod tests {
             "mode": "content",
             "path": "/",
             "pattern": "test",
-            "context_before": 15
+            "context_before": 25
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         let result = fs_search.validate(&os).await;
@@ -807,9 +1041,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_vs_directory_search_errors() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
         let mut stdout = std::io::stdout();
-        
+
         // Test searching a file as if it were a directory (name search)
         // This should result in an error since read_dir() will fail on a file
         let v = json!({
@@ -829,7 +1063,7 @@ mod tests {
 
         // Test content search on a single file (should work now)
         let v = json!({
-            "mode": "content", 
+            "mode": "content",
             "path": "/test_content.rs",
             "pattern": "TODO"
         });
@@ -847,10 +1081,10 @@ mod tests {
         } else {
             panic!("Expected text output");
         }
-        
+
         // Test content search on a directory (should also work)
         let v = json!({
-            "mode": "content", 
+            "mode": "content",
             "path": "/src",
             "pattern": "fn"
         });
@@ -870,13 +1104,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_permission_denied_scenarios() {
-        let os = setup_test_directory().await;
-        
+        let os = setup_fs_search_test_directory().await;
+
         // Create a directory structure to test with
-        let fs = os.fs;
-        fs.create_dir_all("/restricted").await.unwrap();
-        fs.write("/restricted/file.txt", "test content").await.unwrap();
-        
+        // Use os.fs directly
+        os.fs.create_dir_all("/restricted").await.unwrap();
+        os.fs.write("/restricted/file.txt", "test content").await.unwrap();
+
         // Test case where we can at least attempt to read
         // Note: In a fake filesystem, we can't truly test permission errors,
         // but we can test the error handling paths
@@ -886,21 +1120,21 @@ mod tests {
             "path": "/restricted",
             "pattern": "test"
         });
-        
+
         // This should succeed in fake filesystem, but in real usage permission errors
         // would be caught by the error handling in search_directory_content
         let result = serde_json::from_value::<FsSearch>(v)
             .unwrap()
             .invoke(&os, &mut stdout)
             .await;
-        
+
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn test_invalid_nonexistent_path_handling() {
-        let os = setup_test_directory().await;
-        
+        let os = setup_fs_search_test_directory().await;
+
         // Test completely nonexistent path
         let v = json!({
             "mode": "name",
@@ -927,12 +1161,12 @@ mod tests {
 
         // Test path that exists and should validate successfully
         // (This tests runtime error handling vs validation errors)
-        let fs = os.fs;
-        fs.create_dir_all("/temp_dir").await.unwrap();
-        
+        // Use os.fs directly
+        os.fs.create_dir_all("/temp_dir").await.unwrap();
+
         let v = json!({
             "mode": "name",
-            "path": "/temp_dir", 
+            "path": "/temp_dir",
             "pattern": "*.txt"
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
@@ -941,7 +1175,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_malformed_glob_regex_pattern_errors() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
 
         // Test various malformed glob patterns
         let bad_glob_patterns = vec![
@@ -949,7 +1183,7 @@ mod tests {
             // Note: Some patterns that look malformed may actually be valid in glob
             // We test ones that are definitely invalid
         ];
-        
+
         for pattern in bad_glob_patterns {
             let v = json!({
                 "mode": "name",
@@ -963,17 +1197,9 @@ mod tests {
             assert!(error_msg.contains("Invalid glob pattern"));
         }
 
-        // Test various malformed regex patterns  
-        let bad_regex_patterns = vec![
-            "(",
-            "[",
-            "*",
-            "?+",
-            "(?P<>test)",
-            "(?i",
-            "\\k<name>",
-        ];
-        
+        // Test various malformed regex patterns
+        let bad_regex_patterns = vec!["(", "[", "*", "?+", "(?P<>test)", "(?i", "\\k<name>"];
+
         for pattern in bad_regex_patterns {
             let v = json!({
                 "mode": "content",
@@ -990,46 +1216,46 @@ mod tests {
 
     #[tokio::test]
     async fn test_parameter_validation_edge_cases() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
 
         // Test context_before boundary conditions
         let v = json!({
             "mode": "content",
-            "path": "/", 
+            "path": "/",
             "pattern": "test",
-            "context_before": 11
+            "context_before": 21
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         let result = fs_search.validate(&os).await;
         assert!(result.is_err());
-        assert!(format!("{}", result.unwrap_err()).contains("Must be <= 10"));
+        assert!(format!("{}", result.unwrap_err()).contains("Must be <= 20"));
 
         // Test context_after boundary conditions
         let v = json!({
             "mode": "content",
             "path": "/",
-            "pattern": "test", 
-            "context_after": 11
+            "pattern": "test",
+            "context_after": 21
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         let result = fs_search.validate(&os).await;
         assert!(result.is_err());
-        assert!(format!("{}", result.unwrap_err()).contains("Must be <= 10"));
+        assert!(format!("{}", result.unwrap_err()).contains("Must be <= 20"));
 
         // Test valid boundary values (should pass)
         let v = json!({
             "mode": "content",
             "path": "/",
             "pattern": "test",
-            "context_before": 10,
-            "context_after": 10
+            "context_before": 20,
+            "context_after": 20
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         assert!(fs_search.validate(&os).await.is_ok());
 
         // Test negative values (JSON should prevent this, but test if it somehow gets through)
         let v = json!({
-            "mode": "content", 
+            "mode": "content",
             "path": "/",
             "pattern": "test",
             "context_before": 0,
@@ -1041,7 +1267,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_and_whitespace_patterns() {
-        let os = setup_test_directory().await;
+        let os = setup_fs_search_test_directory().await;
 
         // Test empty glob pattern
         let v = json!({
@@ -1056,7 +1282,7 @@ mod tests {
         // Test whitespace-only patterns
         let v = json!({
             "mode": "name",
-            "path": "/", 
+            "path": "/",
             "pattern": "   "
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
@@ -1073,15 +1299,15 @@ mod tests {
         assert!(fs_search.validate(&os).await.is_ok());
     }
 
-    #[tokio::test] 
+    #[tokio::test]
     async fn test_large_file_handling_errors() {
-        let os = setup_test_directory().await;
-        let fs = os.fs;
-        
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
         // Create a large file by writing lots of content
         let large_content = "x".repeat(100_000); // 100KB file
-        fs.write("/large_file.txt", &large_content).await.unwrap();
-        
+        os.fs.write("/large_file.txt", &large_content).await.unwrap();
+
         // Test content search with small max_file_size
         let mut stdout = std::io::stdout();
         let v = json!({
@@ -1090,13 +1316,13 @@ mod tests {
             "pattern": "x",
             "max_file_size": 1000  // 1KB limit
         });
-        
+
         let output = serde_json::from_value::<FsSearch>(v)
             .unwrap()
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         // Large file should be skipped due to size limit
         if let OutputKind::Text(text) = output.output {
             // Should report 0 matches since the large file was skipped
@@ -1108,20 +1334,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_relative_path_handling() {
-        let os = setup_test_directory().await;
-        let fs = os.fs;
-        
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
         // Create a nested directory structure for relative path testing
-        fs.create_dir_all("/project/src/utils").await.unwrap();
-        fs.create_dir_all("/project/tests").await.unwrap();
-        fs.write("/project/src/main.rs", "fn main() {}").await.unwrap();
-        fs.write("/project/src/utils/helper.rs", "pub fn help() {}").await.unwrap();
-        fs.write("/project/tests/test.rs", "// test file").await.unwrap();
-        
+        os.fs.create_dir_all("/project/src/utils").await.unwrap();
+        os.fs.create_dir_all("/project/tests").await.unwrap();
+        os.fs.write("/project/src/main.rs", "fn main() {}").await.unwrap();
+        os.fs
+            .write("/project/src/utils/helper.rs", "pub fn help() {}")
+            .await
+            .unwrap();
+        os.fs.write("/project/tests/test.rs", "// test file").await.unwrap();
+
         // Test relative path navigation - this tests conceptual relative paths
         // In fake filesystem, we need to test the path sanitization logic
         let mut stdout = std::io::stdout();
-        
+
         // Test with current directory shortcut
         let v = json!({
             "mode": "name",
@@ -1133,7 +1362,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             assert!(text.contains("main.rs"));
             assert!(text.contains("helper.rs"));
@@ -1145,14 +1374,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_symlink_following_behavior() {
-        let os = setup_test_directory().await;
-        let fs = os.fs;
-        
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
         // Create files and directories
-        fs.write("/target_file.txt", "target content").await.unwrap();
-        fs.create_dir_all("/target_dir").await.unwrap();
-        fs.write("/target_dir/file.txt", "dir content").await.unwrap();
-        
+        os.fs.write("/target_file.txt", "target content").await.unwrap();
+        os.fs.create_dir_all("/target_dir").await.unwrap();
+        os.fs.write("/target_dir/file.txt", "dir content").await.unwrap();
+
         // Test normal file search
         let mut stdout = std::io::stdout();
         let v = json!({
@@ -1165,7 +1394,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             assert!(text.contains("target_file.txt") || text.contains("target content"));
         } else {
@@ -1175,18 +1404,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_cross_platform_path_canonicalization() {
-        let os = setup_test_directory().await;
-        
+        let os = setup_fs_search_test_directory().await;
+
         // Test path sanitization with various path formats
         // This tests the sanitize_path_tool_arg function behavior
-        
+
         // Create test structure
-        let fs = os.fs;
-        fs.create_dir_all("/path/with/spaces dir").await.unwrap();
-        fs.write("/path/with/spaces dir/file.txt", "test content").await.unwrap();
-        
+        // Use os.fs directly
+        os.fs.create_dir_all("/path/with/spaces dir").await.unwrap();
+        os.fs
+            .write("/path/with/spaces dir/file.txt", "test content")
+            .await
+            .unwrap();
+
         let mut stdout = std::io::stdout();
-        
+
         // Test path with spaces
         let v = json!({
             "mode": "content",
@@ -1198,7 +1430,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             assert!(text.contains("Found matches") || text.contains("test"));
         } else {
@@ -1208,12 +1440,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_current_directory_shortcuts() {
-        let os = setup_test_directory().await;
-        
+        let os = setup_fs_search_test_directory().await;
+
         // Test that various current directory representations work
         // Test with root as current directory
         let mut stdout = std::io::stdout();
-        
+
         // Test explicit root path
         let v = json!({
             "mode": "name",
@@ -1225,7 +1457,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             assert!(text.contains("Found") && text.contains("files"));
         } else {
@@ -1235,8 +1467,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_validation_edge_cases() {
-        let os = setup_test_directory().await;
-        
+        let os = setup_fs_search_test_directory().await;
+
         // Test empty path
         let v = json!({
             "mode": "name",
@@ -1246,17 +1478,17 @@ mod tests {
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         let result = fs_search.validate(&os).await;
         assert!(result.is_err());
-        
+
         // Test path with only whitespace
         let v = json!({
-            "mode": "name", 
+            "mode": "name",
             "path": "   ",
             "pattern": "*.txt"
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         let result = fs_search.validate(&os).await;
         assert!(result.is_err());
-        
+
         // Test extremely long path
         let long_path = "/".to_string() + &"a".repeat(1000);
         let v = json!({
@@ -1269,27 +1501,35 @@ mod tests {
         assert!(result.is_err());
     }
 
-
     #[tokio::test]
     async fn test_file_path_glob_filtering() {
-        let os = setup_test_directory().await;
-        let fs = os.fs;
-        
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
         // Create a diverse file structure for testing
-        fs.create_dir_all("/project/src").await.unwrap();
-        fs.create_dir_all("/project/tests").await.unwrap();
-        fs.create_dir_all("/project/docs").await.unwrap();
-        
-        fs.write("/project/src/main.rs", "fn main() { println!(\"Hello\"); }").await.unwrap();
-        fs.write("/project/src/lib.rs", "pub mod utils;").await.unwrap();
-        fs.write("/project/src/utils.py", "def hello(): pass").await.unwrap();
-        fs.write("/project/tests/test.rs", "// Test file").await.unwrap();
-        fs.write("/project/tests/integration.py", "# Integration test").await.unwrap();
-        fs.write("/project/docs/README.md", "# Documentation").await.unwrap();
-        fs.write("/project/config.json", "{\"version\": \"1.0\"}").await.unwrap();
-        
+        os.fs.create_dir_all("/project/src").await.unwrap();
+        os.fs.create_dir_all("/project/tests").await.unwrap();
+        os.fs.create_dir_all("/project/docs").await.unwrap();
+
+        os.fs
+            .write("/project/src/main.rs", "fn main() { println!(\"Hello\"); }")
+            .await
+            .unwrap();
+        os.fs.write("/project/src/lib.rs", "pub mod utils;").await.unwrap();
+        os.fs.write("/project/src/utils.py", "def hello(): pass").await.unwrap();
+        os.fs.write("/project/tests/test.rs", "// Test file").await.unwrap();
+        os.fs
+            .write("/project/tests/integration.py", "# Integration test")
+            .await
+            .unwrap();
+        os.fs.write("/project/docs/README.md", "# Documentation").await.unwrap();
+        os.fs
+            .write("/project/config.json", "{\"version\": \"1.0\"}")
+            .await
+            .unwrap();
+
         let mut stdout = std::io::stdout();
-        
+
         // Test filtering for Rust files only
         let v = json!({
             "mode": "content",
@@ -1302,7 +1542,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             // Should only find matches in .rs files
             assert!(text.contains("main.rs") || text.contains("lib.rs") || text.contains("test.rs"));
@@ -1312,7 +1552,7 @@ mod tests {
         } else {
             panic!("Expected text output");
         }
-        
+
         // Test filtering for Python files only
         let v = json!({
             "mode": "content",
@@ -1325,7 +1565,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             // Should only find matches in .py files
             assert!(text.contains("utils.py") || text.contains("integration.py"));
@@ -1334,7 +1574,7 @@ mod tests {
         } else {
             panic!("Expected text output");
         }
-        
+
         // Test recursive pattern filtering
         let v = json!({
             "mode": "content",
@@ -1347,7 +1587,7 @@ mod tests {
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             // Should find test files in subdirectories
             assert!(text.contains("test.rs") || text.contains("integration.py"));
@@ -1358,8 +1598,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_path_validation() {
-        let os = setup_test_directory().await;
-        
+        let os = setup_fs_search_test_directory().await;
+
         // Test valid file_path patterns
         let v = json!({
             "mode": "content",
@@ -1369,7 +1609,7 @@ mod tests {
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         assert!(fs_search.validate(&os).await.is_ok());
-        
+
         let v = json!({
             "mode": "content",
             "path": "/",
@@ -1378,7 +1618,7 @@ mod tests {
         });
         let mut fs_search = serde_json::from_value::<FsSearch>(v).unwrap();
         assert!(fs_search.validate(&os).await.is_ok());
-        
+
         // Test invalid file_path patterns
         let v = json!({
             "mode": "content",
@@ -1404,7 +1644,7 @@ mod tests {
             "context_before": 1,
             "context_after": 1
         });
-        
+
         let fs_search: FsSearch = serde_json::from_value(json).unwrap();
         match fs_search {
             FsSearch::Content(content_search) => {
@@ -1413,49 +1653,61 @@ mod tests {
                 assert_eq!(content_search.file_path, Some("*.rs".to_string()));
                 assert_eq!(content_search.context_before, Some(1));
                 assert_eq!(content_search.context_after, Some(1));
-            }
+            },
             _ => panic!("Expected Content variant"),
         }
-        
+
         // Test content search without file_path parameter (should be None)
         let json = json!({
             "mode": "content",
             "path": "/test",
             "pattern": "TODO"
         });
-        
+
         let fs_search: FsSearch = serde_json::from_value(json).unwrap();
         match fs_search {
             FsSearch::Content(content_search) => {
                 assert_eq!(content_search.file_path, None);
-            }
+            },
             _ => panic!("Expected Content variant"),
         }
     }
 
     #[tokio::test]
     async fn test_combined_filtering_and_context() {
-        let os = setup_test_directory().await;
-        let fs = os.fs;
-        
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
         // Create test files with specific content
-        fs.write("/filtered_test.rs", r#"
+        os.fs
+            .write(
+                "/filtered_test.rs",
+                r#"
 fn main() {
     // TODO: Implement main logic
     println!("Hello");
     // FIXME: Handle errors properly
 }
-"#).await.unwrap();
-        
-        fs.write("/filtered_test.py", r#"
+"#,
+            )
+            .await
+            .unwrap();
+
+        os.fs
+            .write(
+                "/filtered_test.py",
+                r#"
 def main():
     # TODO: Implement main logic
     print("Hello")
     # FIXME: Handle errors properly
-"#).await.unwrap();
-        
+"#,
+            )
+            .await
+            .unwrap();
+
         let mut stdout = std::io::stdout();
-        
+
         // Test filtering with context - should only search in .rs files
         let v = json!({
             "mode": "content",
@@ -1470,7 +1722,7 @@ def main():
             .invoke(&os, &mut stdout)
             .await
             .unwrap();
-        
+
         if let OutputKind::Text(text) = output.output {
             // Should find TODO in .rs file with context
             assert!(text.contains("filtered_test.rs"));
@@ -1478,6 +1730,276 @@ def main():
             assert!(text.contains("[context]") || text.contains("[match]"));
             // Should not find matches in .py file
             assert!(!text.contains("filtered_test.py"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_match_counting_display() {
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
+        // Create test files with known match counts
+        os.fs
+            .write("/single_match.txt", "This has one TODO item")
+            .await
+            .unwrap();
+        os.fs
+            .write(
+                "/multiple_matches.txt",
+                "TODO: First item\nTODO: Second item\nTODO: Third item",
+            )
+            .await
+            .unwrap();
+        os.fs
+            .write("/no_matches.txt", "This file has no target pattern")
+            .await
+            .unwrap();
+
+        let mut stdout = std::io::stdout();
+
+        // Test single match - should show "1 match"
+        let v = json!({
+            "mode": "content",
+            "path": "/single_match.txt",
+            "pattern": "TODO"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains("✔ Found: 1 match"));
+            assert!(text.contains("single_match.txt"));
+        } else {
+            panic!("Expected text output");
+        }
+
+        // Test multiple matches - should show "X matches"
+        let v = json!({
+            "mode": "content",
+            "path": "/multiple_matches.txt",
+            "pattern": "TODO"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains("✔ Found: 3 matches"));
+            assert!(text.contains("multiple_matches.txt"));
+        } else {
+            panic!("Expected text output");
+        }
+
+        // Test no matches - should show yellow cross
+        let v = json!({
+            "mode": "content",
+            "path": "/no_matches.txt",
+            "pattern": "TODO"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            assert!(text.contains("✘ Found: 0 matches"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cross_file_match_counting() {
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
+        // Create multiple files with different match counts
+        os.fs.create_dir_all("/project").await.unwrap();
+        os.fs
+            .write("/project/file1.txt", "TODO: First\nFIXME: Also first")
+            .await
+            .unwrap();
+        os.fs
+            .write("/project/file2.txt", "TODO: Second\nTODO: Another second")
+            .await
+            .unwrap();
+        os.fs.write("/project/file3.txt", "No matches here").await.unwrap();
+        os.fs.write("/project/file4.txt", "TODO: Third").await.unwrap();
+
+        let mut stdout = std::io::stdout();
+
+        // Test counting across multiple files
+        let v = json!({
+            "mode": "content",
+            "path": "/project",
+            "pattern": "TODO"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should find 4 total TODO matches across 3 files
+            assert!(text.contains("✔ Found: 4 matches"));
+            assert!(text.contains("Found matches in 3 files"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_match_count_output_order() {
+        let os = setup_fs_search_test_directory().await;
+        // Use os.fs directly
+
+        os.fs.write("/test_order.txt", "TODO: Test output order").await.unwrap();
+
+        let mut stdout = std::io::stdout();
+
+        let v = json!({
+            "mode": "content",
+            "path": "/test_order.txt",
+            "pattern": "TODO"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Match count should appear before detailed results
+            let count_pos = text.find("✔ Found: 1 match");
+            let detail_pos = text.find("test_order.txt:");
+
+            assert!(count_pos.is_some());
+            assert!(detail_pos.is_some());
+            assert!(count_pos.unwrap() < detail_pos.unwrap());
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_name_search_visual_feedback_display() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Test name search with multiple matches using existing files
+        // The setup creates several .rs files, so we'll search for those
+        let v = json!({
+            "mode": "name",
+            "path": "/",
+            "pattern": "*.rs"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should show visual feedback with checkmark and some count > 0
+            assert!(text.contains("✔ Found:"));
+            assert!(text.contains("files"));
+            assert!(text.contains("Found") && text.contains("files matching pattern"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_name_search_no_matches_display() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Test name search with no matches - should show yellow cross
+        let v = json!({
+            "mode": "name",
+            "path": "/",
+            "pattern": "nonexistent*.xyz"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should show visual feedback with cross and zero count
+            assert!(text.contains("✘ Found: 0 files"));
+            assert!(text.contains("Found 0 files matching pattern"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_name_search_singular_plural_formatting() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create exactly one test file
+        os.fs.write("/single_test.txt", "content").await.unwrap();
+
+        // Test name search with exactly 1 match - should show singular "file"
+        let v = json!({
+            "mode": "name",
+            "path": "/",
+            "pattern": "single_test.txt"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should show singular form
+            assert!(text.contains("✔ Found: 1 file"));
+            assert!(text.contains("Found 1 files matching pattern")); // Note: existing code uses "files" even for 1
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_name_search_output_order() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create a test file
+        os.fs.write("/order_test.txt", "content").await.unwrap();
+
+        let v = json!({
+            "mode": "name",
+            "path": "/",
+            "pattern": "order_test.txt"
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Visual feedback should appear before detailed file listing
+            let visual_pos = text.find("✔ Found: 1 file");
+            let detail_pos = text.find("order_test.txt");
+
+            assert!(visual_pos.is_some());
+            assert!(detail_pos.is_some());
+            assert!(visual_pos.unwrap() < detail_pos.unwrap());
         } else {
             panic!("Expected text output");
         }

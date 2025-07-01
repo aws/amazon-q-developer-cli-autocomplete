@@ -967,7 +967,8 @@ impl ToolManager {
             "fs_search" => Tool::FsSearch(serde_json::from_value::<FsSearch>(value.args).map_err(map_err)?),
             "fs_write" => Tool::FsWrite(serde_json::from_value::<FsWrite>(value.args).map_err(map_err)?),
             #[cfg(windows)]
-            "execute_cmd" => {                Tool::ExecuteCommand(serde_json::from_value::<ExecuteCommand>(value.args).map_err(map_err)?)
+            "execute_cmd" => {
+                Tool::ExecuteCommand(serde_json::from_value::<ExecuteCommand>(value.args).map_err(map_err)?)
             },
             #[cfg(not(windows))]
             "execute_bash" => {
