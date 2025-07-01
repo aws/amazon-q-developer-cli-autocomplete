@@ -646,7 +646,7 @@ impl ContextMigrate<'c'> {
         let legacy_profile_config_path = directories::chat_profiles_dir(os)?;
         let profile_backup_path = legacy_profile_config_path
             .parent()
-            .ok_or(eyre::eyre!("Failed to obtaine profile config parent path"))?
+            .ok_or(eyre::eyre!("Failed to obtain profile config parent path"))?
             .join("profiles.bak");
         os.fs.rename(legacy_profile_config_path, profile_backup_path).await?;
 
