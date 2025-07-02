@@ -298,7 +298,9 @@ def apple_notarize_file(file: pathlib.Path, signing_data: CdSigningData):
 
 def get_secretmanager_json(secret_id: str):
     info(f"Loading secretmanager value: {secret_id}")
-    secret_value = run_cmd_output(["aws", "secretsmanager", "get-secret-value", "--secret-id", secret_id])
+    secret_value = run_cmd_output(
+        ["aws", "--region", REGION, "secretsmanager", "get-secret-value", "--secret-id", secret_id]
+    )
     secret_string = json.loads(secret_value)["SecretString"]
     return json.loads(secret_string)
 
