@@ -226,6 +226,7 @@ impl CustomTool {
                 output,
                 style::Print(" with the param:\n"),
                 style::Print(params),
+                style::Print("\n"),
                 style::ResetColor,
             )?;
         } else {
