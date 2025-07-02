@@ -102,11 +102,12 @@ impl ModelArgs {
     }
 }
 
-/// Returns the default model ID based on the type of login.
-/// Builder ID users get Sonnet 4.0; Idc users get Sonnet 3.7.
+/// Returns the default model ID based on login type and region.
+/// Amazon IDC users (in both IAD and FRA regions) are assigned Sonnet 3.7.
+/// Builder ID users and customer IDC users are assigned Sonnet 4.0.
 pub async fn default_model_id(os: &Os) -> &'static str {
     match BuilderIdToken::load(&os.database).await {
-        Ok(Some(token)) if matches!(token.token_type(), TokenType::IamIdentityCenter) => {
+        Ok(Some(token)) if matches!(token.token_type(), TokenType::IamIdentityCenter) && token.is_amzn_user() => {
             "CLAUDE_3_7_SONNET_20250219_V1_0"
         },
         _ => "CLAUDE_SONNET_4_20250514_V1_0",
