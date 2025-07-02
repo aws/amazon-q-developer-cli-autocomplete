@@ -227,14 +227,14 @@ impl ChatArgs {
             } else {
                 None
             };
-            let skip_migration = self.non_interactive || !self.migrate;
+            let skip_migration = self.no_interactive || !self.migrate;
             let mut agents = Agents::load(os, agent_name, skip_migration, &mut stderr).await;
             agents.trust_all_tools = self.trust_all_tools;
 
             if let Some(name) = self.agent.as_ref() {
                 match agents.switch(name) {
                     Ok(agent) if !agent.mcp_servers.mcp_servers.is_empty() => {
-                        if !self.non_interactive
+                        if !self.no_interactive
                             && !os.database.settings.get_bool(Setting::McpLoadedBefore).unwrap_or(false)
                         {
                             execute!(
