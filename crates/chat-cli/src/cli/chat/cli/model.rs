@@ -106,7 +106,9 @@ impl ModelArgs {
 /// Builder ID users get Sonnet 4.0; Idc users get Sonnet 3.7.
 pub async fn default_model_id(os: &Os) -> &'static str {
     match BuilderIdToken::load(&os.database).await {
-        Ok(Some(token)) if matches!(token.token_type(), TokenType::BuilderId) => "CLAUDE_SONNET_4_20250514_V1_0",
-        _ => "CLAUDE_3_7_SONNET_20250219_V1_0",
+        Ok(Some(token)) if matches!(token.token_type(), TokenType::IamIdentityCenter) => {
+            "CLAUDE_3_7_SONNET_20250219_V1_0"
+        },
+        _ => "CLAUDE_SONNET_4_20250514_V1_0",
     }
 }
