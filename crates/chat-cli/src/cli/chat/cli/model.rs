@@ -102,14 +102,23 @@ impl ModelArgs {
     }
 }
 
-/// Returns the default model ID based on login type and region.
-/// Amazon IDC users (in both IAD and FRA regions) are assigned Sonnet 3.7.
-/// Builder ID users and customer IDC users are assigned Sonnet 4.0.
+/// Returns Claude 3.7 for: Amazon IDC users, FRA region users
+/// Returns Claude 4.0 for: Builder ID users, other regions
 pub async fn default_model_id(os: &Os) -> &'static str {
-    match BuilderIdToken::load(&os.database).await {
-        Ok(Some(token)) if matches!(token.token_type(), TokenType::IamIdentityCenter) && token.is_amzn_user() => {
-            "CLAUDE_3_7_SONNET_20250219_V1_0"
-        },
-        _ => "CLAUDE_SONNET_4_20250514_V1_0",
+    // Check FRA region first
+    if let Ok(Some(profile)) = os.database.get_auth_profile() {
+        if profile.arn.split(':').nth(3) == Some("eu-central-1") {
+            return "CLAUDE_3_7_SONNET_20250219_V1_0";
+        }
     }
+
+    // Check if Amazon IDC user
+    if let Ok(Some(token)) = BuilderIdToken::load(&os.database).await {
+        if matches!(token.token_type(), TokenType::IamIdentityCenter) && token.is_amzn_user() {
+            return "CLAUDE_3_7_SONNET_20250219_V1_0";
+        }
+    }
+
+    // Default to 4.0
+    "CLAUDE_SONNET_4_20250514_V1_0"
 }
