@@ -45,12 +45,11 @@ pub const COMMANDS: &[&str] = &[
     "/help",
     "/editor",
     "/issue",
-    // "/acceptall", /// Functional, but deprecated in favor of /tools trustall
     "/quit",
     "/tools",
     "/tools trust",
     "/tools untrust",
-    "/tools trustall",
+    "/tools trust-all",
     "/tools reset",
     "/mcp",
     "/model",
