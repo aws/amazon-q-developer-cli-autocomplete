@@ -34,6 +34,7 @@ pub struct Context {
     pub env: Env,
     pub sysinfo: SysInfo,
     pub platform: Platform,
+    pub full_context: bool,
 }
 
 impl Context {
@@ -49,6 +50,7 @@ impl Context {
                 env,
                 sysinfo: SysInfo::new(),
                 platform: Platform::new(),
+                full_context: false,
             }
         } else {
             Self {
@@ -56,8 +58,14 @@ impl Context {
                 env: Env::new(),
                 sysinfo: SysInfo::new(),
                 platform: Platform::new(),
+                full_context: false,
             }
         }
+    }
+
+    pub fn with_full_context(mut self, full_context: bool) -> Self {
+        self.full_context = full_context;
+        self
     }
 
     /// TODO: delete this function

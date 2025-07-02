@@ -164,6 +164,9 @@ pub struct ChatArgs {
     /// Whether the command should run without expecting user input
     #[arg(long)]
     pub non_interactive: bool,
+    /// Force reading entire file content for complete context analysis
+    #[arg(long)]
+    pub full_context: bool,
     /// The first question to ask
     pub input: Option<String>,
 }
@@ -175,6 +178,8 @@ impl ChatArgs {
         database: &mut Database,
         telemetry: &TelemetryThread,
     ) -> Result<ExitCode> {
+        // Set full_context flag in context
+        *ctx = ctx.clone().with_full_context(self.full_context);
         if self.non_interactive && self.input.is_none() {
             bail!("Input must be supplied when --non-interactive is set");
         }
