@@ -9,11 +9,16 @@ use crossterm::{
 };
 use dialoguer::Select;
 
+use crate::auth::builder_id::{
+    BuilderIdToken,
+    TokenType,
+};
 use crate::cli::chat::{
     ChatError,
     ChatSession,
     ChatState,
 };
+use crate::os::Os;
 
 pub struct ModelOption {
     pub name: &'static str,
@@ -97,7 +102,11 @@ impl ModelArgs {
     }
 }
 
-/// Currently, Sonnet 4 is set as the default model for non-FRA users.
-pub fn default_model_id() -> &'static str {
-    "CLAUDE_3_7_SONNET_20250219_V1_0"
+/// Returns the default model ID based on the type of login.
+/// Builder ID users get Sonnet 4.0; Idc users get Sonnet 3.7.
+pub async fn default_model_id(os: &Os) -> &'static str {
+    match BuilderIdToken::load(&os.database).await {
+        Ok(Some(token)) if matches!(token.token_type(), TokenType::BuilderId) => "CLAUDE_SONNET_4_20250514_V1_0",
+        _ => "CLAUDE_3_7_SONNET_20250219_V1_0",
+    }
 }

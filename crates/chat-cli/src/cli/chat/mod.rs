@@ -524,9 +524,11 @@ impl ChatSession {
         tool_permissions: ToolPermissions,
         interactive: bool,
     ) -> Result<Self> {
-        let valid_model_id = model_id
-            .or_else(|| {
-                os.database
+        let valid_model_id = match model_id {
+            Some(id) => id,
+            None => {
+                let from_settings = os
+                    .database
                     .settings
                     .get_string(Setting::ChatDefaultModel)
                     .and_then(|model_name| {
@@ -534,9 +536,14 @@ impl ChatSession {
                             .iter()
                             .find(|opt| opt.name == model_name)
                             .map(|opt| opt.model_id.to_owned())
-                    })
-            })
-            .unwrap_or_else(|| default_model_id().to_owned());
+                    });
+
+                match from_settings {
+                    Some(id) => id,
+                    None => default_model_id(os).await.to_owned(),
+                }
+            },
+        };
 
         // Reload prior conversation
         let mut existing_conversation = false;
