@@ -536,7 +536,7 @@ impl ChatSession {
                             .map(|opt| opt.model_id.to_owned())
                     })
             })
-            .unwrap_or_else(|| default_model_id(os).to_owned());
+            .unwrap_or_else(|| default_model_id().to_owned());
 
         // Reload prior conversation
         let mut existing_conversation = false;

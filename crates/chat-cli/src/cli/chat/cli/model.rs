@@ -14,7 +14,6 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::os::Os;
 
 pub struct ModelOption {
     pub name: &'static str,
@@ -99,9 +98,6 @@ impl ModelArgs {
 }
 
 /// Currently, Sonnet 4 is set as the default model for non-FRA users.
-pub fn default_model_id(os: &Os) -> &'static str {
-    match os.database.get_auth_profile() {
-        Ok(Some(profile)) if profile.arn.split(':').nth(3) == Some("eu-central-1") => "CLAUDE_3_7_SONNET_20250219_V1_0",
-        _ => "CLAUDE_SONNET_4_20250514_V1_0",
-    }
+pub fn default_model_id() -> &'static str {
+    "CLAUDE_3_7_SONNET_20250219_V1_0"
 }
