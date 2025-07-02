@@ -40,7 +40,7 @@ use crate::os::Os;
 #[derive(Debug, Clone, Deserialize)]
 pub struct FsRead {
     // For batch operations
-    pub operations: Option<Vec<FsReadOperation>>,
+    pub operations: Vec<FsReadOperation>,
     pub summary: Option<String>,
 }
 
@@ -55,146 +55,129 @@ pub enum FsReadOperation {
 
 impl FsRead {
     pub async fn validate(&mut self, os: &Os) -> Result<()> {
-        if let Some(operations) = &mut self.operations {
-            if operations.is_empty() {
-                bail!("At least one operation must be provided");
-            }
-
-            for op in operations {
-                op.validate(os).await?;
-            }
-            Ok(())
-        } else {
-            bail!("'operations' field must be provided")
+        if self.operations.is_empty() {
+            bail!("At least one operation must be provided");
         }
+        for op in &mut self.operations {
+            op.validate(os).await?;
+        }
+        Ok(())
     }
 
     pub async fn queue_description(&self, os: &Os, updates: &mut impl Write) -> Result<()> {
-        if let Some(operations) = &self.operations {
-            if operations.len() == 1 {
-                // Single operation - display without batch prefix
-                operations[0].queue_description(os, updates).await
-            } else {
-                // Multiple operations - display as batch
-                queue!(
-                    updates,
-                    style::Print("Batch fs_read operation with "),
-                    style::SetForegroundColor(Color::Green),
-                    style::Print(operations.len()),
-                    style::ResetColor,
-                    style::Print(" operations:\n")
-                )?;
-
-                // Display purpose if available for batch operations
-                let _ = display_purpose(self.summary.as_ref(), updates);
-
-                for (i, op) in operations.iter().enumerate() {
-                    queue!(updates, style::Print(format!("\n↱ Operation {}: ", i + 1)))?;
-                    op.queue_description(os, updates).await?;
-                }
-                Ok(())
-            }
+        if self.operations.len() == 1 {
+            // Single operation - display without batch prefix
+            self.operations[0].queue_description(os, updates).await
         } else {
-            bail!("'operations' field must be provided")
+            // Multiple operations - display as batch
+            queue!(
+                updates,
+                style::Print("Batch fs_read operation with "),
+                style::SetForegroundColor(Color::Green),
+                style::Print(self.operations.len()),
+                style::ResetColor,
+                style::Print(" operations:\n")
+            )?;
+
+            // Display purpose if available for batch operations
+            let _ = display_purpose(self.summary.as_ref(), updates);
+
+            for (i, op) in self.operations.iter().enumerate() {
+                queue!(updates, style::Print(format!("\n↱ Operation {}: ", i + 1)))?;
+                op.queue_description(os, updates).await?;
+            }
+            Ok(())
         }
     }
 
     pub async fn invoke(&self, os: &Os, updates: &mut impl Write) -> Result<InvokeOutput> {
-        if let Some(operations) = &self.operations {
-            if operations.len() == 1 {
-                // Single operation - return result directly
-                operations[0].invoke(os, updates).await
-            } else {
-                // Multiple operations - combine results
-                let mut combined_results = Vec::new();
-                let mut all_images = Vec::new();
-                let mut has_non_image_ops = false;
-                let mut success_ops = 0usize;
-                let mut failed_ops = 0usize;
+        if self.operations.len() == 1 {
+            // Single operation - return result directly
+            self.operations[0].invoke(os, updates).await
+        } else {
+            // Multiple operations - combine results
+            let mut combined_results = Vec::new();
+            let mut all_images = Vec::new();
+            let mut has_non_image_ops = false;
+            let mut success_ops = 0usize;
+            let mut failed_ops = 0usize;
 
-                for (i, op) in operations.iter().enumerate() {
-                    match op.invoke(os, updates).await {
-                        Ok(result) => {
-                            success_ops += 1;
+            for (i, op) in self.operations.iter().enumerate() {
+                match op.invoke(os, updates).await {
+                    Ok(result) => {
+                        success_ops += 1;
 
-                            match &result.output {
-                                OutputKind::Text(text) => {
-                                    combined_results.push(format!(
-                                        "=== Operation {} Result (Text) ===\n{}",
-                                        i + 1,
-                                        text
-                                    ));
-                                    has_non_image_ops = true;
-                                },
-                                OutputKind::Json(json) => {
-                                    combined_results.push(format!(
-                                        "=== Operation {} Result (Json) ===\n{}",
-                                        i + 1,
-                                        serde_json::to_string_pretty(json)?
-                                    ));
-                                    has_non_image_ops = true;
-                                },
-                                OutputKind::Images(images) => {
-                                    all_images.extend(images.clone());
-                                    combined_results.push(format!(
-                                        "=== Operation {} Result (Images) ===\n[{} images processed]",
-                                        i + 1,
-                                        images.len()
-                                    ));
-                                },
-                                // This branch won't be reached because single operation execution never returns a Mixed
-                                // result
-                                OutputKind::Mixed { text: _, images: _ } => {},
-                            }
-                        },
+                        match &result.output {
+                            OutputKind::Text(text) => {
+                                combined_results.push(format!("=== Operation {} Result (Text) ===\n{}", i + 1, text));
+                                has_non_image_ops = true;
+                            },
+                            OutputKind::Json(json) => {
+                                combined_results.push(format!(
+                                    "=== Operation {} Result (Json) ===\n{}",
+                                    i + 1,
+                                    serde_json::to_string_pretty(json)?
+                                ));
+                                has_non_image_ops = true;
+                            },
+                            OutputKind::Images(images) => {
+                                all_images.extend(images.clone());
+                                combined_results.push(format!(
+                                    "=== Operation {} Result (Images) ===\n[{} images processed]",
+                                    i + 1,
+                                    images.len()
+                                ));
+                            },
+                            // This branch won't be reached because single operation execution never returns a Mixed
+                            // result
+                            OutputKind::Mixed { text: _, images: _ } => {},
+                        }
+                    },
 
-                        Err(err) => {
-                            failed_ops += 1;
-                            combined_results.push(format!("=== Operation {} Error ===\n{}", i + 1, err));
-                        },
-                    }
-                }
-
-                queue!(
-                    updates,
-                    style::Print("\n"),
-                    style::Print(CONTINUATION_LINE),
-                    style::Print("\n")
-                )?;
-                super::queue_function_result(
-                    &format!(
-                        "Summary: {} operations processed, {} successful, {} failed",
-                        operations.len(),
-                        success_ops,
-                        failed_ops
-                    ),
-                    updates,
-                    false,
-                    true,
-                )?;
-
-                let combined_text = combined_results.join("\n\n");
-
-                if !all_images.is_empty() && has_non_image_ops {
-                    queue!(updates, style::Print("\nherherherherherh"),)?;
-                    Ok(InvokeOutput {
-                        output: OutputKind::Mixed {
-                            text: combined_text,
-                            images: all_images,
-                        },
-                    })
-                } else if !all_images.is_empty() {
-                    Ok(InvokeOutput {
-                        output: OutputKind::Images(all_images),
-                    })
-                } else {
-                    Ok(InvokeOutput {
-                        output: OutputKind::Text(combined_text),
-                    })
+                    Err(err) => {
+                        failed_ops += 1;
+                        combined_results.push(format!("=== Operation {} Error ===\n{}", i + 1, err));
+                    },
                 }
             }
-        } else {
-            bail!("'operations' field must be provided")
+
+            queue!(
+                updates,
+                style::Print("\n"),
+                style::Print(CONTINUATION_LINE),
+                style::Print("\n")
+            )?;
+            super::queue_function_result(
+                &format!(
+                    "Summary: {} operations processed, {} successful, {} failed",
+                    self.operations.len(),
+                    success_ops,
+                    failed_ops
+                ),
+                updates,
+                false,
+                true,
+            )?;
+
+            let combined_text = combined_results.join("\n\n");
+
+            if !all_images.is_empty() && has_non_image_ops {
+                queue!(updates, style::Print("\nherherherherherh"),)?;
+                Ok(InvokeOutput {
+                    output: OutputKind::Mixed {
+                        text: combined_text,
+                        images: all_images,
+                    },
+                })
+            } else if !all_images.is_empty() {
+                Ok(InvokeOutput {
+                    output: OutputKind::Images(all_images),
+                })
+            } else {
+                Ok(InvokeOutput {
+                    output: OutputKind::Text(combined_text),
+                })
+            }
         }
     }
 }
