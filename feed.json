@@ -1,5 +1,5 @@
 {
-  "$schema": "./docs/assets/feed-schema.json",
+  "$schema": "./feed-schema.json",
   "entries": [
     {
       "$comment": "This is the next release, any changes here",
@@ -9,6 +9,30 @@
       "title": "Version 0.0.0",
       "hidden": true,
       "changes": []
+    },
+    {
+      "type": "release",
+      "date": "2025-07-03",
+      "version": "1.12.3",
+      "title": "Version 1.12.3",
+      "changes": [
+        {
+          "type": "fixed",
+          "description": "Piping input into `q chat` - [#363](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/363)"
+        },
+        {
+          "type": "fixed",
+          "description": "An issue with `/compact` not being executed on context window overflow - [#365](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/365)"
+        },
+        {
+          "type": "changed",
+          "description": "The `-a` flag to alias to `--trust-all-tools` - [#372](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/372)"
+        },
+        {
+          "type": "added",
+          "description": "Terminal bell support for the emacs eat terminal - [#357](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/357)"
+        }
+      ]
     },
     {
       "type": "release",
