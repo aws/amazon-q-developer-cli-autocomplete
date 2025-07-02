@@ -110,7 +110,6 @@ impl ToolsArgs {
                 })
                 .collect::<BTreeSet<_>>();
 
-            tracing::error!("## perm: command called");
             let to_display = sorted_tools.iter().fold(String::new(), |mut acc, tool_name| {
                 let width = longest - tool_name.len() + 4;
                 acc.push_str(

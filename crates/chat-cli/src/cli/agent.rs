@@ -449,10 +449,8 @@ impl Agents {
 
     /// Returns a label to describe the permission status for a given tool.
     pub fn display_label(&self, tool_name: &str, origin: &ToolOrigin) -> String {
-        error!("## perm: name: display_label called");
         let tool_trusted = self.get_active().is_some_and(|a| {
             a.allowed_tools.iter().any(|name| {
-                error!("## perm: name: {name}, tool_name: {tool_name}");
                 // Here the tool names can take the following forms:
                 // - @{server_name}{delimiter}{tool_name}
                 // - native_tool_name
