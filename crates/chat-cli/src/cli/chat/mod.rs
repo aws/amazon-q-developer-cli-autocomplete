@@ -426,6 +426,8 @@ pub enum ChatError {
         "Tool approval required but --no-interactive was specified. Use --trust-all-tools to automatically approve tools."
     )]
     NonInteractiveToolApproval,
+    #[error("The conversation history is too large to compact")]
+    CompactHistoryFailure,
 }
 
 impl ChatError {
@@ -440,6 +442,7 @@ impl ChatError {
             ChatError::Interrupted { .. } => None,
             ChatError::GetPromptError(_) => None,
             ChatError::NonInteractiveToolApproval => None,
+            ChatError::CompactHistoryFailure => None,
         }
     }
 }
@@ -456,6 +459,7 @@ impl ReasonCode for ChatError {
             ChatError::GetPromptError(_) => "GetPromptError".to_string(),
             ChatError::Auth(_) => "AuthError".to_string(),
             ChatError::NonInteractiveToolApproval => "NonInteractiveToolApproval".to_string(),
+            ChatError::CompactHistoryFailure => "CompactHistoryFailure".to_string(),
         }
     }
 }
@@ -618,9 +622,13 @@ impl ChatSession {
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(self.tool_uses.clone()) })
                 }
             },
-            ChatState::CompactHistory { prompt, show_summary } => {
+            ChatState::CompactHistory {
+                prompt,
+                show_summary,
+                attempt_truncated_compact_retry,
+            } => {
                 tokio::select! {
-                    res = self.compact_history(os, prompt, show_summary) => res,
+                    res = self.compact_history(os, prompt, show_summary, attempt_truncated_compact_retry) => res,
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(self.tool_uses.clone()) })
                 }
             },
@@ -697,40 +705,40 @@ impl ChatSession {
 
                 ("Tool use was interrupted", Report::from(err), false)
             },
+            ChatError::CompactHistoryFailure => {
+                // This error is not retryable - the user must take manual intervention to manage
+                // their context.
+                execute!(
+                    self.stderr,
+                    style::SetForegroundColor(Color::Red),
+                    style::Print("Your conversation is too large to continue.\n"),
+                    style::SetForegroundColor(Color::Reset),
+                    style::Print(format!("• Run {} to analyze your context usage\n", "/usage".green())),
+                    style::Print(format!("• Run {} to reset your conversation state\n", "/clear".green())),
+                    style::SetAttribute(Attribute::Reset),
+                    style::Print("\n\n"),
+                )?;
+                ("Unable to compact the conversation history", eyre!(err), true)
+            },
             ChatError::Client(err) => match *err {
                 // Errors from attempting to send too large of a conversation history. In
                 // this case, attempt to automatically compact the history for the user.
                 ApiClientError::ContextWindowOverflow { .. } => {
-                    if !self.conversation.can_create_summary_request(os).await? {
-                        execute!(
-                            self.stderr,
-                            style::SetForegroundColor(Color::Red),
-                            style::Print("Your conversation is too large to continue.\n"),
-                            style::SetForegroundColor(Color::Reset),
-                            style::Print(format!("• Run {} to analyze your context usage\n", "/usage".green())),
-                            style::Print(format!("• Run {} to reset your conversation state\n", "/clear".green())),
-                            style::SetAttribute(Attribute::Reset),
-                            style::Print("\n\n"),
-                        )?;
-
-                        self.conversation.reset_next_user_message();
-                        self.inner = Some(ChatState::PromptUser {
-                            skip_printing_tools: false,
-                        });
-
-                        return Ok(());
-                    }
-
                     self.inner = Some(ChatState::CompactHistory {
                         prompt: None,
                         show_summary: false,
+                        attempt_truncated_compact_retry: true,
                     });
 
-                    (
-                        "The context window has overflowed, summarizing the history...",
-                        Report::from(err),
-                        true,
-                    )
+                    execute!(
+                        self.stdout,
+                        style::SetForegroundColor(Color::Yellow),
+                        style::Print("The context window has overflowed, summarizing the history..."),
+                        style::SetAttribute(Attribute::Reset),
+                        style::Print("\n\n"),
+                    )?;
+
+                    return Ok(());
                 },
                 ApiClientError::QuotaBreach { message, .. } => (message, Report::from(err), true),
                 ApiClientError::ModelOverloadedError { request_id, .. } => {
@@ -890,6 +898,11 @@ enum ChatState {
         prompt: Option<String>,
         /// Whether or not the summary should be shown on compact success.
         show_summary: bool,
+        /// Whether or not we should truncate large messages in the conversation history if we
+        /// encounter a context window overfload while attempting compaction.
+        ///
+        /// This should be `true` everywhere other than [ChatSession::compact_history].
+        attempt_truncated_compact_retry: bool,
     },
     /// Exit the chat.
     Exit,
@@ -995,17 +1008,21 @@ impl ChatSession {
     /// Compacts the conversation history, replacing the history with a summary generated by the
     /// model.
     ///
-    /// The last two user messages in the history are not included in the compaction process.
+    /// If `attempt_truncated_compact_retry` is true, then  if we encounter a context window
+    /// overflow while attempting compaction, large user messages will be heavily truncated and
+    /// the compaction attempt will be retried, failing with [ChatError::CompactHistoryFailure] if
+    /// we fail again.
     async fn compact_history(
         &mut self,
         os: &Os,
         custom_prompt: Option<String>,
         show_summary: bool,
+        attempt_truncated_compact_retry: bool,
     ) -> Result<ChatState, ChatError> {
         let hist = self.conversation.history();
         debug!(?hist, "compacting history");
 
-        if self.conversation.history().len() < 2 {
+        if self.conversation.history().is_empty() {
             execute!(
                 self.stderr,
                 style::SetForegroundColor(Color::Yellow),
@@ -1046,23 +1063,29 @@ impl ChatSession {
                 .await;
                 match err {
                     ApiClientError::ContextWindowOverflow { .. } => {
-                        self.conversation.clear(true);
-
-                        self.spinner.take();
-                        execute!(
-                            self.stderr,
-                            terminal::Clear(terminal::ClearType::CurrentLine),
-                            cursor::MoveToColumn(0),
-                            style::SetForegroundColor(Color::Yellow),
-                            style::Print(
-                                "The context window usage has overflowed. Clearing the conversation history.\n\n"
-                            ),
-                            style::SetAttribute(Attribute::Reset)
-                        )?;
-
-                        return Ok(ChatState::PromptUser {
-                            skip_printing_tools: true,
-                        });
+                        error!(?attempt_truncated_compact_retry, "failed to send compaction request");
+                        if attempt_truncated_compact_retry {
+                            self.conversation.truncate_large_user_messages().await;
+                            if self.spinner.is_some() {
+                                drop(self.spinner.take());
+                                execute!(
+                                    self.stderr,
+                                    terminal::Clear(terminal::ClearType::CurrentLine),
+                                    cursor::MoveToColumn(0),
+                                    style::SetForegroundColor(Color::Yellow),
+                                    style::Print("Reducing context..."),
+                                    style::SetAttribute(Attribute::Reset),
+                                    style::Print("\n\n"),
+                                )?;
+                            }
+                            return Ok(ChatState::CompactHistory {
+                                prompt: custom_prompt,
+                                show_summary,
+                                attempt_truncated_compact_retry: false,
+                            });
+                        } else {
+                            return Err(ChatError::CompactHistoryFailure);
+                        }
                     },
                     err => return Err(err.into()),
                 }
@@ -1195,10 +1218,8 @@ impl ChatSession {
         // Check token usage and display warnings if needed
         if self.pending_tool_index.is_none() {
             // Only display warnings when not waiting for tool approval
-            if self.conversation.can_create_summary_request(os).await? {
-                if let Err(err) = self.display_char_warnings(os).await {
-                    warn!("Failed to display character limit warnings: {}", err);
-                }
+            if let Err(err) = self.display_char_warnings(os).await {
+                warn!("Failed to display character limit warnings: {}", err);
             }
         }
 

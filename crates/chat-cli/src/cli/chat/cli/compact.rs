@@ -35,6 +35,6 @@ pub struct CompactArgs {
 
 impl CompactArgs {
     pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
-        session.compact_history(os, self.prompt, self.show_summary).await
+        session.compact_history(os, self.prompt, self.show_summary, true).await
     }
 }
