@@ -170,7 +170,7 @@ pub struct ChatArgs {
     #[arg(long = "model")]
     pub model: Option<String>,
     /// Allows the model to use any tool to run commands without asking for confirmation.
-    #[arg(long)]
+    #[arg(short = 'a', long)]
     pub trust_all_tools: bool,
     /// Trust only this set of tools. Example: trust some tools:
     /// '--trust-tools=fs_read,fs_write', trust no tools: '--trust-tools='
