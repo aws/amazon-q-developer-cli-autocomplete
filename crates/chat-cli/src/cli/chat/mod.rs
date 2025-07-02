@@ -177,8 +177,8 @@ pub struct ChatArgs {
     #[arg(long, value_delimiter = ',', value_name = "TOOL_NAMES")]
     pub trust_tools: Option<Vec<String>>,
     /// Whether the command should run without expecting user input
-    #[arg(long, alias = "no-interactive")]
-    pub non_interactive: bool,
+    #[arg(long, alias = "non-interactive")]
+    pub no_interactive: bool,
     /// The first question to ask
     pub input: Option<String>,
 }
@@ -187,7 +187,7 @@ impl ChatArgs {
     pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
         let mut input = self.input;
 
-        if self.non_interactive && input.is_none() {
+        if self.no_interactive && input.is_none() {
             if !std::io::stdin().is_terminal() {
                 let mut buffer = String::new();
                 match std::io::stdin().read_to_string(&mut buffer) {
@@ -277,7 +277,7 @@ impl ChatArgs {
             .prompt_list_sender(prompt_response_sender)
             .prompt_list_receiver(prompt_request_receiver)
             .conversation_id(&conversation_id)
-            .build(os, Box::new(std::io::stderr()), !self.non_interactive)
+            .build(os, Box::new(std::io::stderr()), !self.no_interactive)
             .await?;
         let tool_config = tool_manager.load_tools(os, &mut stderr).await?;
         let mut tool_permissions = ToolPermissions::new(tool_config.len());
@@ -320,7 +320,7 @@ impl ChatArgs {
             model_id,
             tool_config,
             tool_permissions,
-            !self.non_interactive,
+            !self.no_interactive,
         )
         .await?
         .spawn(os)
