@@ -56,7 +56,11 @@ pub enum ContextSubcommand {
         paths: Vec<String>,
     },
     /// Remove specified rules from current profile
-    Remove { paths: Vec<String> },
+    #[command(alias = "rm")]
+    Remove {
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
     /// Remove all rules from current profile
     Clear,
     #[command(hide = true)]

@@ -356,7 +356,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })),
             verbose: 2,
@@ -396,7 +396,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })
         );
@@ -413,7 +413,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })
         );
@@ -430,7 +430,7 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })
         );
@@ -447,7 +447,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: true,
+                no_interactive: true,
                 migrate: false,
             })
         );
@@ -460,7 +460,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: true,
+                no_interactive: true,
                 migrate: false,
             })
         );
@@ -477,7 +477,7 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })
         );
@@ -494,7 +494,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["".to_string()]),
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })
         );
@@ -511,7 +511,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["fs_read".to_string(), "fs_write".to_string()]),
-                non_interactive: false,
+                no_interactive: false,
                 migrate: false,
             })
         );

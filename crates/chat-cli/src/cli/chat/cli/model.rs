@@ -9,6 +9,10 @@ use crossterm::{
 };
 use dialoguer::Select;
 
+use crate::auth::builder_id::{
+    BuilderIdToken,
+    TokenType,
+};
 use crate::cli::chat::{
     ChatError,
     ChatSession,
@@ -98,10 +102,23 @@ impl ModelArgs {
     }
 }
 
-/// Currently, Sonnet 4 is set as the default model for non-FRA users.
-pub fn default_model_id(os: &Os) -> &'static str {
-    match os.database.get_auth_profile() {
-        Ok(Some(profile)) if profile.arn.split(':').nth(3) == Some("eu-central-1") => "CLAUDE_3_7_SONNET_20250219_V1_0",
-        _ => "CLAUDE_SONNET_4_20250514_V1_0",
+/// Returns Claude 3.7 for: Amazon IDC users, FRA region users
+/// Returns Claude 4.0 for: Builder ID users, other regions
+pub async fn default_model_id(os: &Os) -> &'static str {
+    // Check FRA region first
+    if let Ok(Some(profile)) = os.database.get_auth_profile() {
+        if profile.arn.split(':').nth(3) == Some("eu-central-1") {
+            return "CLAUDE_3_7_SONNET_20250219_V1_0";
+        }
     }
+
+    // Check if Amazon IDC user
+    if let Ok(Some(token)) = BuilderIdToken::load(&os.database).await {
+        if matches!(token.token_type(), TokenType::IamIdentityCenter) && token.is_amzn_user() {
+            return "CLAUDE_3_7_SONNET_20250219_V1_0";
+        }
+    }
+
+    // Default to 4.0
+    "CLAUDE_SONNET_4_20250514_V1_0"
 }
