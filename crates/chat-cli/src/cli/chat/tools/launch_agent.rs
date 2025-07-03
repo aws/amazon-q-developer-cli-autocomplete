@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::process::Stdio;
+use std::time::Duration;
 
 use crossterm::style::{
     self,
@@ -157,12 +158,9 @@ impl SubAgent {
             task_handles.push(handle.1);
         }
 
-        // get grand child pid for chat instance spawned from q_cli
-        // TODO: 1 second may not be reliable -> have a notify / retry mechanism
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
+        // 1 second wait for q to spawn chat child process and wait on that pid
         for child_pid in child_pids {
-            grand_child_pids.push(get_grandchild_pid(child_pid).await?);
+            grand_child_pids.push(wait_for_grandchild(child_pid).await?);
         }
 
         // Track completed progress with regular status updates
@@ -433,4 +431,15 @@ async fn capture_stdout_and_log(
         }
     }
     Ok(output)
+}
+
+/// checks if process with pid=child_pid has a grandchild every 500 seconds for 2.5 seconds max
+async fn wait_for_grandchild(child_pid: u32) -> Result<u32> {
+    for _ in 0..5 {
+        if let Ok(pid) = get_grandchild_pid(child_pid).await {
+            return Ok(pid);
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    Err(eyre::eyre!("Failed to get child PID for pid {}", child_pid))
 }

@@ -610,6 +610,7 @@ pub struct ChatContext {
     pending_prompts: VecDeque<Prompt>,
     /// Channel for agent piping
     message_receiver: Option<tokio::sync::mpsc::Receiver<String>>,
+    last_tool_use: Option<(String, String)>,
 }
 
 impl ChatContext {
@@ -710,6 +711,7 @@ impl ChatContext {
             failed_request_ids: Vec::new(),
             pending_prompts: VecDeque::new(),
             message_receiver,
+            last_tool_use: None,
         })
     }
 }
@@ -846,14 +848,37 @@ impl ChatContext {
                 pending_tool_index: Some(_),
                 ..
             } => "waiting for tool approval".to_string(),
-            ChatState::ExecuteTools(queued_tool) => format!("executing tool: {}", queued_tool[0].name),
+            ChatState::ExecuteTools(queued_tool) => {
+                if !queued_tool.is_empty() {
+                    let tool = &queued_tool[0];
+                    // TODO: enable this for fs_write as well
+                    // Check if it's an ExecuteCommand tool and extract the summary
+                    if let Tool::ExecuteCommand(execute_cmd) = &tool.tool {
+                        if let Some(summary) = &execute_cmd.summary {
+                            return format!("Running {}: {}", tool.name, summary);
+                        }
+                    }
+
+                    // Default to tool name if no summary available
+                    format!("Running {}", tool.name)
+                } else {
+                    "executing tool".to_string()
+                }
+            },
             ChatState::ValidateTools(_) => "validating tools".to_string(),
             ChatState::HandleResponseStream(_) => "generating response".to_string(),
             ChatState::CompactHistory { .. } => "compacting history".to_string(),
             _ => match &self.tool_use_status {
                 ToolUseStatus::RetryInProgress(_) => "retrying tool use".to_string(),
                 ToolUseStatus::Idle => {
+                    // Use last tool use if exists or default to generating response
                     if self.spinner.is_some() {
+                        if let Some((name, summary)) = &self.last_tool_use {
+                            if !summary.is_empty() {
+                                return format!("Processing results from {}: {}", name, summary);
+                            }
+                            return format!("Processing results from {}", name);
+                        }
                         "generating response".to_string()
                     } else if self.conversation_state.next_user_message().is_some() {
                         "processing request".to_string()
@@ -3490,6 +3515,17 @@ impl ChatContext {
 
             let tool_start = std::time::Instant::now();
             let invoke_result = tool.tool.invoke(&self.ctx, &mut self.output).await;
+
+            // store last tool use for current status
+            if let Tool::ExecuteCommand(execute_cmd) = &tool.tool {
+                if let Some(summary) = &execute_cmd.summary {
+                    self.last_tool_use = Some((tool.name.clone(), summary.clone()));
+                } else {
+                    self.last_tool_use = Some((tool.name.clone(), String::new()));
+                }
+            } else {
+                self.last_tool_use = Some((tool.name.clone(), String::new()));
+            }
 
             if self.interactive && self.spinner.is_some() {
                 queue!(
