@@ -270,6 +270,20 @@ impl FsSearchName {
 }
 
 impl FsSearchContent {
+    /// Count actual regex matches, excluding context lines
+    /// Context lines have "[context]" prefix, actual matches have "[match]" prefix or no prefix
+    fn count_actual_matches(matches: &[(usize, String)]) -> usize {
+        matches
+            .iter()
+            .filter(|(_, content)| {
+                // Count lines that are actual matches:
+                // - Lines with "[match]" prefix (when context is enabled)
+                // - Lines without "[context]" or "[match]" prefix (when context is disabled)
+                content.starts_with("[match]") || (!content.starts_with("[context]") && !content.starts_with("[match]"))
+            })
+            .count()
+    }
+
     fn context_before_lines(&self) -> usize {
         self.context_before.unwrap_or(0).min(MAX_CONTEXT_LINES)
     }
@@ -350,7 +364,7 @@ impl FsSearchContent {
             // Search single file
             if let Some(matches) = self.search_file_content(&path, &regex, os).await? {
                 if !matches.is_empty() {
-                    total_matches += matches.len();
+                    total_matches += Self::count_actual_matches(&matches);
                     let size = Self::estimate_matches_size(&matches);
                     total_size += size;
                     matches_by_file.push((path, matches));
@@ -457,7 +471,7 @@ impl FsSearchContent {
                     if let Some(matches) = self.search_file_content(&entry_path, regex, os).await? {
                         if !matches.is_empty() {
                             // Count matches and update total
-                            *total_matches += matches.len();
+                            *total_matches += Self::count_actual_matches(&matches);
 
                             // Accurate size estimation
                             let file_content_size = Self::estimate_matches_size(&matches);
@@ -2002,6 +2016,215 @@ def main():
             assert!(visual_pos.unwrap() < detail_pos.unwrap());
         } else {
             panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_context_lines_match_counting_accuracy() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create test file with exactly 2 TODO matches
+        os.fs
+            .write(
+                "/context_test.txt",
+                "Line 1: Some content\nLine 2: TODO: First item\nLine 3: More content\nLine 4: TODO: Second item\nLine 5: Final content"
+            )
+            .await
+            .unwrap();
+
+        // Test with context lines - should still report 2 matches, not inflated count
+        let v = json!({
+            "mode": "content",
+            "path": "/context_test.txt",
+            "pattern": "TODO",
+            "context_before": 2,
+            "context_after": 2
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should report exactly 2 matches, not 10 (2 matches * 5 lines each with context)
+            assert!(
+                text.contains("✔ Found: 2 matches"),
+                "Expected '✔ Found: 2 matches' but got: {}",
+                text
+            );
+            assert!(text.contains("context_test.txt"));
+            assert!(text.contains("[match]"));
+            assert!(text.contains("[context]"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_no_context_vs_context_match_count_consistency() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create test file with exactly 3 TODO matches
+        os.fs
+            .write(
+                "/consistency_test.txt",
+                "TODO: First\nSome content\nTODO: Second\nMore content\nTODO: Third",
+            )
+            .await
+            .unwrap();
+
+        // Test without context
+        let v_no_context = json!({
+            "mode": "content",
+            "path": "/consistency_test.txt",
+            "pattern": "TODO"
+        });
+        let output_no_context = serde_json::from_value::<FsSearch>(v_no_context)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        // Test with context
+        let v_with_context = json!({
+            "mode": "content",
+            "path": "/consistency_test.txt",
+            "pattern": "TODO",
+            "context_before": 1,
+            "context_after": 1
+        });
+        let output_with_context = serde_json::from_value::<FsSearch>(v_with_context)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        // Both should report the same match count
+        if let (OutputKind::Text(text_no_context), OutputKind::Text(text_with_context)) =
+            (output_no_context.output, output_with_context.output)
+        {
+            assert!(
+                text_no_context.contains("✔ Found: 3 matches"),
+                "No context should show 3 matches: {}",
+                text_no_context
+            );
+            assert!(
+                text_with_context.contains("✔ Found: 3 matches"),
+                "With context should show 3 matches: {}",
+                text_with_context
+            );
+        } else {
+            panic!("Expected text output for both tests");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_directory_search_match_counting_accuracy() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create directory with multiple files having known match counts
+        os.fs.create_dir_all("/count_test_dir").await.unwrap();
+        os.fs
+            .write("/count_test_dir/file1.txt", "TODO: One match here")
+            .await
+            .unwrap();
+        os.fs
+            .write("/count_test_dir/file2.txt", "TODO: First\nTODO: Second")
+            .await
+            .unwrap();
+        os.fs
+            .write("/count_test_dir/file3.txt", "No matches in this file")
+            .await
+            .unwrap();
+
+        // Test directory search with context - should report 3 total matches
+        let v = json!({
+            "mode": "content",
+            "path": "/count_test_dir",
+            "pattern": "TODO",
+            "context_before": 1,
+            "context_after": 1
+        });
+        let output = serde_json::from_value::<FsSearch>(v)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        if let OutputKind::Text(text) = output.output {
+            // Should report exactly 3 matches across 2 files
+            assert!(
+                text.contains("✔ Found: 3 matches"),
+                "Expected '✔ Found: 3 matches' but got: {}",
+                text
+            );
+            assert!(text.contains("Found matches in 2 files"));
+        } else {
+            panic!("Expected text output");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_single_file_vs_directory_search_consistency() {
+        let os = setup_fs_search_test_directory().await;
+        let mut stdout = std::io::stdout();
+
+        // Create a single file with known matches
+        os.fs.create_dir_all("/single_vs_dir").await.unwrap();
+        os.fs
+            .write(
+                "/single_vs_dir/test_file.txt",
+                "TODO: Match one\nSome content\nTODO: Match two",
+            )
+            .await
+            .unwrap();
+
+        // Test single file search
+        let v_single = json!({
+            "mode": "content",
+            "path": "/single_vs_dir/test_file.txt",
+            "pattern": "TODO",
+            "context_before": 1,
+            "context_after": 1
+        });
+        let output_single = serde_json::from_value::<FsSearch>(v_single)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        // Test directory search
+        let v_dir = json!({
+            "mode": "content",
+            "path": "/single_vs_dir",
+            "pattern": "TODO",
+            "context_before": 1,
+            "context_after": 1
+        });
+        let output_dir = serde_json::from_value::<FsSearch>(v_dir)
+            .unwrap()
+            .invoke(&os, &mut stdout)
+            .await
+            .unwrap();
+
+        // Both should report the same match count
+        if let (OutputKind::Text(text_single), OutputKind::Text(text_dir)) = (output_single.output, output_dir.output) {
+            assert!(
+                text_single.contains("✔ Found: 2 matches"),
+                "Single file should show 2 matches: {}",
+                text_single
+            );
+            assert!(
+                text_dir.contains("✔ Found: 2 matches"),
+                "Directory search should show 2 matches: {}",
+                text_dir
+            );
+        } else {
+            panic!("Expected text output for both tests");
         }
     }
 }
