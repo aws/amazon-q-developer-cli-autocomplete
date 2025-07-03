@@ -23,7 +23,7 @@ pub(super) fn append(a: impl AsRef<Path>, b: impl AsRef<Path>) -> PathBuf {
     let mut b_normal_path = PathBuf::new();
     for comp in b_path.components() {
         match comp {
-            Component::Prefix(_) | Component::RootDir => continue,
+            Component::Prefix(_) | Component::RootDir => (),
             _ => b_normal_path.push(comp.as_os_str()),
         }
     }

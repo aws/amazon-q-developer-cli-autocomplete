@@ -121,7 +121,7 @@ fn grandparent_status(ctx: &Context, parent_pid: fig_os_shim::process_info::Pid)
             .split(' ')
             .take(1)
             .next()
-            .and_then(|cmd| cmd.split('/').last())
+            .and_then(|cmd| cmd.split('/').next_back())
             .map(str::to_string)
     } else {
         None

@@ -53,7 +53,7 @@ use tracing::{
     warn,
 };
 
-use crate::api_client::clients::shared::stalled_stream_protection_config;
+use crate::api_client::stalled_stream_protection_config;
 use crate::auth::AuthError;
 use crate::auth::consts::*;
 use crate::auth::scope::is_scopes;
@@ -457,6 +457,12 @@ impl BuilderIdToken {
             None => TokenType::BuilderId,
             Some(_) => TokenType::IamIdentityCenter,
         }
+    }
+
+    /// Check if the token is for the internal amzn start URL (`https://amzn.awsapps.com/start`),
+    /// this implies the user will use midway for private specs
+    pub fn is_amzn_user(&self) -> bool {
+        matches!(&self.start_url, Some(url) if url == AMZN_START_URL)
     }
 }
 

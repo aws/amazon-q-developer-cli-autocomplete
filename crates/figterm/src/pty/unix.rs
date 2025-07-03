@@ -219,7 +219,7 @@ impl AsyncMasterPty for UnixAsyncMasterPty {
 
             match guard.try_io(|inner| inner.get_mut().read(buff)) {
                 Ok(result) => return result,
-                Err(_would_block) => continue,
+                Err(_would_block) => (),
             }
         }
     }
@@ -230,7 +230,7 @@ impl AsyncMasterPty for UnixAsyncMasterPty {
 
             match guard.try_io(|inner| inner.get_mut().write(buff)) {
                 Ok(result) => return result,
-                Err(_would_block) => continue,
+                Err(_would_block) => (),
             }
         }
     }

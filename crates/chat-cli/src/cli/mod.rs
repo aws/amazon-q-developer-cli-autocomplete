@@ -41,13 +41,11 @@ use crate::cli::user::{
     LoginArgs,
     WhoamiArgs,
 };
-use crate::database::Database;
 use crate::logging::{
     LogArgs,
     initialize_logging,
 };
-use crate::platform::Context;
-use crate::telemetry::TelemetryThread;
+use crate::os::Os;
 use crate::util::directories::logs_dir;
 use crate::util::{
     CLI_BINARY_NAME,
@@ -128,14 +126,9 @@ impl RootSubcommand {
         matches!(self, Self::Chat(_) | Self::Profile)
     }
 
-    pub async fn execute(
-        self,
-        ctx: &mut Context,
-        database: &mut Database,
-        telemetry: &TelemetryThread,
-    ) -> Result<ExitCode> {
+    pub async fn execute(self, os: &mut Os) -> Result<ExitCode> {
         // Check for auth on subcommands that require it.
-        if self.requires_auth() && !crate::auth::is_logged_in(database).await {
+        if self.requires_auth() && !crate::auth::is_logged_in(&mut os.database).await {
             bail!(
                 "You are not logged in, please log in with {}",
                 format!("{CLI_BINARY_NAME} login").bold()
@@ -144,20 +137,20 @@ impl RootSubcommand {
 
         // Send executed telemetry.
         if self.valid_for_telemetry() {
-            telemetry.send_cli_subcommand_executed(&self).ok();
+            os.telemetry.send_cli_subcommand_executed(&self).ok();
         }
 
         match self {
-            Self::Diagnostic(args) => args.execute().await,
-            Self::Login(args) => args.execute(database, telemetry).await,
-            Self::Logout => user::logout(database).await,
-            Self::Whoami(args) => args.execute(database).await,
-            Self::Profile => user::profile(database, telemetry).await,
-            Self::Settings(settings_args) => settings_args.execute(ctx, database).await,
-            Self::Issue(args) => args.execute().await,
+            Self::Diagnostic(args) => args.execute(os).await,
+            Self::Login(args) => args.execute(os).await,
+            Self::Logout => user::logout(os).await,
+            Self::Whoami(args) => args.execute(os).await,
+            Self::Profile => user::profile(os).await,
+            Self::Settings(settings_args) => settings_args.execute(os).await,
+            Self::Issue(args) => args.execute(os).await,
             Self::Version { changelog } => Cli::print_version(changelog),
-            Self::Chat(args) => args.execute(ctx, database, telemetry).await,
-            Self::Mcp(args) => args.execute(&mut std::io::stderr()).await,
+            Self::Chat(args) => args.execute(os).await,
+            Self::Mcp(args) => args.execute(os, &mut std::io::stderr()).await,
         }
     }
 }
@@ -235,15 +228,13 @@ impl Cli {
 
         debug!(command =? std::env::args().collect::<Vec<_>>(), "Command being ran");
 
-        let mut ctx = Context::new();
-        let mut database = crate::database::Database::new().await?;
-        let telemetry = crate::telemetry::TelemetryThread::new(&ctx.env, &mut database).await?;
+        let mut os = Os::new().await?;
+        let result = subcommand.execute(&mut os).await;
 
-        let result = subcommand.execute(&mut ctx, &mut database, &telemetry).await;
-
-        let telemetry_result = telemetry.finish().await;
+        let telemetry_result = os.telemetry.finish().await;
         let exit_code = result?;
         telemetry_result?;
+
         Ok(exit_code)
     }
 
@@ -364,7 +355,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })),
             verbose: 2,
@@ -404,7 +395,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })
         );
@@ -421,7 +412,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })
         );
@@ -438,7 +429,7 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })
         );
@@ -447,7 +438,7 @@ mod test {
     #[test]
     fn test_chat_with_no_interactive_and_resume() {
         assert_parse!(
-            ["chat", "--non-interactive", "--resume"],
+            ["chat", "--no-interactive", "--resume"],
             RootSubcommand::Chat(ChatArgs {
                 resume: true,
                 input: None,
@@ -455,7 +446,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: true,
+                no_interactive: true,
                 full_context: false
             })
         );
@@ -468,7 +459,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: true,
+                no_interactive: true,
                 full_context: false
             })
         );
@@ -485,7 +476,7 @@ mod test {
                 model: None,
                 trust_all_tools: true,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })
         );
@@ -502,7 +493,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["".to_string()]),
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })
         );
@@ -519,7 +510,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: Some(vec!["fs_read".to_string(), "fs_write".to_string()]),
-                non_interactive: false,
+                no_interactive: false,
                 full_context: false
             })
         );
@@ -536,7 +527,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: true
             })
         );
@@ -553,7 +544,7 @@ mod test {
                 model: None,
                 trust_all_tools: false,
                 trust_tools: None,
-                non_interactive: false,
+                no_interactive: false,
                 full_context: true
             })
         );

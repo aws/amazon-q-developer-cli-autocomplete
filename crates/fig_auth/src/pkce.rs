@@ -382,6 +382,7 @@ impl PkceHttpService {
         Self::redirect_to_index(&host, "")
     }
 
+    #[allow(clippy::result_large_err)]
     fn redirect_to_index(host: &str, query_params: &str) -> Result<ServiceResponse> {
         Ok(Response::builder()
             .status(302)

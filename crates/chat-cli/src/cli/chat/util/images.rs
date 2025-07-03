@@ -22,10 +22,6 @@ use crate::cli::chat::consts::{
     MAX_IMAGE_SIZE,
     MAX_NUMBER_OF_IMAGES_PER_REQUEST,
 };
-use crate::platform::{
-    self,
-    Context,
-};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageMetadata {
@@ -43,8 +39,8 @@ pub type RichImageBlock = (ImageBlock, ImageMetadata);
 ///
 /// However, the model will just treat it as a normal space and return the wrong path string to the
 /// `fs_read` tool. This will lead to file-not-found errors.
-pub fn pre_process(ctx: &Context, path: &str) -> String {
-    if ctx.platform.os() == platform::Os::Mac && path.contains("Screenshot") {
+pub fn pre_process(path: &str) -> String {
+    if cfg!(target_os = "macos") && path.contains("Screenshot") {
         let mac_screenshot_regex =
             regex::Regex::new(r"Screenshot \d{4}-\d{2}-\d{2} at \d{1,2}\.\d{2}\.\d{2} [AP]M").unwrap();
         if mac_screenshot_regex.is_match(path) {
@@ -81,7 +77,7 @@ pub fn handle_images_from_paths(output: &mut impl Write, paths: &[String]) -> Ri
 
                 extracted_images.push((image_block, ImageMetadata {
                     filename,
-                    filepath: path.to_string(),
+                    filepath: path.clone(),
                     size: image_size,
                 }));
             }
@@ -151,7 +147,7 @@ pub fn handle_images_from_paths(output: &mut impl Write, paths: &[String]) -> Ri
 /// * `false` otherwise
 pub fn is_supported_image_type(maybe_file_path: &str) -> bool {
     let supported_image_types = ["jpg", "jpeg", "png", "gif", "webp"];
-    if let Some(extension) = maybe_file_path.split('.').last() {
+    if let Some(extension) = maybe_file_path.split('.').next_back() {
         return supported_image_types.contains(&extension.trim().to_lowercase().as_str());
     }
     false

@@ -486,6 +486,7 @@ impl BuilderIdToken {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum PollCreateToken {
     Pending,
     Complete(BuilderIdToken),

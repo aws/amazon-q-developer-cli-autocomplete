@@ -352,6 +352,6 @@ fn get_num(dict: &CFDictionary, key: CFStringRef) -> Option<i64> {
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
+unsafe extern "C" {
     pub fn CGWindowLevelForKey(key: i32) -> i32;
 }

@@ -10,6 +10,11 @@ use crossterm::{
     style,
 };
 
+use crate::cli::chat::cli::hooks::{
+    HookTrigger,
+    map_chat_error,
+    print_hook_section,
+};
 use crate::cli::chat::consts::CONTEXT_FILES_MAX_SIZE;
 use crate::cli::chat::token_counter::TokenCounter;
 use crate::cli::chat::util::drop_matched_context_files;
@@ -18,7 +23,7 @@ use crate::cli::chat::{
     ChatSession,
     ChatState,
 };
-use crate::platform::Context;
+use crate::os::Os;
 
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
@@ -28,7 +33,7 @@ The files matched by these rules provide Amazon Q with additional information
 about your project or environment. Adding relevant files helps Q generate 
 more accurate and helpful responses.
 
-Notes
+Notes:
 • You can add specific files or use glob patterns (e.g., \"*.py\", \"src/**/*.js\")
 • Profile rules apply only to the current profile
 • Global rules apply across all profiles
@@ -50,13 +55,16 @@ pub enum ContextSubcommand {
         /// Include even if matched files exceed size limits
         #[arg(short, long)]
         force: bool,
+        #[arg(required = true)]
         paths: Vec<String>,
     },
     /// Remove specified rules from current profile
+    #[command(alias = "rm")]
     Remove {
         /// Remove specified rules globally
         #[arg(short, long)]
         global: bool,
+        #[arg(required = true)]
         paths: Vec<String>,
     },
     /// Remove all rules from current profile
@@ -65,10 +73,12 @@ pub enum ContextSubcommand {
         #[arg(short, long)]
         global: bool,
     },
+    #[command(hide = true)]
+    Hooks,
 }
 
 impl ContextSubcommand {
-    pub async fn execute(self, ctx: &Context, session: &mut ChatSession) -> Result<ChatState, ChatError> {
+    pub async fn execute(self, os: &Os, session: &mut ChatSession) -> Result<ChatState, ChatError> {
         let Some(context_manager) = &mut session.conversation.context_manager else {
             execute!(
                 session.stderr,
@@ -104,7 +114,7 @@ impl ContextSubcommand {
                 } else {
                     for path in &context_manager.global_config.paths {
                         execute!(session.stderr, style::Print(format!("    {} ", path)))?;
-                        if let Ok(context_files) = context_manager.get_context_files_by_path(ctx, path).await {
+                        if let Ok(context_files) = context_manager.get_context_files_by_path(os, path).await {
                             execute!(
                                 session.stderr,
                                 style::SetForegroundColor(Color::Green),
@@ -119,6 +129,28 @@ impl ContextSubcommand {
                         }
                         execute!(session.stderr, style::Print("\n"))?;
                     }
+                }
+
+                if expand {
+                    execute!(
+                        session.stderr,
+                        style::SetAttribute(Attribute::Bold),
+                        style::SetForegroundColor(Color::DarkYellow),
+                        style::Print("\n    🔧 Hooks:\n")
+                    )?;
+                    print_hook_section(
+                        &mut session.stderr,
+                        &context_manager.global_config.hooks,
+                        HookTrigger::ConversationStart,
+                    )
+                    .map_err(map_chat_error)?;
+
+                    print_hook_section(
+                        &mut session.stderr,
+                        &context_manager.global_config.hooks,
+                        HookTrigger::PerPrompt,
+                    )
+                    .map_err(map_chat_error)?;
                 }
 
                 // Display profile context
@@ -140,7 +172,7 @@ impl ContextSubcommand {
                 } else {
                     for path in &context_manager.profile_config.paths {
                         execute!(session.stderr, style::Print(format!("    {} ", path)))?;
-                        if let Ok(context_files) = context_manager.get_context_files_by_path(ctx, path).await {
+                        if let Ok(context_files) = context_manager.get_context_files_by_path(os, path).await {
                             execute!(
                                 session.stderr,
                                 style::SetForegroundColor(Color::Green),
@@ -155,6 +187,28 @@ impl ContextSubcommand {
                         }
                         execute!(session.stderr, style::Print("\n"))?;
                     }
+                    execute!(session.stderr, style::Print("\n"))?;
+                }
+
+                if expand {
+                    execute!(
+                        session.stderr,
+                        style::SetAttribute(Attribute::Bold),
+                        style::SetForegroundColor(Color::DarkYellow),
+                        style::Print("    🔧 Hooks:\n")
+                    )?;
+                    print_hook_section(
+                        &mut session.stderr,
+                        &context_manager.profile_config.hooks,
+                        HookTrigger::ConversationStart,
+                    )
+                    .map_err(map_chat_error)?;
+                    print_hook_section(
+                        &mut session.stderr,
+                        &context_manager.profile_config.hooks,
+                        HookTrigger::PerPrompt,
+                    )
+                    .map_err(map_chat_error)?;
                     execute!(session.stderr, style::Print("\n"))?;
                 }
 
@@ -304,7 +358,7 @@ impl ContextSubcommand {
                 }
             },
             Self::Add { global, force, paths } => {
-                match context_manager.add_paths(ctx, paths.clone(), global, force).await {
+                match context_manager.add_paths(os, paths.clone(), global, force).await {
                     Ok(_) => {
                         let target = if global { "global" } else { "profile" };
                         execute!(
@@ -324,7 +378,7 @@ impl ContextSubcommand {
                     },
                 }
             },
-            Self::Remove { global, paths } => match context_manager.remove_paths(ctx, paths.clone(), global).await {
+            Self::Remove { global, paths } => match context_manager.remove_paths(os, paths.clone(), global).await {
                 Ok(_) => {
                     let target = if global { "global" } else { "profile" };
                     execute!(
@@ -347,7 +401,7 @@ impl ContextSubcommand {
                     )?;
                 },
             },
-            Self::Clear { global } => match context_manager.clear(ctx, global).await {
+            Self::Clear { global } => match context_manager.clear(os, global).await {
                 Ok(_) => {
                     let target = if global {
                         "global".to_string()
@@ -369,6 +423,18 @@ impl ContextSubcommand {
                         style::SetForegroundColor(Color::Reset)
                     )?;
                 },
+            },
+            Self::Hooks => {
+                execute!(
+                    session.stderr,
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print("The /context hooks command is deprecated. Use "),
+                    style::SetForegroundColor(Color::Green),
+                    style::Print("/hooks"),
+                    style::SetForegroundColor(Color::Yellow),
+                    style::Print(" instead.\n\n"),
+                    style::SetForegroundColor(Color::Reset)
+                )?;
             },
         }
 

@@ -303,7 +303,7 @@ impl Terminal {
                 .skip(1)
                 .take(1)
                 .next()
-                .and_then(|cmd| cmd.split('/').last());
+                .and_then(|cmd| cmd.split('/').next_back());
             if let Some(second_arg_name) = second_arg_name {
                 if let Some(term) = second_arg_terms
                     .iter()
@@ -319,7 +319,7 @@ impl Terminal {
             .split(' ')
             .take(1)
             .next()
-            .and_then(|cmd| cmd.split('/').last())
+            .and_then(|cmd| cmd.split('/').next_back())
             .map(str::to_string);
         if let Some(first_arg_name) = first_arg_name {
             for terminal in terminals {
