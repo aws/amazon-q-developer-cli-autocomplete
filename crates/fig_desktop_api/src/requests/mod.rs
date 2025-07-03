@@ -2,17 +2,13 @@ use std::borrow::Cow;
 
 use fig_proto::ReflectMessage;
 
-pub mod auth;
-pub mod codewhisperer;
 pub mod fs;
 pub mod history;
 pub mod install;
 pub mod other;
 pub mod platform;
-pub mod profile;
 pub mod settings;
 pub mod state;
-pub mod telemetry;
 pub mod update;
 
 pub type ServerOriginatedSubMessage = fig_proto::fig::server_originated_message::Submessage;

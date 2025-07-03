@@ -2,8 +2,8 @@ use std::borrow::BorrowMut as _;
 use std::path::Path;
 use std::time::Duration;
 
+use fig_request::reqwest::IntoUrl;
 use hex::encode;
-use reqwest::IntoUrl;
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::mpsc::Sender;
 
@@ -12,7 +12,6 @@ use crate::{
     UpdateStatus,
 };
 
-#[allow(dead_code)]
 pub(crate) async fn download_file(
     src: impl IntoUrl,
     dst: impl AsRef<Path>,

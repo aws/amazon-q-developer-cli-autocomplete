@@ -6,8 +6,6 @@ members = [
     "crates/macos-utils/accessibility-master/accessibility",
     "crates/macos-utils/accessibility-master/accessibility-sys",
     "crates/macos-utils/appkit-nsworkspace-bindings",
-    "tests/fig-api/fig-api-mock",
-    "tests/figterm2",
 ]
 
 [workspace.package]
@@ -23,10 +21,6 @@ version = "1.12.3"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-amzn-codewhisperer-client = { path = "crates/amzn-codewhisperer-client" }
-amzn-codewhisperer-streaming-client = { path = "crates/amzn-codewhisperer-streaming-client" }
-amzn-consolas-client = { path = "crates/amzn-consolas-client" }
-amzn-qdeveloper-streaming-client = { path = "crates/amzn-qdeveloper-streaming-client" }
 anstream = "0.6.13"
 anyhow = "1.0.98"
 appkit-nsworkspace-bindings = { path = "crates/macos-utils/appkit-nsworkspace-bindings" }
@@ -59,9 +53,6 @@ crossterm = { version = "0.28.1", features = ["event-stream", "events"] }
 dashmap = "6.0.1"
 dirs = "5.0.0"
 eyre = "0.6.8"
-fig_api_client = { path = "crates/fig_api_client" }
-fig_auth = { path = "crates/fig_auth" }
-fig_aws_common = { path = "crates/fig_aws_common" }
 fig_desktop_api = { path = "crates/fig_desktop_api" }
 fig_diagnostic = { path = "crates/fig_diagnostic" }
 fig_install = { path = "crates/fig_install" }
@@ -73,8 +64,6 @@ fig_proto = { path = "crates/fig_proto" }
 fig_remote_ipc = { path = "crates/fig_remote_ipc" }
 fig_request = { path = "crates/fig_request" }
 fig_settings = { path = "crates/fig_settings" }
-fig_telemetry = { path = "crates/fig_telemetry" }
-fig_telemetry_core = { path = "crates/fig_telemetry_core" }
 fig_test_utils = { path = "crates/fig_test_utils" }
 fig_util = { path = "crates/fig_util" }
 flate2 = "1.1.1"
@@ -171,7 +160,6 @@ winnow = "0.6.2"
 rustls = "0.23.23"
 rustls-native-certs = "0.8.1"
 webpki-roots = "=0.26.8"
-
 
 [workspace.lints.rust]
 future_incompatible = "warn"

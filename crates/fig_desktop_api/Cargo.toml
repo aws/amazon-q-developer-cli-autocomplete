@@ -18,15 +18,11 @@ bincode = "1.3.3"
 camino.workspace = true
 cfg-if.workspace = true
 dashmap.workspace = true
-fig_api_client.workspace = true
-fig_auth.workspace = true
 fig_install.workspace = true
 fig_integrations.workspace = true
 fig_os_shim.workspace = true
 fig_proto.workspace = true
 fig_settings.workspace = true
-fig_telemetry.workspace = true
-fig_telemetry_core.workspace = true
 fig_util.workspace = true
 fnv = "1.0.7"
 serde.workspace = true
@@ -40,7 +36,6 @@ which.workspace = true
 whoami.workspace = true
 
 [dev-dependencies]
-reqwest.workspace = true
 tracing-subscriber.workspace = true
 
 [target.'cfg(target_os="macos")'.dependencies]

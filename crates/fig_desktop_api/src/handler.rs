@@ -164,14 +164,7 @@ where
             use ClientOriginatedSubMessage::{
                 AggregateSessionMetricActionRequest,
                 AppendToFileRequest,
-                AuthBuilderIdPollCreateTokenRequest,
-                AuthBuilderIdStartDeviceAuthorizationRequest,
-                AuthCancelPkceAuthorizationRequest,
-                AuthFinishPkceAuthorizationRequest,
-                AuthStartPkceAuthorizationRequest,
-                AuthStatusRequest,
                 CheckForUpdatesRequest,
-                CodewhispererListCustomizationRequest,
                 ContentsOfDirectoryRequest,
                 CreateDirectoryRequest,
                 DestinationOfSymbolicLinkRequest,
@@ -182,7 +175,6 @@ where
                 HistoryQueryRequest,
                 InsertTextRequest,
                 InstallRequest,
-                ListAvailableProfilesRequest,
                 NotificationRequest,
                 OnboardingRequest,
                 OpenInExternalApplicationRequest,
@@ -190,9 +182,6 @@ where
                 PositionWindowRequest,
                 ReadFileRequest,
                 RunProcessRequest,
-                SetProfileRequest,
-                TelemetryPageRequest,
-                TelemetryTrackRequest,
                 UpdateApplicationPropertiesRequest,
                 UpdateApplicationRequest,
                 UpdateLocalStateRequest,
@@ -230,8 +219,6 @@ where
                 GetSettingsPropertyRequest(request) => settings::get(request).await,
                 UpdateSettingsPropertyRequest(request) => settings::update(request).await,
                 // telemetry
-                TelemetryTrackRequest(request) => telemetry::handle_track_request(request).await,
-                TelemetryPageRequest(request) => telemetry::handle_page_request(request).await,
                 AggregateSessionMetricActionRequest(request) => {
                     event_handler.aggregate_session_metric_action(request!(request)).await
                 },
@@ -245,21 +232,6 @@ where
                 InstallRequest(request) => install::install(request, &ctx).await,
                 // history
                 HistoryQueryRequest(request) => history::query(request).await,
-                // auth
-                AuthStatusRequest(request) => auth::status(request).await,
-                AuthStartPkceAuthorizationRequest(request) => auth::start_pkce_authorization(request).await,
-                AuthFinishPkceAuthorizationRequest(request) => {
-                    let result = auth::finish_pkce_authorization(request).await;
-                    event_handler.user_logged_in_callback(ctx).await;
-                    result
-                },
-                AuthCancelPkceAuthorizationRequest(request) => auth::cancel_pkce_authorization(request).await,
-                AuthBuilderIdStartDeviceAuthorizationRequest(request) => {
-                    auth::builder_id_start_device_authorization(request, &ctx).await
-                },
-                AuthBuilderIdPollCreateTokenRequest(request) => auth::builder_id_poll_create_token(request, &ctx).await,
-                // codewhisperer api
-                CodewhispererListCustomizationRequest(request) => codewhisperer::list_customization(request).await,
                 // other
                 OpenInExternalApplicationRequest(request) => other::open_in_external_application(request).await,
                 PingRequest(request) => other::ping(request),
@@ -267,8 +239,6 @@ where
                 CheckForUpdatesRequest(request) => update::check_for_updates(request).await,
                 GetPlatformInfoRequest(request) => platform::get_platform_info(request, &ctx).await,
                 UserLogoutRequest(request) => event_handler.user_logout(request!(request)).await,
-                ListAvailableProfilesRequest(request) => profile::list_available_profiles(request).await,
-                SetProfileRequest(request) => profile::set_profile(request).await,
             }
         },
         None => {

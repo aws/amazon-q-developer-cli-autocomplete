@@ -16,7 +16,6 @@ clap.workspace = true
 fig_ipc.workspace = true
 fig_os_shim.workspace = true
 fig_proto.workspace = true
-fig_telemetry.workspace = true
 fig_util.workspace = true
 serde.workspace = true
 serde_json.workspace = true

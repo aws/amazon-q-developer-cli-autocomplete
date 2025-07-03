@@ -21,9 +21,8 @@ cfg-if.workspace = true
 cookie = "0.18.0"
 fig_integrations.workspace = true
 fig_os_shim.workspace = true
-fig_request.workspace = true
 fig_settings.workspace = true
-fig_telemetry.workspace = true
+fig_request.workspace = true
 fig_util.workspace = true
 hex.workspace = true
 regex.workspace = true
@@ -51,6 +50,4 @@ tar = "0.4.44"
 zstd = "0.13.3"
 
 [dev-dependencies]
-fig_test_utils.workspace = true
 tracing-subscriber.workspace = true
-

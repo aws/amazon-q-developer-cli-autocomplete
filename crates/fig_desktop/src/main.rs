@@ -166,7 +166,6 @@ async fn main() -> ExitCode {
     }
 
     let accessibility_enabled = PlatformState::accessibility_is_enabled().unwrap_or(true);
-    let visible = !cli.no_dashboard;
 
     let autocomplete_enabled =
         !fig_settings::settings::get_bool_or("autocomplete.disable", false) && is_logged_in && accessibility_enabled;
