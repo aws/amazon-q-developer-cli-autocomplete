@@ -534,16 +534,10 @@ impl ConversationState {
         })
     }
 
-    /// Whether or not it is possible to create a summary out of this conversation state.
-    ///
-    /// Currently only checks if we have enough messages in the history to create a summary out of.
-    pub async fn can_create_summary_request(&mut self, os: &Os) -> Result<bool, ChatError> {
-        Ok(self
-            .backend_conversation_state(os, false, &mut vec![])
-            .await?
-            .history
-            .len()
-            >= 2)
+    pub async fn truncate_large_user_messages(&mut self) {
+        for (user_message, _) in &mut self.history {
+            user_message.truncate_safe(25_000);
+        }
     }
 
     /// Returns a [FigConversationState] capable of replacing the history of the current
@@ -597,14 +591,7 @@ impl ConversationState {
         };
 
         let conv_state = self.backend_conversation_state(os, false, &mut vec![]).await?;
-
-        // Include everything but the last message in the history.
-        let history_len = conv_state.history.len();
-        let history = if history_len < 2 {
-            vec![]
-        } else {
-            flatten_history(conv_state.history.take(history_len.saturating_sub(1)))
-        };
+        let history = flatten_history(conv_state.history);
 
         let user_input_message_context = UserInputMessageContext {
             env_state: Some(build_env_state()),

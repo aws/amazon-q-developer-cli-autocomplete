@@ -4,7 +4,10 @@ use serde::{
     Deserialize,
     Serialize,
 };
-use tracing::error;
+use tracing::{
+    error,
+    warn,
+};
 
 use super::consts::MAX_CURRENT_WORKING_DIRECTORY_LEN;
 use super::tools::{
@@ -15,6 +18,7 @@ use super::util::{
     document_to_serde_value,
     serde_value_to_document,
     truncate_safe,
+    truncate_safe_in_place,
 };
 use crate::api_client::model::{
     AssistantResponseMessage,
@@ -53,6 +57,30 @@ pub enum UserMessageContent {
     ToolUseResults {
         tool_use_results: Vec<ToolUseResult>,
     },
+}
+
+impl UserMessageContent {
+    fn truncate_safe(&mut self, max_bytes: usize) {
+        match self {
+            UserMessageContent::Prompt { prompt } => {
+                truncate_safe_in_place(prompt, max_bytes);
+            },
+            UserMessageContent::CancelledToolUses {
+                prompt,
+                tool_use_results,
+            } => {
+                if let Some(prompt) = prompt {
+                    truncate_safe_in_place(prompt, max_bytes / 2);
+                    truncate_safe_tool_use_results(tool_use_results.as_mut_slice(), max_bytes / 2);
+                } else {
+                    truncate_safe_tool_use_results(tool_use_results.as_mut_slice(), max_bytes);
+                }
+            },
+            UserMessageContent::ToolUseResults { tool_use_results } => {
+                truncate_safe_tool_use_results(tool_use_results.as_mut_slice(), max_bytes);
+            },
+        }
+    }
 }
 
 impl UserMessage {
@@ -193,6 +221,14 @@ impl UserMessage {
             UserMessageContent::ToolUseResults { .. } => None,
         }
     }
+
+    /// Truncates the content contained in this user message to a maximum length of `max_bytes`.
+    ///
+    /// This isn't a perfect truncation - JSON tool use results are ignored, and only the content
+    /// of the user message is truncated, ignoring extra context fields.
+    pub fn truncate_safe(&mut self, max_bytes: usize) {
+        self.content.truncate_safe(max_bytes);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -221,6 +257,20 @@ impl From<ToolUseResult> for ToolResult {
             tool_use_id: value.tool_use_id,
             content: value.content.into_iter().map(Into::into).collect(),
             status: value.status,
+        }
+    }
+}
+
+fn truncate_safe_tool_use_results(tool_use_results: &mut [ToolUseResult], max_bytes: usize) {
+    let max_bytes = max_bytes / tool_use_results.len();
+    for result in tool_use_results {
+        for content in &mut result.content {
+            match content {
+                ToolUseResultBlock::Json(_) => {
+                    warn!("Unable to truncate JSON safely");
+                },
+                ToolUseResultBlock::Text(t) => truncate_safe_in_place(t, max_bytes),
+            }
         }
     }
 }
