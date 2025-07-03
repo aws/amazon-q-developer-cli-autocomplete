@@ -282,7 +282,7 @@ mod tests {
         assert_eq!(config.chunk_overlap, 128);
         assert_eq!(config.default_results, 5);
         assert_eq!(config.model_name, "all-MiniLM-L6-v2");
-        assert_eq!(config.max_files, 5000);
+        assert_eq!(config.max_files, 10000);
     }
 
     #[test]
