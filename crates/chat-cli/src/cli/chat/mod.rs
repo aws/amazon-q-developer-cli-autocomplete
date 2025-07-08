@@ -724,7 +724,7 @@ impl ChatSession {
                     style::Print(format!(
                         "• Run {} to compact your conversation. See {} for compaction options\n",
                         "/compact".green(),
-                        "/compact".green()
+                        "/compact --help".green()
                     )),
                     style::Print(format!("• Run {} to analyze your context usage\n", "/usage".green())),
                     style::Print(format!("• Run {} to reset your conversation state\n", "/clear".green())),
