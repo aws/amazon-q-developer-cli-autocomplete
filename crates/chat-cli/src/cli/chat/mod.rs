@@ -757,7 +757,10 @@ impl ChatSession {
                         self.inner = Some(ChatState::CompactHistory {
                             prompt: None,
                             show_summary: false,
-                            strategy: Default::default(),
+                            strategy: CompactStrategy {
+                                truncate_large_messages: self.conversation.history().len() <= 2,
+                                ..Default::default()
+                            },
                         });
 
                         execute!(
@@ -1114,16 +1117,35 @@ impl ChatSession {
                     err.status_code(),
                 )
                 .await;
+                let history_len = self.conversation.history().len();
                 match err {
                     ApiClientError::ContextWindowOverflow { .. } => {
                         error!(?strategy, "failed to send compaction request");
-                        if strategy.messages_to_exclude < 1 {
+                        // If there's only two messages in the history, we have no choice but to
+                        // truncate it. We use two messages since it's almost guaranteed to contain:
+                        // 1. A small user prompt
+                        // 2. A large user tool use result
+                        if history_len <= 2 && !strategy.truncate_large_messages {
                             return Ok(ChatState::CompactHistory {
                                 prompt: custom_prompt,
                                 show_summary,
                                 strategy: CompactStrategy {
-                                    messages_to_exclude: strategy.messages_to_exclude + 1,
-                                    ..strategy // truncate_large_messages: false,
+                                    truncate_large_messages: true,
+                                    max_message_length: 25_000,
+                                    messages_to_exclude: 0,
+                                },
+                            });
+                        }
+
+                        // Otherwise, we will first exclude the most recent message, and only then
+                        // truncate. If both of these have already been set, then return an error.
+                        if history_len > 2 && strategy.messages_to_exclude < 1 {
+                            return Ok(ChatState::CompactHistory {
+                                prompt: custom_prompt,
+                                show_summary,
+                                strategy: CompactStrategy {
+                                    messages_to_exclude: 1,
+                                    ..strategy
                                 },
                             });
                         } else if !strategy.truncate_large_messages {
@@ -1187,7 +1209,8 @@ impl ChatSession {
         self.send_chat_telemetry(os, request_id, TelemetryResult::Succeeded, None, None, None)
             .await;
 
-        self.conversation.replace_history_with_summary(summary.clone());
+        self.conversation
+            .replace_history_with_summary(summary.clone(), strategy);
 
         // Print output to the user.
         {

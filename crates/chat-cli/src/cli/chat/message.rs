@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 
 use serde::{
@@ -9,10 +10,14 @@ use tracing::{
     warn,
 };
 
-use super::consts::MAX_CURRENT_WORKING_DIRECTORY_LEN;
+use super::consts::{
+    MAX_CURRENT_WORKING_DIRECTORY_LEN,
+    MAX_USER_MESSAGE_SIZE,
+};
 use super::tools::{
     InvokeOutput,
     OutputKind,
+    ToolOrigin,
 };
 use super::util::{
     document_to_serde_value,
@@ -24,6 +29,7 @@ use crate::api_client::model::{
     AssistantResponseMessage,
     EnvState,
     ImageBlock,
+    Tool,
     ToolResult,
     ToolResultContentBlock,
     ToolResultStatus,
@@ -168,7 +174,11 @@ impl UserMessage {
 
     /// Converts this message into a [UserInputMessage] to be sent as
     /// [FigConversationState::user_input_message].
-    pub fn into_user_input_message(self) -> UserInputMessage {
+    pub fn into_user_input_message(
+        self,
+        model_id: Option<String>,
+        tools: &HashMap<ToolOrigin, Vec<Tool>>,
+    ) -> UserInputMessage {
         let formatted_prompt = match self.prompt() {
             Some(prompt) if !prompt.is_empty() => {
                 format!("{}{}{}", USER_ENTRY_START_HEADER, prompt, USER_ENTRY_END_HEADER)
@@ -189,11 +199,15 @@ impl UserMessage {
                     },
                     UserMessageContent::Prompt { .. } => None,
                 },
-                tools: None,
+                tools: if tools.is_empty() {
+                    None
+                } else {
+                    Some(tools.values().flatten().cloned().collect::<Vec<_>>())
+                },
                 ..Default::default()
             }),
             user_intent: None,
-            model_id: None,
+            model_id,
         }
     }
 
@@ -231,6 +245,30 @@ impl UserMessage {
     /// Truncates the content contained in this user message to a maximum length of `max_bytes`.
     pub fn truncate_safe(&mut self, max_bytes: usize) {
         self.content.truncate_safe(max_bytes);
+    }
+
+    pub fn replace_content_with_tool_use_results(&mut self) {
+        if let Some(tool_results) = self.tool_use_results() {
+            let tool_content: Vec<String> = tool_results
+                .iter()
+                .flat_map(|tr| {
+                    tr.content.iter().map(|c| match c {
+                        ToolUseResultBlock::Json(document) => serde_json::to_string(&document)
+                            .map_err(|err| error!(?err, "failed to serialize tool result"))
+                            .unwrap_or_default(),
+                        ToolUseResultBlock::Text(s) => s.clone(),
+                    })
+                })
+                .collect::<_>();
+            let mut tool_content = tool_content.join(" ");
+            if tool_content.is_empty() {
+                // To avoid validation errors with empty content, we need to make sure
+                // something is set.
+                tool_content.push_str("<tool result redacted>");
+            }
+            let prompt = truncate_safe(&tool_content, MAX_USER_MESSAGE_SIZE).to_string();
+            self.content = UserMessageContent::Prompt { prompt };
+        }
     }
 }
 
