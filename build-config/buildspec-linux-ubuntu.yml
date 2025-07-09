@@ -41,7 +41,7 @@ phases:
       - export AMAZON_Q_BUILD_SKIP_FISH_TESTS=1
       - export AMAZON_Q_BUILD_SKIP_SHELLCHECK_TESTS=1
       - export GNOME_SHELL_BUILD_RELEASE=1
-      - python3.11 build-scripts/main.py build --variant=full
+      - python3.11 build-scripts/main.py build --variant=full --chat-build-bucket-name "$CHAT_BUILD_BUCKET_NAME" --chat-download-role-arn "$CHAT_DOWNLOAD_ROLE_ARN"
 
 artifacts:
   discard-paths: "yes"

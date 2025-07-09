@@ -185,7 +185,7 @@ def fetch_chat_bin(chat_build_bucket_name: str | None, chat_download_role_arn: s
         return dummy_path
 
     """Get S3 client with cross-account role credentials"""
-    if profile_name := os.getenv('CHAT_BUILD_BUCKET_ACCESS_AWS_PROFILE'):
+    if profile_name := os.getenv("CHAT_BUILD_BUCKET_ACCESS_AWS_PROFILE"):
         info(f"Using AWS_PROFILE override {profile_name} for accessing the chat build bucket")
         session = boto3.Session(profile_name=profile_name)
         sts = session.client("sts")
@@ -207,10 +207,7 @@ def fetch_chat_bin(chat_build_bucket_name: str | None, chat_download_role_arn: s
     # The path to the download should be:
     # BUILD_BUCKET/prod/latest/{target}/qchat.zip
     target = get_target_triple()
-    chat_bucket_path = f"main/latest/{target}/qchat.zip"
-    # chat_bucket_path = (
-    #     "bskiser/build-qchat-script/ad47c27d2a47d6e16f8ae1f9cce867a219189314/universal-apple-darwin/qchat.zip"
-    # )
+    chat_bucket_path = f"prod/latest/{target}/qchat.zip"
     chat_dl_dir = BUILD_DIR / "chat_download"
     chat_dl_dir.mkdir(exist_ok=True)
     chat_dl_path = chat_dl_dir / "qchat.zip"
