@@ -922,14 +922,6 @@ def build(
         chat_path = fetch_chat_bin(
             chat_build_bucket_name=chat_build_bucket_name, chat_download_role_arn=chat_download_role_arn
         )
-        # chat_path = build_cargo_bin(
-        #     variant=variant,
-        #     release=release,
-        #     package=CHAT_PACKAGE_NAME,
-        #     output_name=CHAT_BINARY_NAME,
-        #     features=cargo_features,
-        #     targets=targets,
-        # )
 
         info("Building", CLI_PACKAGE_NAME)
         cli_path = build_cargo_bin(
