@@ -53,6 +53,8 @@ use time::OffsetDateTime;
 use tracing::{
     debug,
     error,
+    info,
+    trace,
     warn,
 };
 
@@ -307,6 +309,7 @@ impl BuilderIdToken {
 
     /// Load the token from the keychain, refresh the token if it is expired and return it
     pub async fn load(secret_store: &SecretStore, force_refresh: bool) -> Result<Option<Self>> {
+        trace!("loading builder id token from the secret store");
         match secret_store.get(Self::SECRET_KEY).await {
             Ok(Some(secret)) => {
                 let token: Option<Self> = serde_json::from_str(&secret.0)?;
@@ -319,13 +322,20 @@ impl BuilderIdToken {
                         if token.is_expired() || force_refresh {
                             token.refresh_token(&client, secret_store, &region).await
                         } else {
+                            trace!(?token, "found a valid token");
                             Ok(Some(token))
                         }
                     },
-                    None => Ok(None),
+                    None => {
+                        debug!("secret stored in the database was empty");
+                        Ok(None)
+                    },
                 }
             },
-            Ok(None) => Ok(None),
+            Ok(None) => {
+                debug!("no secret found in the database");
+                Ok(None)
+            },
             Err(err) => {
                 error!(%err, "Error getting builder id token from keychain");
                 Err(err)
@@ -341,6 +351,7 @@ impl BuilderIdToken {
         region: &Region,
     ) -> Result<Option<Self>> {
         let Some(refresh_token) = &self.refresh_token else {
+            warn!("no refresh token was found");
             // if the token is expired and has no refresh token, delete it
             if let Err(err) = self.delete(secret_store).await {
                 error!(?err, "Failed to delete builder id token");
@@ -349,6 +360,7 @@ impl BuilderIdToken {
             return Ok(None);
         };
 
+        trace!("loading device registration from secret store");
         let registration = match DeviceRegistration::load_from_secret_store(secret_store, region).await? {
             Some(registration) if registration.oauth_flow == self.oauth_flow => registration,
             // If the OIDC client registration is for a different oauth flow or doesn't exist, then
@@ -559,7 +571,17 @@ pub async fn is_amzn_user() -> Result<bool> {
 }
 
 pub async fn is_logged_in() -> bool {
-    matches!(builder_id_token().await, Ok(Some(_)))
+    match builder_id_token().await {
+        Ok(Some(_)) => true,
+        Ok(None) => {
+            info!("not logged in - no valid token found");
+            false
+        },
+        Err(err) => {
+            warn!(?err, "failed to try to load a builder id token");
+            false
+        },
+    }
 }
 
 pub async fn logout() -> Result<()> {

@@ -439,6 +439,7 @@ impl Cli {
             }
         });
 
+        debug!("launching q chat binary");
         let exit_status = cmd.status().await?;
         let exit_code = exit_status
             .code()
