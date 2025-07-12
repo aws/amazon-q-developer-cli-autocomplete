@@ -72,6 +72,7 @@ use crate::{
 #[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OAuthFlow {
     DeviceCode,
+    #[serde(alias = "Pkce")]
     PKCE,
 }
 
@@ -647,6 +648,7 @@ mod tests {
     fn test_oauth_flow_ser_deser() {
         test_ser_deser!(OAuthFlow, OAuthFlow::DeviceCode, "DeviceCode");
         test_ser_deser!(OAuthFlow, OAuthFlow::PKCE, "PKCE");
+        assert_eq!(OAuthFlow::PKCE, serde_json::from_str("\"Pkce\"").unwrap());
     }
 
     #[test]
