@@ -12,6 +12,18 @@
     },
     {
       "type": "release",
+      "date": "2025-07-14",
+      "version": "1.12.5",
+      "title": "Version 1.12.5",
+      "changes": [
+        {
+          "type": "fixed",
+          "description": "An issue with authentication failing for long chat sessions - [#424](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/424)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-07-09",
       "version": "1.12.4",
       "title": "Version 1.12.4",
