@@ -1,5 +1,3 @@
-import boto3
-
 from dataclasses import dataclass
 from functools import cache
 import os
@@ -18,7 +16,6 @@ from util import (
     run_cmd,
     run_cmd_output,
     info,
-    warn,
     set_executable,
     version,
     tauri_product_name,
@@ -163,66 +160,6 @@ def build_cargo_bin(
         return out_path
 
 
-def fetch_chat_bin(chat_build_bucket_name: str | None, chat_download_role_arn: str | None) -> pathlib.Path:
-    """
-    Downloads the chat binary from the provided bucket (using the IAM role to authenticate as).
-    If the build bucket or role is not provided, then a dummy script is created and returned instead.
-
-    The returned path follows the convention: `{binary_name}-{target_triple}`
-    """
-    info(f"Chat build bucket name: {chat_build_bucket_name}")
-    info(f"IAM Role to assume: {chat_download_role_arn}")
-
-    # To prevent requiring a network request and S3 bucket for downloading the chat
-    # binary (e.g. for local dev testing), we create a dummy script to bundle instead.
-    if not chat_build_bucket_name or not chat_download_role_arn:
-        warn("missing required chat arguments, creating dummy binary")
-        dummy_dir = BUILD_DIR / "dummy_chat"
-        dummy_dir.mkdir(exist_ok=True)
-        dummy_path = dummy_dir / f"qchat-{get_target_triple()}"
-        dummy_path.write_text("#!/usr/bin/env sh\n\necho dummy chat binary\n")
-        set_executable(dummy_path)
-        return dummy_path
-
-    """Get S3 client with cross-account role credentials"""
-    if profile_name := os.getenv("CHAT_BUILD_BUCKET_ACCESS_AWS_PROFILE"):
-        info(f"Using AWS_PROFILE override {profile_name} for accessing the chat build bucket")
-        session = boto3.Session(profile_name=profile_name)
-        sts = session.client("sts")
-    else:
-        sts = boto3.client("sts")
-
-    # Assume the cross-account role
-    response = sts.assume_role(RoleArn=chat_download_role_arn, RoleSessionName="QChatBuildBucketS3Access")
-    creds = response["Credentials"]
-
-    # Return S3 client with assumed role credentials
-    s3 = boto3.client(
-        "s3",
-        aws_access_key_id=creds["AccessKeyId"],
-        aws_secret_access_key=creds["SecretAccessKey"],
-        aws_session_token=creds["SessionToken"],
-    )
-
-    # The path to the download should be:
-    # BUILD_BUCKET/prod/latest/{target}/qchat.zip
-    target = get_target_triple()
-    chat_bucket_path = f"prod/latest/{target}/qchat.zip"
-    chat_dl_dir = BUILD_DIR / "chat_download"
-    chat_dl_dir.mkdir(exist_ok=True)
-    chat_dl_path = chat_dl_dir / "qchat.zip"
-    info(f"Downloading qchat zip from bucket: {chat_bucket_path} and path: {chat_bucket_path}")
-    s3.download_file(chat_build_bucket_name, chat_bucket_path, chat_dl_path)
-
-    # unzip and return the path to the contained binary
-    run_cmd(["unzip", "-o", chat_dl_path, "-d", chat_dl_dir])
-
-    # Append target triple, as expected by tauri cli.
-    chat_path = chat_dl_dir / f"qchat-{target}"
-    (chat_dl_dir / "qchat").rename(chat_path)
-    return chat_path
-
-
 @cache
 def gen_manifest() -> str:
     return json.dumps(
@@ -278,8 +215,6 @@ def macos_tauri_config(cli_path: pathlib.Path, chat_path: pathlib.Path, pty_path
         "tauri": {
             "bundle": {
                 "externalBin": [
-                    # Note that tauri bundling expects the target triple to be appended to each binary,
-                    # but in the config it must be strippled.
                     str(cli_path).removesuffix(f"-{target}"),
                     str(chat_path).removesuffix(f"-{target}"),
                     str(pty_path).removesuffix(f"-{target}"),
@@ -859,8 +794,6 @@ def build(
     output_bucket: str | None = None,
     signing_bucket: str | None = None,
     aws_account_id: str | None = None,
-    chat_build_bucket_name: str | None = None,
-    chat_download_role_arn: str | None = None,
     apple_id_secret: str | None = None,
     signing_role_name: str | None = None,
     stage_name: str | None = None,
@@ -918,17 +851,22 @@ def build(
     for variant in variants:
         info(f"Building variant: {variant.name}")
 
-        info("Fetching", CHAT_PACKAGE_NAME)
-        chat_path = fetch_chat_bin(
-            chat_build_bucket_name=chat_build_bucket_name, chat_download_role_arn=chat_download_role_arn
-        )
-
         info("Building", CLI_PACKAGE_NAME)
         cli_path = build_cargo_bin(
             variant=variant,
             release=release,
             package=CLI_PACKAGE_NAME,
             output_name=CLI_BINARY_NAME,
+            features=cargo_features,
+            targets=targets,
+        )
+
+        info("Building", CHAT_PACKAGE_NAME)
+        chat_path = build_cargo_bin(
+            variant=variant,
+            release=release,
+            package=CHAT_PACKAGE_NAME,
+            output_name=CHAT_BINARY_NAME,
             features=cargo_features,
             targets=targets,
         )
