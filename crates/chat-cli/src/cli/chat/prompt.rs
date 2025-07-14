@@ -217,12 +217,23 @@ impl Completer for ChatCompleter {
 pub struct ChatHinter {
     /// Command history for providing suggestions based on past commands
     history: Vec<String>,
+    /// Whether history-based hints are enabled
+    history_hints_enabled: bool,
 }
 
 impl ChatHinter {
     /// Creates a new ChatHinter instance
-    pub fn new() -> Self {
-        Self { history: Vec::new() }
+    pub fn new(os: &Os) -> Self {
+        let history_hints_enabled = os
+            .database
+            .settings
+            .get_bool(Setting::ChatEnableHistoryHints)
+            .unwrap_or(false);
+
+        Self {
+            history: Vec::new(),
+            history_hints_enabled,
+        }
     }
 
     /// Updates the history with a new command
@@ -247,12 +258,16 @@ impl ChatHinter {
                 .map(|cmd| cmd[line.len()..].to_string());
         }
 
-        // Try to find a hint from history
-        self.history
-            .iter()
-            .rev() // Start from most recent
-            .find(|cmd| cmd.starts_with(line) && cmd.len() > line.len())
-            .map(|cmd| cmd[line.len()..].to_string())
+        // Try to find a hint from history, but only if history hints are enabled
+        if self.history_hints_enabled {
+            self.history
+                .iter()
+                .rev() // Start from most recent
+                .find(|cmd| cmd.starts_with(line) && cmd.len() > line.len())
+                .map(|cmd| cmd[line.len()..].to_string())
+        } else {
+            None
+        }
     }
 }
 
@@ -370,7 +385,7 @@ pub fn rl(
         .build();
     let h = ChatHelper {
         completer: ChatCompleter::new(sender, receiver),
-        hinter: ChatHinter::new(),
+        hinter: ChatHinter::new(os),
         validator: MultiLineValidator,
     };
     let mut rl = Editor::with_config(config)?;
@@ -403,6 +418,23 @@ mod tests {
     use rustyline::highlight::Highlighter;
 
     use super::*;
+
+    // Helper function to create a mock Os for testing
+    fn create_mock_os() -> Os {
+        use crate::database::settings::Settings;
+
+        Os {
+            env: crate::os::Env::new(),
+            fs: crate::os::Fs::new(),
+            sysinfo: crate::os::SysInfo::new(),
+            database: crate::database::Database {
+                settings: Settings::default(),
+            },
+            client: crate::api_client::ApiClient::default(),
+            telemetry: crate::telemetry::TelemetryThread::default(),
+        }
+    }
+
     #[test]
     fn test_chat_completer_command_completion() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
@@ -448,9 +480,10 @@ mod tests {
     fn test_highlight_prompt_basic() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
         let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let mock_os = create_mock_os();
         let helper = ChatHelper {
             completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
-            hinter: ChatHinter::new(),
+            hinter: ChatHinter::new(&mock_os),
             validator: MultiLineValidator,
         };
 
@@ -464,9 +497,10 @@ mod tests {
     fn test_highlight_prompt_with_warning() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
         let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let mock_os = create_mock_os();
         let helper = ChatHelper {
             completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
-            hinter: ChatHinter::new(),
+            hinter: ChatHinter::new(&mock_os),
             validator: MultiLineValidator,
         };
 
@@ -480,9 +514,10 @@ mod tests {
     fn test_highlight_prompt_with_profile() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
         let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let mock_os = create_mock_os();
         let helper = ChatHelper {
             completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
-            hinter: ChatHinter::new(),
+            hinter: ChatHinter::new(&mock_os),
             validator: MultiLineValidator,
         };
 
@@ -496,9 +531,10 @@ mod tests {
     fn test_highlight_prompt_with_profile_and_warning() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
         let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let mock_os = create_mock_os();
         let helper = ChatHelper {
             completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
-            hinter: ChatHinter::new(),
+            hinter: ChatHinter::new(&mock_os),
             validator: MultiLineValidator,
         };
 
@@ -515,9 +551,10 @@ mod tests {
     fn test_highlight_prompt_invalid_format() {
         let (prompt_request_sender, _) = std::sync::mpsc::channel::<Option<String>>();
         let (_, prompt_response_receiver) = std::sync::mpsc::channel::<Vec<String>>();
+        let mock_os = create_mock_os();
         let helper = ChatHelper {
             completer: ChatCompleter::new(prompt_request_sender, prompt_response_receiver),
-            hinter: ChatHinter::new(),
+            hinter: ChatHinter::new(&mock_os),
             validator: MultiLineValidator,
         };
 
@@ -529,7 +566,8 @@ mod tests {
 
     #[test]
     fn test_chat_hinter_command_hint() {
-        let hinter = ChatHinter::new();
+        let mock_os = create_mock_os();
+        let hinter = ChatHinter::new(&mock_os);
 
         // Test hint for a command
         let line = "/he";
@@ -552,8 +590,15 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_hinter_history_hint() {
-        let mut hinter = ChatHinter::new();
+    fn test_chat_hinter_history_hint_enabled() {
+        let mut mock_os = create_mock_os();
+        // Set the setting to true
+        mock_os.database.settings.0.insert(
+            Setting::ChatEnableHistoryHints.as_ref().to_string(),
+            serde_json::Value::Bool(true),
+        );
+
+        let mut hinter = ChatHinter::new(&mock_os);
 
         // Add some history
         hinter.update_history("Hello, world!");
@@ -567,5 +612,25 @@ mod tests {
 
         let hint = hinter.hint(line, pos, &ctx);
         assert_eq!(hint, Some(" are you?".to_string()));
+    }
+
+    #[test]
+    fn test_chat_hinter_history_hint_disabled() {
+        let mock_os = create_mock_os();
+
+        let mut hinter = ChatHinter::new(&mock_os);
+
+        // Add some history
+        hinter.update_history("Hello, world!");
+        hinter.update_history("How are you?");
+
+        // Test hint from history when disabled
+        let line = "How";
+        let pos = line.len();
+        let empty_history = DefaultHistory::new();
+        let ctx = Context::new(&empty_history);
+
+        let hint = hinter.hint(line, pos, &ctx);
+        assert_eq!(hint, None);
     }
 }
