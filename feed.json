@@ -19,7 +19,12 @@
         {
           "type": "fixed",
           "description": "An issue with authentication failing for long chat sessions - [#424](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/424)"
+        },
+        {
+          "type": "fixed",
+          "description": "Issues with parsing `/compact` and `/editor` arguments - [#425](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/425)"
         }
+
       ]
     },
     {
