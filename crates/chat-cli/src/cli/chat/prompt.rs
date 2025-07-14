@@ -317,6 +317,10 @@ pub struct ChatHelper {
 impl ChatHelper {
     /// Updates the history of the ChatHinter with a new command
     pub fn update_hinter_history(&mut self, command: &str) {
+        if command.contains("\n") || command.contains("\r") {
+            return;
+        }
+
         self.hinter.update_history(command);
     }
 }
