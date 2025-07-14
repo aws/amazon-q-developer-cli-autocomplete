@@ -12,10 +12,13 @@ use std::time::Duration;
 
 use amzn_codewhisperer_client::Client as CodewhispererClient;
 use amzn_codewhisperer_client::operation::create_subscription_token::CreateSubscriptionTokenOutput;
+use amzn_codewhisperer_client::operation::get_usage_limits::GetUsageLimitsOutput;
 use amzn_codewhisperer_client::types::{
     OptOutPreference,
     SubscriptionStatus,
     TelemetryEvent,
+    UsageLimitList,
+    UsageLimitType,
     UserContext,
 };
 use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
@@ -421,6 +424,33 @@ impl ApiClient {
         } else {
             unreachable!("One of the clients must be created by this point");
         }
+    }
+
+    pub async fn get_usage_limits(&self) -> Result<GetUsageLimitsOutput, ApiClientError> {
+        // if cfg!(test) {
+            let mock_limits = 
+                UsageLimitList::builder()
+                // todo yifan: need to confirm type
+                    .r#type(UsageLimitType::Chat) 
+                    .value(1000)
+                    .percent_used(123.4) 
+                    .build()
+                    .unwrap();
+                
+            return Ok(GetUsageLimitsOutput::builder()
+                .limits(mock_limits)
+                .days_until_reset(14)
+                .build()
+                .unwrap());
+        // }
+
+        // self.client
+        //     .get_usage_limits()
+        //     .set_profile_arn(self.profile.as_ref().map(|p| p.arn.clone()))
+        //     .send()
+        //     .await
+        //     .map_err(ApiClientError::GetUsageLimits)
+    
     }
 
     /// Only meant for testing. Do not use outside of testing responses.

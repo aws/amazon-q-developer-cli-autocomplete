@@ -183,6 +183,62 @@ impl UsageArgs {
             )),
         )?;
 
+        match os.client.get_usage_limits().await {
+            Ok(usage_response) => {
+                if let Some(query_limit) = usage_response.limits().first() {
+                    let total_limit = query_limit.value();
+                    let percent_used = query_limit.percent_used().unwrap_or(0.0);
+
+                    // Mock data
+                    let queries_used = ((total_limit as f64 * percent_used / 100.0) as i64).max(1234);
+                    let average_queries_per_day = 59.36;
+
+                    // calculate reset date
+                    let reset_date = (chrono::Local::now()
+                        + chrono::Duration::days(usage_response.days_until_reset() as i64))
+                    .format("%m/%d/%Y at %H:%M:%S");
+
+                    queue!(
+                        session.stderr,
+                        style::Print("\n"),
+                        style::SetAttribute(Attribute::Bold),
+                        style::Print("📊 Usage limits\n"),
+                        style::SetAttribute(Attribute::Reset),
+                        // queries used
+                        style::Print("• "),
+                        style::SetForegroundColor(Color::Red),
+                        style::Print(format!("{}", queries_used)),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print(" of "),
+                        style::SetForegroundColor(Color::Red),
+                        style::Print(format!("{}", total_limit)),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print(" queries used\n"),
+                        // overages charged
+                        style::Print("• $"),
+                        style::SetForegroundColor(Color::Red),
+                        style::Print(format!("{:.2}", average_queries_per_day)),
+                        style::SetForegroundColor(Color::Reset),
+                        style::Print(" incurred in average\n"),
+                        // limit rest date
+                        // Line 3
+                        style::Print("• Limits reset on "),
+                        style::SetForegroundColor(Color::Red),
+                        style::Print(format!("{}\n", reset_date)),
+                        style::SetForegroundColor(Color::Reset),
+                    )?;
+                }
+            },
+            Err(err) => {
+                queue!(
+                    session.stderr,
+                    style::SetForegroundColor(Color::Red),
+                    style::Print(format!("Failed to get usage limit: {}\n\n", err)),
+                    style::SetForegroundColor(Color::Reset),
+                )?;
+            },
+        }
+
         queue!(
             session.stderr,
             style::SetAttribute(Attribute::Bold),
