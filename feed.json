@@ -18,7 +18,7 @@
       "changes": [
         {
           "type": "added",
-          "description": "Support for Sigv4 authentication with `q chat`. Launch chat with the environment variable `AMAZON_Q_SIGV4=1` - [#207](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/207)"
+          "description": "(Experimental) Support for Sigv4 authentication with `q chat`. Launch chat with the environment variable `AMAZON_Q_SIGV4=1` - [#207](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/207)"
         },
         {
           "type": "fixed",
