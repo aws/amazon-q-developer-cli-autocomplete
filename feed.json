@@ -23,8 +23,11 @@
         {
           "type": "fixed",
           "description": "Issues with parsing `/compact` and `/editor` arguments - [#425](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/425)"
+        },
+        {
+          "type": "changed",
+          "description": "`q chat` inline prompt hints to be disabled by default. To enable, run `q settings chat.enableHistoryHints true` - [#429](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/429)"
         }
-
       ]
     },
     {
