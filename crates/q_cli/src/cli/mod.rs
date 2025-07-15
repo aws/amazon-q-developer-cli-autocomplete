@@ -218,6 +218,13 @@ pub enum CliRootCommands {
     /// Inline shell completions
     #[command(subcommand)]
     Inline(inline::InlineSubcommand),
+    /// Agent root commands
+    #[command(disable_help_flag = true)]
+    Agent {
+        /// Args for Agent subcommand
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 impl CliRootCommands {
@@ -252,6 +259,7 @@ impl CliRootCommands {
             CliRootCommands::Chat { .. } => "chat",
             CliRootCommands::Mcp { .. } => "mcp",
             CliRootCommands::Inline(_) => "inline",
+            CliRootCommands::Agent { .. } => "agent",
         }
     }
 }
@@ -375,6 +383,13 @@ impl Cli {
                     Self::execute_chat("mcp", Some(args), true).await
                 },
                 CliRootCommands::Inline(subcommand) => subcommand.execute(&cli_context).await,
+                CliRootCommands::Agent { args } => {
+                    if args.iter().any(|arg| ["--help", "-h"].contains(&arg.as_str())) {
+                        return Self::execute_chat("agent", Some(args), false).await;
+                    }
+
+                    Self::execute_chat("agent", Some(args), true).await
+                },
             },
             // Root command
             None => Self::execute_chat("chat", None, true).await,
