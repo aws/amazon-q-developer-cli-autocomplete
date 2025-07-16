@@ -86,6 +86,7 @@ use crate::cli::chat::tools::{
     ToolOrigin,
     ToolSpec,
 };
+use crate::database::Database;
 use crate::database::settings::Setting;
 use crate::mcp_client::{
     JsonRpcResponse,
@@ -415,6 +416,7 @@ impl ToolManagerBuilder {
         let pending_clone = pending.clone();
         let (mut msg_rx, messenger_builder) = ServerMessengerBuilder::new(20);
         let telemetry_clone = os.telemetry.clone();
+        let database_clone = os.database.clone();
         let notify = Arc::new(Notify::new());
         let notify_weak = Arc::downgrade(&notify);
         let load_record = Arc::new(Mutex::new(HashMap::<String, Vec<LoadingRecord>>::new()));
@@ -452,7 +454,9 @@ impl ToolManagerBuilder {
                                     &mut sanitized_mapping,
                                     &regex,
                                     &telemetry_clone,
-                                );
+                                    &database_clone,
+                                )
+                                .await;
                                 if let Some(sender) = &loading_status_sender_clone {
                                     // Anomalies here are not considered fatal, thus we shall give
                                     // warnings.
@@ -591,7 +595,8 @@ impl ToolManagerBuilder {
                 Err(e) => {
                     error!("Error initializing mcp client for server {}: {:?}", name, &e);
                     os.telemetry
-                        .send_mcp_server_init(conversation_id.clone(), Some(e.to_string()), 0)
+                        .send_mcp_server_init(&os.database, conversation_id.clone(), Some(e.to_string()), 0)
+                        .await
                         .ok();
                     let _ = messenger.send_tools_list_result(Err(e)).await;
                 },
@@ -1266,13 +1271,14 @@ impl ToolManager {
 }
 
 #[inline]
-fn process_tool_specs(
+async fn process_tool_specs(
     conversation_id: &str,
     server_name: &str,
     specs: &mut Vec<ToolSpec>,
     tn_map: &mut HashMap<String, String>,
     regex: &Regex,
     telemetry: &TelemetryThread,
+    database: &Database,
 ) -> eyre::Result<()> {
     // Each mcp server might have multiple tools.
     // To avoid naming conflicts we are going to namespace it.
@@ -1322,7 +1328,10 @@ fn process_tool_specs(
     specs.retain(|spec| !matches!(spec.tool_origin, ToolOrigin::Native));
     // Send server load success metric datum
     let conversation_id = conversation_id.to_string();
-    let _ = telemetry.send_mcp_server_init(conversation_id, None, number_of_tools);
+    telemetry
+        .send_mcp_server_init(database, conversation_id, None, number_of_tools)
+        .await
+        .ok();
     // Tool name translation. This is beyond of the scope of what is
     // considered a "server load". Reasoning being:
     // - Failures here are not related to server load

@@ -86,6 +86,16 @@
       "description": "The name associated with a tool"
     },
     {
+      "name": "codewhispererterminal_AwsServiceName",
+      "type": "string",
+      "description": "AWS service called by the tool"
+    },
+    {
+      "name": "codewhispererterminal_AwsOperationName",
+      "type": "string",
+      "description": "Specific operation of the AWS service invoked by the tool"
+    },
+    {
       "name": "codewhispererterminal_isToolUseAccepted",
       "type": "boolean",
       "description": "Denotes if a tool use event has been fulfilled"
@@ -149,6 +159,11 @@
       "name": "codewhispererterminal_model",
       "type": "string",
       "description": "The underlying LLM used by the service, set by the client"
+    },
+    {
+      "name": "codewhispererterminal_clientApplication",
+      "type": "string",
+      "description": "Identifier for the client application or service using the chat-cli"
     }
   ],
   "metrics": [
@@ -177,7 +192,8 @@
         { "type": "reason", "required": false },
         { "type": "reasonDesc", "required": false },
         { "type": "statusCode", "required": false },
-        { "type": "codewhispererterminal_model" }
+        { "type": "codewhispererterminal_model" },
+        { "type": "codewhispererterminal_clientApplication" }
       ]
     },
     {
@@ -219,7 +235,8 @@
       "metadata": [
         { "type": "credentialStartUrl" },
         { "type": "codewhispererterminal_subcommand" },
-        { "type": "codewhispererterminal_inCloudshell" }
+        { "type": "codewhispererterminal_inCloudshell" },
+        { "type": "codewhispererterminal_clientApplication" }
       ]
     },
     {
@@ -246,7 +263,10 @@
           "required": false
         },
         { "type": "codewhispererterminal_customToolLatency", "required": false },
-        { "type": "codewhispererterminal_model" }
+        { "type": "codewhispererterminal_model" },
+        { "type": "codewhispererterminal_clientApplication" },
+        { "type": "codewhispererterminal_AwsServiceName", "required": false },
+        { "type": "codewhispererterminal_AwsOperationName", "required": false }
       ]
     },
     {
@@ -260,7 +280,8 @@
           "type": "codewhispererterminal_mcpServerInitFailureReason",
           "required": false
         },
-        { "type": "codewhispererterminal_toolsPerMcpServer" }
+        { "type": "codewhispererterminal_toolsPerMcpServer" },
+        { "type": "codewhispererterminal_clientApplication" }
       ]
     },
     {
@@ -299,7 +320,8 @@
           { "type": "result" },
           { "type": "reason", "required": false },
           { "type": "reasonDesc", "required": false },
-          { "type": "statusCode", "required": false }
+          { "type": "statusCode", "required": false },
+          { "type": "codewhispererterminal_clientApplication" }
       ]
     }
   ]

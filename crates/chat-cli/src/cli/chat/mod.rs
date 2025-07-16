@@ -1599,6 +1599,18 @@ impl ChatSession {
             let mut tool_telemetry = self.tool_use_telemetry_events.entry(tool.id.clone());
             tool_telemetry = tool_telemetry.and_modify(|ev| ev.is_accepted = true);
 
+            // Extract AWS service name and operation name if available
+            if let Some(additional_info) = tool.tool.get_additional_info() {
+                if let Some(aws_service_name) = additional_info.get("aws_service_name").and_then(|v| v.as_str()) {
+                    tool_telemetry =
+                        tool_telemetry.and_modify(|ev| ev.aws_service_name = Some(aws_service_name.to_string()));
+                }
+                if let Some(aws_operation_name) = additional_info.get("aws_operation_name").and_then(|v| v.as_str()) {
+                    tool_telemetry =
+                        tool_telemetry.and_modify(|ev| ev.aws_operation_name = Some(aws_operation_name.to_string()));
+                }
+            }
+
             let tool_start = std::time::Instant::now();
             let invoke_result = tool.tool.invoke(os, &mut self.stdout).await;
 
@@ -2179,7 +2191,7 @@ impl ChatSession {
             }
             .map(|v| v.to_string());
 
-            os.telemetry.send_tool_use_suggested(event).ok();
+            os.telemetry.send_tool_use_suggested(&os.database, event).await.ok();
         }
     }
 

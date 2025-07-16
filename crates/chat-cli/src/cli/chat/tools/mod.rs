@@ -129,6 +129,15 @@ impl Tool {
             Tool::Thinking(think) => think.validate(os).await,
         }
     }
+
+    /// Returns additional information about the tool if available
+    pub fn get_additional_info(&self) -> Option<serde_json::Value> {
+        match self {
+            Tool::UseAws(use_aws) => Some(use_aws.get_additional_info()),
+            // Add other tool types here as they implement get_additional_info()
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

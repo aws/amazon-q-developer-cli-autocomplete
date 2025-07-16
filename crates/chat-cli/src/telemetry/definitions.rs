@@ -32,6 +32,7 @@ mod tests {
             reason_desc: None,
             status_code: None,
             codewhispererterminal_model: None,
+            codewhispererterminal_client_application: None,
         });
 
         let s = serde_json::to_string_pretty(&metric_datum_init).unwrap();

@@ -66,6 +66,7 @@ pub use crate::telemetry::core::{
     QProfileSwitchIntent,
     TelemetryResult,
 };
+use crate::util::env_var::Q_CLI_CLIENT_APPLICATION;
 use crate::util::system_info::os_version;
 
 #[derive(thiserror::Error, Debug)]
@@ -226,10 +227,17 @@ impl TelemetryThread {
         Ok(self.tx.send(Event::new(EventType::UserLoggedIn {}))?)
     }
 
-    pub fn send_cli_subcommand_executed(&self, subcommand: &RootSubcommand) -> Result<(), TelemetryError> {
-        Ok(self.tx.send(Event::new(EventType::CliSubcommandExecuted {
+    pub async fn send_cli_subcommand_executed(
+        &self,
+        database: &Database,
+        subcommand: &RootSubcommand,
+    ) -> Result<(), TelemetryError> {
+        let mut telemetry_event = Event::new(EventType::CliSubcommandExecuted {
             subcommand: subcommand.to_string(),
-        }))?)
+        });
+        set_event_metadata(database, &mut telemetry_event).await;
+
+        Ok(self.tx.send(telemetry_event)?)
     }
 
     #[allow(clippy::too_many_arguments)] // TODO: Should make a parameters struct.
@@ -246,7 +254,7 @@ impl TelemetryThread {
         status_code: Option<u16>,
         model: Option<String>,
     ) -> Result<(), TelemetryError> {
-        let mut event = Event::new(EventType::ChatAddedMessage {
+        let mut telemetry_event = Event::new(EventType::ChatAddedMessage {
             conversation_id,
             message_id,
             request_id,
@@ -257,13 +265,17 @@ impl TelemetryThread {
             status_code,
             model,
         });
-        set_start_url_and_region(database, &mut event).await;
+        set_event_metadata(database, &mut telemetry_event).await;
 
-        Ok(self.tx.send(event)?)
+        Ok(self.tx.send(telemetry_event)?)
     }
 
-    pub fn send_tool_use_suggested(&self, event: ToolUseEventBuilder) -> Result<(), TelemetryError> {
-        Ok(self.tx.send(Event::new(EventType::ToolUseSuggested {
+    pub async fn send_tool_use_suggested(
+        &self,
+        database: &Database,
+        event: ToolUseEventBuilder,
+    ) -> Result<(), TelemetryError> {
+        let mut telemetry_event = Event::new(EventType::ToolUseSuggested {
             conversation_id: event.conversation_id,
             utterance_id: event.utterance_id,
             user_input_id: event.user_input_id,
@@ -277,20 +289,29 @@ impl TelemetryThread {
             output_token_size: event.output_token_size,
             custom_tool_call_latency: event.custom_tool_call_latency,
             model: event.model,
-        }))?)
+            aws_service_name: event.aws_service_name,
+            aws_operation_name: event.aws_operation_name,
+        });
+        set_event_metadata(database, &mut telemetry_event).await;
+
+        Ok(self.tx.send(telemetry_event)?)
     }
 
-    pub fn send_mcp_server_init(
+    pub async fn send_mcp_server_init(
         &self,
+        database: &Database,
         conversation_id: String,
         init_failure_reason: Option<String>,
         number_of_tools: usize,
     ) -> Result<(), TelemetryError> {
-        Ok(self.tx.send(Event::new(crate::telemetry::EventType::McpServerInit {
+        let mut telemetry_event = Event::new(crate::telemetry::EventType::McpServerInit {
             conversation_id,
             init_failure_reason,
             number_of_tools,
-        }))?)
+        });
+        set_event_metadata(database, &mut telemetry_event).await;
+
+        Ok(self.tx.send(telemetry_event)?)
     }
 
     pub fn send_did_select_profile(
@@ -336,7 +357,7 @@ impl TelemetryThread {
         reason_desc: Option<String>,
         status_code: Option<u16>,
     ) -> Result<(), TelemetryError> {
-        let mut event = Event::new(EventType::MessageResponseError {
+        let mut telemetry_event = Event::new(EventType::MessageResponseError {
             result,
             reason,
             reason_desc,
@@ -344,19 +365,24 @@ impl TelemetryThread {
             conversation_id,
             context_file_length,
         });
-        set_start_url_and_region(database, &mut event).await;
+        set_event_metadata(database, &mut telemetry_event).await;
 
-        Ok(self.tx.send(event)?)
+        Ok(self.tx.send(telemetry_event)?)
     }
 }
 
-async fn set_start_url_and_region(database: &Database, event: &mut Event) {
+async fn set_event_metadata(database: &Database, event: &mut Event) {
     let (start_url, region) = get_start_url_and_region(database).await;
     if let Some(start_url) = start_url {
         event.set_start_url(start_url);
     }
     if let Some(region) = region {
         event.set_sso_region(region);
+    }
+
+    // Set the client application from environment variable
+    if let Ok(client_app) = std::env::var(Q_CLI_CLIENT_APPLICATION) {
+        event.set_client_application(client_app);
     }
 }
 
@@ -627,7 +653,8 @@ mod test {
 
         thread.send_user_logged_in().ok();
         thread
-            .send_cli_subcommand_executed(&RootSubcommand::Version { changelog: None })
+            .send_cli_subcommand_executed(&database, &RootSubcommand::Version { changelog: None })
+            .await
             .ok();
         thread
             .send_chat_added_message(

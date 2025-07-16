@@ -42,6 +42,7 @@ pub struct Event {
     pub created_time: Option<SystemTime>,
     pub credential_start_url: Option<String>,
     pub sso_region: Option<String>,
+    pub client_application: Option<String>,
     #[serde(flatten)]
     pub ty: EventType,
 }
@@ -53,6 +54,7 @@ impl Event {
             created_time: Some(SystemTime::now()),
             credential_start_url: None,
             sso_region: None,
+            client_application: None,
         }
     }
 
@@ -62,6 +64,10 @@ impl Event {
 
     pub fn set_sso_region(&mut self, sso_region: String) {
         self.sso_region = Some(sso_region);
+    }
+
+    pub fn set_client_application(&mut self, client_application: String) {
+        self.client_application = Some(client_application);
     }
 
     pub fn into_metric_datum(self) -> Option<MetricDatum> {
@@ -100,6 +106,7 @@ impl Event {
                     credential_start_url: self.credential_start_url.map(Into::into),
                     codewhispererterminal_subcommand: Some(subcommand.into()),
                     codewhispererterminal_in_cloudshell: None,
+                    codewhispererterminal_client_application: self.client_application.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -152,6 +159,7 @@ impl Event {
                     reason_desc: reason_desc.map(Into::into),
                     status_code: status_code.map(|v| v as i64).map(Into::into),
                     codewhispererterminal_model: model.map(Into::into),
+                    codewhispererterminal_client_application: self.client_application.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -169,6 +177,8 @@ impl Event {
                 output_token_size,
                 custom_tool_call_latency,
                 model,
+                aws_service_name,
+                aws_operation_name,
             } => Some(
                 CodewhispererterminalToolUseSuggested {
                     create_time: self.created_time,
@@ -190,6 +200,9 @@ impl Event {
                     codewhispererterminal_custom_tool_latency: custom_tool_call_latency
                         .map(|l| CodewhispererterminalCustomToolLatency(l as i64)),
                     codewhispererterminal_model: model.map(Into::into),
+                    codewhispererterminal_client_application: self.client_application.map(Into::into),
+                    codewhispererterminal_aws_service_name: aws_service_name.map(Into::into),
+                    codewhispererterminal_aws_operation_name: aws_operation_name.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -208,6 +221,7 @@ impl Event {
                     codewhispererterminal_tools_per_mcp_server: Some(CodewhispererterminalToolsPerMcpServer(
                         number_of_tools as i64,
                     )),
+                    codewhispererterminal_client_application: self.client_application.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -266,6 +280,7 @@ impl Event {
                     reason: reason.map(Into::into),
                     reason_desc: reason_desc.map(Into::into),
                     status_code: status_code.map(|v| v as i64).map(Into::into),
+                    codewhispererterminal_client_application: self.client_application.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -320,6 +335,8 @@ pub enum EventType {
         output_token_size: Option<usize>,
         custom_tool_call_latency: Option<usize>,
         model: Option<String>,
+        aws_service_name: Option<String>,
+        aws_operation_name: Option<String>,
     },
     McpServerInit {
         conversation_id: String,
@@ -364,6 +381,8 @@ pub struct ToolUseEventBuilder {
     pub output_token_size: Option<usize>,
     pub custom_tool_call_latency: Option<usize>,
     pub model: Option<String>,
+    pub aws_service_name: Option<String>,
+    pub aws_operation_name: Option<String>,
 }
 
 impl ToolUseEventBuilder {
@@ -382,6 +401,8 @@ impl ToolUseEventBuilder {
             output_token_size: None,
             custom_tool_call_latency: None,
             model,
+            aws_service_name: None,
+            aws_operation_name: None,
         }
     }
 
