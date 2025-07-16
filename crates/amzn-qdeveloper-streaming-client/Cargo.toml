@@ -61,7 +61,7 @@ path = "src/lib.rs"
 version = "1.2.1"
 
 [dependencies.aws-runtime]
-version = "1.5.5"
+version = "1.5.9"
 
 [dependencies.aws-smithy-async]
 version = "1.2.4"
@@ -81,7 +81,7 @@ version = "1.7.8"
 features = ["client"]
 
 [dependencies.aws-smithy-runtime-api]
-version = "1.7.3"
+version = "1.8.3"
 features = [
     "client",
     "http-02x",
