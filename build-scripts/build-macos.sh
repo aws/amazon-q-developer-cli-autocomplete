@@ -35,6 +35,14 @@ while [[ $# -gt 0 ]]; do
       shift
       stage_name="$1"
       ;;
+    --chat-build-bucket-name)
+      shift
+      chat_build_bucket_name="$1"
+      ;;
+    --chat-download-role-arn)
+      shift
+      chat_download_role_arn="$1"
+      ;;
   esac
   shift
 done
@@ -71,4 +79,6 @@ python3.11 build-scripts/main.py build \
   --aws-account-id "${aws_account_id:-}" \
   --signing-role-name "${signing_role_name:-}" \
   --stage-name "${stage_name:-}" \
+  --chat-build-bucket-name "${chat_build_bucket_name:-}" \
+  --chat-download-role-arn "${chat_download_role_arn:-}" \
   2>&1
