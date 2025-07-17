@@ -428,20 +428,19 @@ impl ApiClient {
 
     pub async fn get_usage_limits(&self) -> Result<GetUsageLimitsOutput, ApiClientError> {
         // if cfg!(test) {
-            let mock_limits = 
-                UsageLimitList::builder()
+        let mock_limits = UsageLimitList::builder()
                 // todo yifan: need to confirm type
                     .r#type(UsageLimitType::Chat) 
                     .value(1000)
-                    .percent_used(123.4) 
+                    .percent_used(123.4)
                     .build()
                     .unwrap();
-                
-            return Ok(GetUsageLimitsOutput::builder()
-                .limits(mock_limits)
-                .days_until_reset(14)
-                .build()
-                .unwrap());
+
+        Ok(GetUsageLimitsOutput::builder()
+            .limits(mock_limits)
+            .days_until_reset(14)
+            .build()
+            .unwrap())
         // }
 
         // self.client
@@ -450,7 +449,6 @@ impl ApiClient {
         //     .send()
         //     .await
         //     .map_err(ApiClientError::GetUsageLimits)
-    
     }
 
     /// Only meant for testing. Do not use outside of testing responses.

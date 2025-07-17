@@ -1,4 +1,6 @@
+use amzn_codewhisperer_client::operation::create_subscription_token::CreateSubscriptionTokenError;
 use amzn_codewhisperer_client::operation::generate_completions::GenerateCompletionsError;
+use amzn_codewhisperer_client::operation::get_usage_limits::GetUsageLimitsError;
 use amzn_codewhisperer_client::operation::list_available_customizations::ListAvailableCustomizationsError;
 use amzn_codewhisperer_client::operation::list_available_profiles::ListAvailableProfilesError;
 pub use amzn_codewhisperer_streaming_client::operation::generate_assistant_response::GenerateAssistantResponseError;
@@ -63,6 +65,13 @@ pub enum Error {
 
     #[error(transparent)]
     ListAvailableProfilesError(#[from] SdkError<ListAvailableProfilesError, HttpResponse>),
+
+    #[error("{}", SdkErrorDisplay(.0))]
+    CreateSubscriptionToken(#[from] SdkError<CreateSubscriptionTokenError, HttpResponse>),
+
+    // Get usgae limits error
+    #[error("{}", SdkErrorDisplay(.0))]
+    GetUsageLimits(#[from] SdkError<GetUsageLimitsError, HttpResponse>),
 }
 
 impl Error {
@@ -78,6 +87,8 @@ impl Error {
             },
             Error::QDeveloperSendMessage(e) => e.as_service_error().is_some_and(|e| e.is_throttling_error()),
             Error::ListAvailableProfilesError(e) => e.as_service_error().is_some_and(|e| e.is_throttling_error()),
+            Error::CreateSubscriptionToken(e) => e.as_service_error().is_some_and(|e| e.is_throttling_error()),
+            Error::GetUsageLimits(e) => e.as_service_error().is_some_and(|e| e.is_throttling_error()),
             Error::CodewhispererChatResponseStream(_)
             | Error::QDeveloperChatResponseStream(_)
             | Error::SmithyBuild(_)
@@ -98,6 +109,8 @@ impl Error {
             Error::QDeveloperSendMessage(e) => e.as_service_error().is_some(),
             Error::ContextWindowOverflow => true,
             Error::ListAvailableProfilesError(e) => e.as_service_error().is_some(),
+            Error::GetUsageLimits(e) => e.as_service_error().is_some(),
+            Error::CreateSubscriptionToken(e) => e.as_service_error().is_some(),
             Error::CodewhispererChatResponseStream(_)
             | Error::QDeveloperChatResponseStream(_)
             | Error::SmithyBuild(_)
@@ -138,6 +151,14 @@ mod tests {
             )),
             Error::ListAvailableCustomizations(SdkError::service_error(
                 ListAvailableCustomizationsError::unhandled("<unhandled>"),
+                response(),
+            )),
+            Error::CreateSubscriptionToken(SdkError::service_error(
+                CreateSubscriptionTokenError::unhandled("<unhandled>"),
+                response(),
+            )),
+            Error::GetUsageLimits(SdkError::service_error(
+                GetUsageLimitsError::unhandled("<unhandled>"),
                 response(),
             )),
             Error::ListAvailableServices(SdkError::service_error(

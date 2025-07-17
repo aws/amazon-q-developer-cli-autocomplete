@@ -4,12 +4,16 @@ use std::sync::{
 };
 
 use amzn_codewhisperer_client::Client as CodewhispererClient;
+use amzn_codewhisperer_client::operation::create_subscription_token::CreateSubscriptionTokenOutput;
 use amzn_codewhisperer_client::operation::generate_completions::GenerateCompletionsError;
+use amzn_codewhisperer_client::operation::get_usage_limits::GetUsageLimitsOutput;
 use amzn_codewhisperer_client::types::error::AccessDeniedError;
 use amzn_codewhisperer_client::types::{
     AccessDeniedExceptionReason,
     OptOutPreference,
     TelemetryEvent,
+    UsageLimitList,
+    UsageLimitType,
     UserContext,
 };
 use amzn_consolas_client::Client as ConsolasClient;
@@ -271,6 +275,76 @@ impl Client {
                     profile_name: "MyOtherProfile".to_owned(),
                 },
             ]),
+        }
+    }
+
+    pub async fn create_subscription_token(&self) -> Result<CreateSubscriptionTokenOutput, Error> {
+        match &self.inner {
+            inner::Inner::Codewhisperer(client) => client
+                .create_subscription_token()
+                .send()
+                .await
+                .map_err(Error::CreateSubscriptionToken),
+            inner::Inner::Consolas(_) => Err(Error::UnsupportedConsolas("create_subscription_token")),
+            inner::Inner::Mock => {
+                use amzn_codewhisperer_client::types::SubscriptionStatus;
+                Ok(CreateSubscriptionTokenOutput::builder()
+                    .set_encoded_verification_url(Some("test/url".to_string()))
+                    .set_status(Some(SubscriptionStatus::Inactive))
+                    .set_token(Some("test-token".to_string()))
+                    .build()
+                    .unwrap())
+            },
+        }
+    }
+
+    pub async fn get_usage_limits(
+        &self,
+    ) -> Result<amzn_codewhisperer_client::operation::get_usage_limits::GetUsageLimitsOutput, Error> {
+        match &self.inner {
+            inner::Inner::Codewhisperer(_client) => {
+                let mock_limits = UsageLimitList::builder()
+                // todo yifan: need to confirm type
+                    .r#type(UsageLimitType::Chat) 
+                    .value(1000)
+                    .percent_used(123.4)
+                    .build()
+                    .unwrap();
+
+                Ok(GetUsageLimitsOutput::builder()
+                    .limits(mock_limits)
+                    .days_until_reset(14)
+                    .build()
+                    .unwrap())
+                // let request = client.get_usage_limits();
+                // request
+                //     .set_profile_arn(self.profile_arn.clone())
+                //     .send()
+                //     .await
+                //     .map_err(Error::GetUsageLimits)
+            },
+            inner::Inner::Consolas(_) => Err(Error::UnsupportedConsolas("get_usage_limits")),
+            inner::Inner::Mock => {
+                use amzn_codewhisperer_client::types::{
+                    UsageLimitList,
+                    UsageLimitType,
+                };
+
+                let mock_limits = UsageLimitList::builder()
+                    .r#type(UsageLimitType::Chat)
+                    .value(1000)
+                    .percent_used(123.4)
+                    .build()
+                    .unwrap();
+
+                Ok(
+                    amzn_codewhisperer_client::operation::get_usage_limits::GetUsageLimitsOutput::builder()
+                        .limits(mock_limits)
+                        .days_until_reset(14)
+                        .build()
+                        .unwrap(),
+                )
+            },
         }
     }
 }

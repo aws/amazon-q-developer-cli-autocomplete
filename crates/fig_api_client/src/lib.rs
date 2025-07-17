@@ -7,6 +7,7 @@ mod error;
 pub(crate) mod interceptor;
 pub mod model;
 pub mod profile;
+pub mod subscription;
 
 pub use clients::{
     Client,
