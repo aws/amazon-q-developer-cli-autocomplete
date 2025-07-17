@@ -12,6 +12,18 @@
     },
     {
       "type": "release",
+      "date": "2025-07-17",
+      "version": "1.12.6",
+      "title": "Version 1.12.6",
+      "changes": [
+        {
+          "type": "fixed",
+          "description": "Issues with read-only commands with the `execute_bash` tool - [#444](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/444)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-07-14",
       "version": "1.12.5",
       "title": "Version 1.12.5",
