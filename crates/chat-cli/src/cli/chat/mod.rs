@@ -627,7 +627,7 @@ impl ChatSession {
             },
             ChatState::HandleInput { input } => {
                 tokio::select! {
-                    res = self.handle_input(os, input.clone()) => res,
+                    res = self.handle_input(os, input) => res,
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(self.tool_uses.clone()) })
                 }
             },
