@@ -1723,7 +1723,7 @@ dependencies = [
  "strum 0.27.1",
  "syn 2.0.104",
  "syntect",
- "sysinfo",
+ "sysinfo 0.36.0",
  "tempfile",
  "thiserror 2.0.12",
  "time",
@@ -3169,7 +3169,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
- "sysinfo",
+ "sysinfo 0.36.0",
  "system-configuration",
  "tao",
  "tempfile",
@@ -3250,7 +3250,7 @@ dependencies = [
  "fig_util",
  "serde",
  "serde_json",
- "sysinfo",
+ "sysinfo 0.36.0",
  "time",
  "tokio",
  "toml",
@@ -3343,7 +3343,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "sysinfo",
+ "sysinfo 0.36.0",
  "tempfile",
  "thiserror 2.0.12",
  "tokio",
@@ -3394,7 +3394,7 @@ dependencies = [
  "dirs 5.0.1",
  "nix 0.29.0",
  "serde",
- "sysinfo",
+ "sysinfo 0.36.0",
  "tempfile",
  "tokio",
 ]
@@ -3587,7 +3587,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "strum 0.27.1",
- "sysinfo",
+ "sysinfo 0.36.0",
  "thiserror 2.0.12",
  "time",
  "tokio",
@@ -3649,7 +3649,7 @@ dependencies = [
  "shell-words",
  "shellexpand",
  "shlex",
- "sysinfo",
+ "sysinfo 0.36.0",
  "tempfile",
  "time",
  "tokio",
@@ -6374,7 +6374,7 @@ dependencies = [
  "nix 0.29.0",
  "ntapi",
  "procfs",
- "sysinfo",
+ "sysinfo 0.33.1",
  "web-time",
  "windows 0.56.0",
 ]
@@ -6737,6 +6737,16 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
  "objc2-foundation 0.2.2",
+]
+
+[[package]]
+name = "objc2-io-kit"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71c1c64d6120e51cd86033f67176b1cb66780c2efe34dec55176f77befd93c0a"
+dependencies = [
+ "libc",
+ "objc2-core-foundation",
 ]
 
 [[package]]
@@ -7770,7 +7780,7 @@ dependencies = [
  "serde",
  "serde_json",
  "spinners",
- "sysinfo",
+ "sysinfo 0.36.0",
  "tempfile",
  "thiserror 2.0.12",
  "time",
@@ -9471,6 +9481,20 @@ dependencies = [
  "ntapi",
  "rayon",
  "windows 0.57.0",
+]
+
+[[package]]
+name = "sysinfo"
+version = "0.36.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aab138f5c1bb35231de19049060a87977ad23e04f2303e953bc5c2947ac7dec4"
+dependencies = [
+ "libc",
+ "memchr",
+ "ntapi",
+ "objc2-core-foundation",
+ "objc2-io-kit",
+ "windows 0.61.3",
 ]
 
 [[package]]
