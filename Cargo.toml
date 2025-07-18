@@ -9,6 +9,7 @@ members = [
     "tests/fig-api/fig-api-mock",
     "tests/figterm2",
 ]
+default-members = ["crates/chat-cli"]
 
 [workspace.package]
 authors = [

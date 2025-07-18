@@ -505,6 +505,10 @@ pub struct ChatSession {
     pending_prompts: VecDeque<Prompt>,
     interactive: bool,
     inner: Option<ChatState>,
+    /// This is a hack. We will remove.
+    last_input: Option<String>,
+    /// This is a hack. We will remove.
+    retry_because_model_overloaded: bool,
 }
 
 impl ChatSession {
@@ -601,6 +605,8 @@ impl ChatSession {
             pending_prompts: VecDeque::new(),
             interactive,
             inner: Some(ChatState::default()),
+            last_input: None,
+            retry_because_model_overloaded: false,
         })
     }
 
@@ -626,7 +632,20 @@ impl ChatSession {
             },
             ChatState::HandleInput { input } => {
                 tokio::select! {
-                    res = self.handle_input(os, input) => res,
+                    res = self.handle_input(os, input.clone()) => {
+                        match (self.retry_because_model_overloaded, self.last_input.take()) {
+                            (true, Some(input)) => {
+                                self.retry_because_model_overloaded = false;
+                                Ok(ChatState::HandleInput {
+                                    input,
+                                })
+                            },
+                            _ => {
+                                self.last_input = Some(input);
+                                res
+                            },
+                        }
+                    },
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(self.tool_uses.clone()) })
                 }
             },
@@ -782,7 +801,7 @@ impl ChatSession {
                             style::SetAttribute(Attribute::Bold),
                             style::SetForegroundColor(Color::Red),
                             style::Print(
-                                "\nThe model you've selected is temporarily unavailable. Please select a different model and try again.\n"
+                                "\nThe model you've selected is temporarily unavailable. Please select a different model.\n"
                             ),
                             style::SetAttribute(Attribute::Reset),
                             style::SetForegroundColor(Color::Reset),
@@ -797,6 +816,8 @@ impl ChatSession {
                         self.inner = Some(ChatState::HandleInput {
                             input: "/model".to_string(),
                         });
+
+                        self.retry_because_model_overloaded = true;
 
                         return Ok(());
                     }
