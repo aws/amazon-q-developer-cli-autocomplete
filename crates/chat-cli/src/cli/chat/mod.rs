@@ -506,10 +506,6 @@ pub struct ChatSession {
     pending_prompts: VecDeque<Prompt>,
     interactive: bool,
     inner: Option<ChatState>,
-    /// This is a hack. We will remove.
-    last_input: Option<String>,
-    /// This is a hack. We will remove.
-    retry_because_model_overloaded: bool,
 }
 
 impl ChatSession {
@@ -606,8 +602,6 @@ impl ChatSession {
             pending_prompts: VecDeque::new(),
             interactive,
             inner: Some(ChatState::default()),
-            last_input: None,
-            retry_because_model_overloaded: false,
         })
     }
 
@@ -633,20 +627,7 @@ impl ChatSession {
             },
             ChatState::HandleInput { input } => {
                 tokio::select! {
-                    res = self.handle_input(os, input.clone()) => {
-                        match (self.retry_because_model_overloaded, self.last_input.take()) {
-                            (true, Some(input)) => {
-                                self.retry_because_model_overloaded = false;
-                                Ok(ChatState::HandleInput {
-                                    input,
-                                })
-                            },
-                            _ => {
-                                self.last_input = Some(input);
-                                res
-                            },
-                        }
-                    },
+                    res = self.handle_input(os, input.clone()) => res,
                     Ok(_) = ctrl_c_stream => Err(ChatError::Interrupted { tool_uses: Some(self.tool_uses.clone()) })
                 }
             },
@@ -680,7 +661,7 @@ impl ChatSession {
                     Err(ChatError::Interrupted { tool_uses: None })
                 }
             },
-            ChatState::RetryModelOverload {} => tokio::select! {
+            ChatState::RetryModelOverload => tokio::select! {
                 res = self.retry_model_overload(os) => res,
                 Ok(_) = ctrl_c_stream => {
                     Err(ChatError::Interrupted { tool_uses: None })
@@ -819,7 +800,7 @@ impl ChatSession {
                                 .append_transcript(format!("Model unavailable (Request ID: {})", id));
                         }
 
-                        self.inner = Some(ChatState::RetryModelOverload {});
+                        self.inner = Some(ChatState::RetryModelOverload);
 
                         return Ok(());
                     }
@@ -995,8 +976,8 @@ enum ChatState {
         /// Parameters for how to perform the compaction request.
         strategy: CompactStrategy,
     },
-    /// idk
-    RetryModelOverload {},
+    /// Retry the current request if we encounter a model overloaded error.
+    RetryModelOverload,
     /// Exit the chat.
     Exit,
 }
