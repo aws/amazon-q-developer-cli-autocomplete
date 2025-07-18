@@ -39,6 +39,7 @@ use clap::{
     Parser,
 };
 use cli::compact::CompactStrategy;
+use cli::model::select_model;
 use context::ContextManager;
 pub use conversation::ConversationState;
 use conversation::TokenWarningLevel;
@@ -679,6 +680,12 @@ impl ChatSession {
                     Err(ChatError::Interrupted { tool_uses: None })
                 }
             },
+            ChatState::RetryModelOverload {} => tokio::select! {
+                res = self.retry_model_overload(os) => res,
+                Ok(_) = ctrl_c_stream => {
+                    Err(ChatError::Interrupted { tool_uses: None })
+                }
+            },
             ChatState::Exit => return Ok(()),
         };
 
@@ -812,12 +819,7 @@ impl ChatSession {
                                 .append_transcript(format!("Model unavailable (Request ID: {})", id));
                         }
 
-                        // trigger /model for user
-                        self.inner = Some(ChatState::HandleInput {
-                            input: "/model".to_string(),
-                        });
-
-                        self.retry_because_model_overloaded = true;
+                        self.inner = Some(ChatState::RetryModelOverload {});
 
                         return Ok(());
                     }
@@ -993,6 +995,8 @@ enum ChatState {
         /// Parameters for how to perform the compaction request.
         strategy: CompactStrategy,
     },
+    /// idk
+    RetryModelOverload {},
     /// Exit the chat.
     Exit,
 }
@@ -2142,6 +2146,35 @@ impl ChatSession {
         self.tool_uses = queued_tools;
         self.pending_tool_index = Some(0);
         Ok(ChatState::ExecuteTools)
+    }
+
+    async fn retry_model_overload(&mut self, os: &mut Os) -> Result<ChatState, ChatError> {
+        match select_model(self) {
+            Ok(Some(_)) => (),
+            Ok(None) => {
+                // User did not select a model, so reset the current request state.
+                self.conversation.enforce_conversation_invariants();
+                self.conversation.reset_next_user_message();
+                self.pending_tool_index = None;
+                return Ok(ChatState::PromptUser {
+                    skip_printing_tools: false,
+                });
+            },
+            Err(err) => return Err(err),
+        }
+
+        let conv_state = self
+            .conversation
+            .as_sendable_conversation_state(os, &mut self.stderr, true)
+            .await?;
+
+        if self.interactive {
+            self.spinner = Some(Spinner::new(Spinners::Dots, "Thinking...".to_owned()));
+        }
+
+        Ok(ChatState::HandleResponseStream(
+            os.client.send_message(conv_state).await?,
+        ))
     }
 
     /// Apply program context to tools that Q may not have.
