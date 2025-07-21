@@ -324,19 +324,20 @@ impl ConversationState {
     /// Returns a [FigConversationState] capable of being sent by [api_client::StreamingClient].
     ///
     /// Params:
-    /// - `run_hooks` - whether hooks should be executed and included as context
+    /// - `run_perprompt_hooks` - whether per-prompt hooks should be executed and included as
+    ///   context
     pub async fn as_sendable_conversation_state(
         &mut self,
         os: &Os,
         stderr: &mut impl Write,
-        run_hooks: bool,
+        run_perprompt_hooks: bool,
     ) -> Result<FigConversationState, ChatError> {
         debug_assert!(self.next_message.is_some());
         self.enforce_conversation_invariants();
         self.history.drain(self.valid_history_range.1..);
         self.history.drain(..self.valid_history_range.0);
 
-        let context = self.backend_conversation_state(os, run_hooks, stderr).await?;
+        let context = self.backend_conversation_state(os, run_perprompt_hooks, stderr).await?;
         if !context.dropped_context_files.is_empty() {
             execute!(
                 stderr,
@@ -390,21 +391,22 @@ impl ConversationState {
     pub async fn backend_conversation_state(
         &mut self,
         os: &Os,
-        run_hooks: bool,
+        run_perprompt_hooks: bool,
         output: &mut impl Write,
     ) -> Result<BackendConversationState<'_>, ChatError> {
         self.update_state(false).await;
         self.enforce_conversation_invariants();
 
-        // Run hooks and add to conversation start and next user message.
         let mut conversation_start_context = None;
-        if let (true, Some(cm)) = (run_hooks, self.context_manager.as_mut()) {
-            let hook_results = cm.run_hooks(output).await?;
-            conversation_start_context = Some(format_hook_context(hook_results.iter(), HookTrigger::ConversationStart));
+        if let Some(cm) = self.context_manager.as_mut() {
+            let conv_start = cm.run_hooks(HookTrigger::ConversationStart, output).await?;
+            conversation_start_context = format_hook_context(&conv_start, HookTrigger::ConversationStart);
 
-            // add per prompt content to next_user_message if available
-            if let Some(next_message) = self.next_message.as_mut() {
-                next_message.additional_context = format_hook_context(hook_results.iter(), HookTrigger::PerPrompt);
+            if let (true, Some(next_message)) = (run_perprompt_hooks, self.next_message.as_mut()) {
+                let per_prompt = cm.run_hooks(HookTrigger::PerPrompt, output).await?;
+                if let Some(ctx) = format_hook_context(&per_prompt, HookTrigger::PerPrompt) {
+                    next_message.additional_context = ctx;
+                }
             }
         }
 
@@ -756,7 +758,17 @@ impl From<InputSchema> for ToolInputSchema {
     }
 }
 
-fn format_hook_context<'a>(hook_results: impl IntoIterator<Item = &'a (Hook, String)>, trigger: HookTrigger) -> String {
+/// Formats hook output to be used within context blocks (e.g., in context messages or in new user
+/// prompts).
+///
+/// # Returns
+/// [Option::Some] if `hook_results` is not empty and at least one hook has content. Otherwise,
+/// [Option::None]
+fn format_hook_context(hook_results: &[(Hook, String)], trigger: HookTrigger) -> Option<String> {
+    if hook_results.iter().all(|(_, content)| content.is_empty()) {
+        return None;
+    }
+
     let mut context_content = String::new();
 
     context_content.push_str(CONTEXT_ENTRY_START_HEADER);
@@ -766,11 +778,11 @@ fn format_hook_context<'a>(hook_results: impl IntoIterator<Item = &'a (Hook, Str
     }
     context_content.push_str("\n\n");
 
-    for (hook, output) in hook_results.into_iter().filter(|(h, _)| h.trigger == trigger) {
+    for (hook, output) in hook_results.iter().filter(|(h, _)| h.trigger == trigger) {
         context_content.push_str(&format!("'{}': {output}\n\n", &hook.name));
     }
     context_content.push_str(CONTEXT_ENTRY_END_HEADER);
-    context_content
+    Some(context_content)
 }
 
 fn enforce_conversation_invariants(

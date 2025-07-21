@@ -873,8 +873,14 @@ mod tests {
         manager.add_hook(&os, "hook2".to_string(), hook2, false).await?;
 
         // Run the hooks
-        let results = manager.run_hooks(&mut vec![]).await.unwrap();
-        assert_eq!(results.len(), 2); // Should include both hooks
+        let results = manager
+            .run_hooks(HookTrigger::ConversationStart, &mut vec![])
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        let results = manager.run_hooks(HookTrigger::PerPrompt, &mut vec![]).await.unwrap();
+        assert_eq!(results.len(), 0);
 
         Ok(())
     }
@@ -889,14 +895,20 @@ mod tests {
         manager.add_hook(&os, "profile_hook".to_string(), hook1, false).await?;
         manager.add_hook(&os, "global_hook".to_string(), hook2, true).await?;
 
-        let results = manager.run_hooks(&mut vec![]).await.unwrap();
+        let results = manager
+            .run_hooks(HookTrigger::ConversationStart, &mut vec![])
+            .await
+            .unwrap();
         assert_eq!(results.len(), 2); // Should include both hooks
 
         // Create and switch to a new profile
         manager.create_profile(&os, "test_profile").await?;
         manager.switch_profile(&os, "test_profile").await?;
 
-        let results = manager.run_hooks(&mut vec![]).await.unwrap();
+        let results = manager
+            .run_hooks(HookTrigger::ConversationStart, &mut vec![])
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1); // Should include global hook
         assert_eq!(results[0].0.name, "global_hook");
 

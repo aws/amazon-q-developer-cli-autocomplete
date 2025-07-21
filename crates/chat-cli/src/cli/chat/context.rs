@@ -17,6 +17,7 @@ use serde::{
 };
 use tracing::debug;
 
+use super::cli::hooks::HookTrigger;
 use super::consts::CONTEXT_FILES_MAX_SIZE;
 use super::util::drop_matched_context_files;
 use crate::cli::chat::ChatError;
@@ -573,7 +574,11 @@ impl ContextManager {
     /// * `updates` - output stream to write hook run status to if Some, else do nothing if None
     /// # Returns
     /// A vector containing pairs of a [`Hook`] definition and its execution output
-    pub async fn run_hooks(&mut self, output: &mut impl Write) -> Result<Vec<(Hook, String)>, ChatError> {
+    pub async fn run_hooks(
+        &mut self,
+        trigger: HookTrigger,
+        output: &mut impl Write,
+    ) -> Result<Vec<(Hook, String)>, ChatError> {
         let mut hooks: Vec<&Hook> = Vec::new();
 
         // Set internal hook states
@@ -583,10 +588,14 @@ impl ContextManager {
         ];
 
         for (hook_list, is_global) in configs {
-            hooks.extend(hook_list.iter_mut().map(|(name, h)| {
-                h.name = name.clone();
-                h.is_global = is_global;
-                &*h
+            hooks.extend(hook_list.iter_mut().filter_map(|(name, h)| {
+                if h.trigger == trigger {
+                    h.name = name.clone();
+                    h.is_global = is_global;
+                    Some(&*h)
+                } else {
+                    None
+                }
             }));
         }
 
