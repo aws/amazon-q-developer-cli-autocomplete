@@ -12,6 +12,18 @@
     },
     {
       "type": "release",
+      "date": "2025-07-22",
+      "version": "1.12.7",
+      "title": "Version 1.12.7",
+      "changes": [
+        {
+          "type": "fixed",
+          "description": "Issues with `q chat` requests not being cached correctly - [#461](https://github.com/aws/amazon-q-developer-cli-autocomplete/pull/461)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-07-17",
       "version": "1.12.6",
       "title": "Version 1.12.6",
