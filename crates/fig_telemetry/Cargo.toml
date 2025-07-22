@@ -15,9 +15,9 @@ amzn-codewhisperer-client = { path = "../amzn-codewhisperer-client" }
 amzn-toolkit-telemetry-client = { path = "../amzn-toolkit-telemetry-client" }
 anyhow.workspace = true
 async-trait.workspace = true
-aws-credential-types = "1.1.6"
-aws-sdk-cognitoidentity = "1.51.0"
-aws-sdk-cognitoidentityprovider = "1.60.1"
+aws-credential-types = "1.2.4"
+aws-sdk-cognitoidentity = "1.77.0"
+aws-sdk-cognitoidentityprovider = "1.89.0"
 aws-smithy-async = "1.2.2"
 aws-smithy-types = "1.2.10"
 aws-toolkit-telemetry-definitions = { path = "../aws-toolkit-telemetry-definitions" }
