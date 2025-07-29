@@ -12,6 +12,34 @@
     },
     {
       "type": "release",
+      "date": "2025-07-29",
+      "version": "1.13.0",
+      "title": "Version 1.13.0",
+      "changes": [
+        {
+          "type": "added",
+          "description": "A new paradigm for working with `q chat` using agents. [See the documentation for more details](https://github.com/aws/amazon-q-developer-cli/blob/main/docs/SUMMARY.md)"
+        },
+        {
+          "type": "added",
+          "description": "A new setting to disable markdown rendering in `qchat` with `chat.disableMarkdownRendering` - [#2236](https://github.com/aws/amazon-q-developer-cli/pull/2236)"
+        },
+        {
+          "type": "fixed",
+          "description": "An issue with `/compact` failing for large initial messages - [#2375](https://github.com/aws/amazon-q-developer-cli/pull/2375)"
+        },
+        {
+          "type": "fixed",
+          "description": "Images being removed from the conversation history - [#2333](https://github.com/aws/amazon-q-developer-cli/pull/2333)"
+        },
+        {
+          "type": "fixed",
+          "description": "Code block detection for multi-line input - [#2384](https://github.com/aws/amazon-q-developer-cli/pull/2384)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-07-22",
       "version": "1.12.7",
       "title": "Version 1.12.7",
