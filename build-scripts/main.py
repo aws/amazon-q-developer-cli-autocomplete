@@ -40,6 +40,16 @@ build_subparser.add_argument(
     help="The AWS account ID",
 )
 build_subparser.add_argument(
+    "--chat-build-bucket-name",
+    action=StoreIfNotEmptyAction,
+    help="The name of the bucket containing the chat binary",
+)
+build_subparser.add_argument(
+    "--chat-download-role-arn",
+    action=StoreIfNotEmptyAction,
+    help="The IAM Role to assume when downloading from the chat build bucket",
+)
+build_subparser.add_argument(
     "--apple-id-secret",
     action=StoreIfNotEmptyAction,
     help="The Apple ID secret",
@@ -116,6 +126,8 @@ match args.subparser:
             output_bucket=args.output_bucket,
             signing_bucket=args.signing_bucket,
             aws_account_id=args.aws_account_id,
+            chat_build_bucket_name=args.chat_build_bucket_name,
+            chat_download_role_arn=args.chat_download_role_arn,
             apple_id_secret=args.apple_id_secret,
             signing_role_name=args.signing_role_name,
             stage_name=args.stage_name,
