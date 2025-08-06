@@ -75,7 +75,6 @@ impl CustomToolClient {
             disabled: _,
         } = config;
 
-        // Expand environment variables in command, args, and env
         let expanded_command = expand_env_vars_in_command(&command)
             .map_err(|e| eyre::eyre!("Failed to expand environment variables in command '{}': {}", command, e))?;
 

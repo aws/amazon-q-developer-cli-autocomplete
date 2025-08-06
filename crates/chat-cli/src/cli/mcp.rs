@@ -79,20 +79,16 @@ pub struct AddArgs {
     /// Name for the server
     #[arg(long)]
     pub name: String,
-    /// The command used to launch the server.
-    /// Supports environment variable expansion using ${VAR_NAME} syntax.
+    /// The command used to launch the server
     #[arg(long)]
     pub command: String,
-    /// Arguments to pass to the command.
-    /// Supports environment variable expansion using ${VAR_NAME} syntax.
+    /// Arguments to pass to the command
     #[arg(long, action = ArgAction::Append, allow_hyphen_values = true, value_delimiter = ',')]
     pub args: Vec<String>,
     /// Where to add the server to.
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
-    /// Environment variables to use when launching the server.
-    /// Supports environment variable expansion using ${VAR_NAME} syntax.
-    /// Example: --env "USERNAME=${ARTIFACTORY_USERNAME},PASSWORD=${ARTIFACTORY_PASSWORD}"
+    /// Environment variables to use when launching the server
     #[arg(long, value_parser = parse_env_vars)]
     pub env: Vec<HashMap<String, String>>,
     /// Server launch timeout, in milliseconds
