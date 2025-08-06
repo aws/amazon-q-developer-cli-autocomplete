@@ -535,6 +535,13 @@ pub async fn is_logged_in(database: &mut Database) -> bool {
         return true;
     }
 
+    // First check if there are IDC tokens available
+    if has_idc_tokens().await {
+        debug!("logged in using IDC tokens");
+        return true;
+    }
+
+    // Fall back to checking existing BuilderIdToken
     match BuilderIdToken::load(database).await {
         Ok(Some(_)) => true,
         Ok(None) => {
@@ -603,11 +610,63 @@ pub async fn is_idc_user(database: &Database) -> Result<bool> {
     if cfg!(test) {
         return Ok(false);
     }
+    
+    // First check if there are IDC tokens in ~/.aws/sso/cache
+    if has_idc_tokens().await {
+        debug!("Found IDC tokens in ~/.aws/sso/cache");
+        return Ok(true);
+    }
+    
+    // Fall back to checking existing BuilderIdToken
     if let Ok(Some(token)) = BuilderIdToken::load(database).await {
         Ok(token.token_type() == TokenType::IamIdentityCenter)
     } else {
         Err(eyre!("No auth token found - is the user signed in?"))
     }
+}
+
+/// Check if there are IDC tokens in the AWS SSO cache directory
+async fn has_idc_tokens() -> bool {
+    let home_dir = match dirs::home_dir() {
+        Some(dir) => dir,
+        None => {
+            debug!("Unable to determine home directory");
+            return false;
+        }
+    };
+    
+    let sso_cache_dir = home_dir.join(".aws").join("sso");
+    
+    if !sso_cache_dir.exists() {
+        debug!("AWS SSO cache directory does not exist: {:?}", aws_sso_dir);
+        return false;
+    }
+    
+    let entries = match std::fs::read_dir(&aws_sso_dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            debug!("Failed to read SSO directory: {}", e);
+            return false;
+        }
+    };
+    
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        
+        let path = entry.path();
+        
+        // Check if it's a JSON file (IDC tokens are stored as JSON)
+        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            debug!("Found IDC token file: {:?}", path);
+            return true;
+        }
+    }ß
+    
+    debug!("No IDC token files found in AWS SSO Directory");
+    false
 }
 
 #[cfg(test)]
