@@ -31,6 +31,11 @@ use crate::mcp_client::{
     ToolCallResult,
 };
 use crate::os::Os;
+use crate::util::env_expansion::{
+    expand_env_vars_in_args,
+    expand_env_vars_in_command,
+    expand_env_vars_in_map,
+};
 
 // TODO: support http transport type
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -69,16 +74,33 @@ impl CustomToolClient {
             timeout,
             disabled: _,
         } = config;
+
+        // Expand environment variables in command, args, and env
+        let expanded_command = expand_env_vars_in_command(&command)
+            .map_err(|e| eyre::eyre!("Failed to expand environment variables in command '{}': {}", command, e))?;
+
+        let expanded_args = expand_env_vars_in_args(&args)
+            .map_err(|e| eyre::eyre!("Failed to expand environment variables in args: {}", e))?;
+
+        let expanded_env = if let Some(env_vars) = env {
+            Some(
+                expand_env_vars_in_map(&env_vars)
+                    .map_err(|e| eyre::eyre!("Failed to expand environment variables in env: {}", e))?,
+            )
+        } else {
+            None
+        };
+
         let mcp_client_config = McpClientConfig {
             server_name: server_name.clone(),
-            bin_path: command.clone(),
-            args,
+            bin_path: expanded_command,
+            args: expanded_args,
             timeout,
             client_info: serde_json::json!({
                "name": "Q CLI Chat",
                "version": "1.0.0"
             }),
-            env,
+            env: expanded_env,
         };
         let client = McpClient::<JsonRpcStdioTransport>::from_config(mcp_client_config)?;
         Ok(CustomToolClient::Stdio {
@@ -242,5 +264,118 @@ impl CustomTool {
     pub fn get_input_token_size(&self) -> usize {
         TokenCounter::count_tokens(self.method.as_str())
             + TokenCounter::count_tokens(self.params.as_ref().map_or("", |p| p.as_str().unwrap_or_default()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::env;
+
+    use super::*;
+
+    #[test]
+    fn test_custom_tool_config_env_expansion() {
+        // Set up test environment variables
+        env::set_var("TEST_USERNAME", "testuser");
+        env::set_var("TEST_PASSWORD", "testpass");
+        env::set_var("TEST_COMMAND", "python");
+        env::set_var("TEST_ARG", "server.py");
+
+        let mut env_vars = HashMap::new();
+        env_vars.insert("USERNAME".to_string(), "${TEST_USERNAME}".to_string());
+        env_vars.insert("PASSWORD".to_string(), "${TEST_PASSWORD}".to_string());
+        env_vars.insert("STATIC_VAR".to_string(), "static_value".to_string());
+
+        let config = CustomToolConfig {
+            command: "${TEST_COMMAND}".to_string(),
+            args: vec!["${TEST_ARG}".to_string(), "--config".to_string()],
+            env: Some(env_vars),
+            timeout: 30000,
+            disabled: false,
+        };
+
+        let result = CustomToolClient::from_config("test_server".to_string(), config);
+
+        // Clean up environment variables
+        env::remove_var("TEST_USERNAME");
+        env::remove_var("TEST_PASSWORD");
+        env::remove_var("TEST_COMMAND");
+        env::remove_var("TEST_ARG");
+
+        assert!(
+            result.is_ok(),
+            "CustomToolClient creation should succeed with valid env vars"
+        );
+    }
+
+    #[test]
+    fn test_custom_tool_config_missing_env_var() {
+        let mut env_vars = HashMap::new();
+        env_vars.insert("USERNAME".to_string(), "${NONEXISTENT_VAR}".to_string());
+
+        let config = CustomToolConfig {
+            command: "python".to_string(),
+            args: vec!["server.py".to_string()],
+            env: Some(env_vars),
+            timeout: 30000,
+            disabled: false,
+        };
+
+        let result = CustomToolClient::from_config("test_server".to_string(), config);
+
+        assert!(
+            result.is_err(),
+            "CustomToolClient creation should fail with missing env vars"
+        );
+        assert!(result.unwrap_err().to_string().contains("NONEXISTENT_VAR"));
+    }
+
+    #[test]
+    fn test_custom_tool_config_no_env_expansion() {
+        let config = CustomToolConfig {
+            command: "python".to_string(),
+            args: vec!["server.py".to_string(), "--port".to_string(), "8080".to_string()],
+            env: None,
+            timeout: 30000,
+            disabled: false,
+        };
+
+        let result = CustomToolClient::from_config("test_server".to_string(), config);
+
+        assert!(
+            result.is_ok(),
+            "CustomToolClient creation should succeed without env vars"
+        );
+    }
+
+    #[test]
+    fn test_custom_tool_config_mixed_env_expansion() {
+        env::set_var("TEST_PORT", "8080");
+
+        let mut env_vars = HashMap::new();
+        env_vars.insert("PORT".to_string(), "${TEST_PORT}".to_string());
+        env_vars.insert("HOST".to_string(), "localhost".to_string()); // No expansion needed
+
+        let config = CustomToolConfig {
+            command: "python".to_string(),
+            args: vec![
+                "server.py".to_string(),
+                "--port".to_string(),
+                "${TEST_PORT}".to_string(),
+            ],
+            env: Some(env_vars),
+            timeout: 30000,
+            disabled: false,
+        };
+
+        let result = CustomToolClient::from_config("test_server".to_string(), config);
+
+        env::remove_var("TEST_PORT");
+
+        assert!(
+            result.is_ok(),
+            "CustomToolClient creation should succeed with mixed env expansion"
+        );
     }
 }
