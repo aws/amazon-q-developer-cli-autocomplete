@@ -12,17 +12,17 @@
     },
     {
       "type": "release",
-      "date": "2025-08-05",
+      "date": "2025-08-07",
       "version": "1.13.2",
       "title": "Version 1.13.2",
       "changes": [
         {
           "type": "added",
-          "description": "A new preview model GPT-OSS-120b from OpenAI - [#2500](https://github.com/aws/amazon-q-developer-cli/pull/2500)"
+          "description": "Regex matching for the `toolsSettings.execute_bash.allowedCommands` agent configuration - [#2483](https://github.com/aws/amazon-q-developer-cli/pull/2483)"
         },
         {
           "type": "added",
-          "description": "Regex matching for the `toolsSettings.execute_bash.allowedCommands` agent configuration - [#2483](https://github.com/aws/amazon-q-developer-cli/pull/2483)"
+          "description": "Support for workspace `mcp.json` configuration when `useLegacyMcpJson` is enabled - [#2516](https://github.com/aws/amazon-q-developer-cli/pull/2516)"
         },
         {
           "type": "added",
