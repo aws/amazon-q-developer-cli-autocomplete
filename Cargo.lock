@@ -3147,7 +3147,7 @@ dependencies = [
  "http 1.3.1",
  "image",
  "infer",
- "keyboard-types 0.8.0",
+ "keyboard-types 0.8.1",
  "libc",
  "macos-utils",
  "mime",
@@ -5421,9 +5421,9 @@ dependencies = [
 
 [[package]]
 name = "keyboard-types"
-version = "0.8.0"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd6e0f18953c66af118a70064505bd3780a226d65b06553b7293fb8933067967"
+checksum = "53cea01d04c8251f945a9f16c5364da6cdb8bce69a61382663302c62f4186d13"
 dependencies = [
  "bitflags 2.9.1",
  "serde",
