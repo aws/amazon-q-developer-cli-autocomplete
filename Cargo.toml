@@ -29,7 +29,7 @@ amzn-codewhisperer-streaming-client = { path = "crates/amzn-codewhisperer-stream
 amzn-consolas-client = { path = "crates/amzn-consolas-client" }
 amzn-qdeveloper-streaming-client = { path = "crates/amzn-qdeveloper-streaming-client" }
 anstream = "0.6.13"
-anyhow = "1.0.98"
+anyhow = "1.0.99"
 appkit-nsworkspace-bindings = { path = "crates/macos-utils/appkit-nsworkspace-bindings" }
 async-trait = "0.1.87"
 aws-smithy-runtime-api = "1.6.1"
