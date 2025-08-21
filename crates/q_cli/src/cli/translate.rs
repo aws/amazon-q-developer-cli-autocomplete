@@ -324,7 +324,7 @@ fn change_blocking_fd(fd: std::os::unix::io::RawFd, is_blocking: bool) -> Result
 
 impl TranslateArgs {
     pub async fn execute(self) -> Result<ExitCode> {
-        if !fig_util::system_info::in_cloudshell() && !chat_cli::auth::builder_id::is_logged_in(&mut database).await {
+        if !fig_util::system_info::in_cloudshell() && !fig_auth::is_logged_in().await {
                 bail!(
                     "You are not logged in. Run {} to login.",
                     format!("{CLI_BINARY_NAME} login").magenta()

@@ -572,6 +572,12 @@ pub async fn is_amzn_user() -> Result<bool> {
 }
 
 pub async fn is_logged_in() -> bool {
+    // Check for BuilderId if not using Sigv4
+    if std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty()) {
+        debug!("logged in using sigv4 credentials");
+        return true;
+    }
+
     match builder_id_token().await {
         Ok(Some(_)) => true,
         Ok(None) => {
