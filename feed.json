@@ -12,6 +12,38 @@
     },
     {
       "type": "release",
+      "date": "2025-08-21",
+      "version": "1.14.1",
+      "title": "Version 1.14.1",
+      "changes": [
+        {
+          "type": "fixed",
+          "description": "Tool permission issue in agent - [#2619](https://github.com/aws/amazon-q-developer-cli/pull/2619)"
+        },
+        {
+          "type": "added",
+          "description": "MCP admin-level configuration with GetProfile - [#2639](https://github.com/aws/amazon-q-developer-cli/pull/2639)"
+        },
+        {
+          "type": "added",
+          "description": "Wildcard pattern matching support for agent allowedTools - [#2612](https://github.com/aws/amazon-q-developer-cli/pull/2612)"
+        },
+        {
+          "type": "added",
+          "description": "Agent hot swap capability - [#2637](https://github.com/aws/amazon-q-developer-cli/pull/2637)"
+        },
+        {
+          "type": "fixed",
+          "description": "Agent default profile printing issue in `use_aws`, plus minor doc updates - [#2617](https://github.com/aws/amazon-q-developer-cli/pull/2617)"
+        },
+        {
+          "type": "changed",
+          "description": "Knowledge beta improvements (phase 2): Refactored async_client and added BM25 support - [#2608](https://github.com/aws/amazon-q-developer-cli/pull/2608)"
+        }
+      ]
+    },
+    {
+      "type": "release",
       "date": "2025-08-15",
       "version": "1.14.0",
       "title": "Version 1.14.0",
