@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "alacritty_terminal"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "bitflags 2.9.1",
  "camino",
@@ -90,7 +90,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
 name = "amzn-codewhisperer-client"
-version = "0.1.10016"
+version = "0.1.10231"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "amzn-codewhisperer-streaming-client"
-version = "0.1.10016"
+version = "0.1.10231"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "amzn-consolas-client"
-version = "0.1.10016"
+version = "0.1.10231"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "amzn-qdeveloper-streaming-client"
-version = "0.1.10016"
+version = "0.1.10231"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -279,7 +279,7 @@ checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
 name = "appkit-nsworkspace-bindings"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "bindgen 0.71.1",
  "objc",
@@ -1630,7 +1630,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
 name = "chat_cli"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "amzn-codewhisperer-client",
  "amzn-codewhisperer-streaming-client",
@@ -2389,7 +2389,7 @@ checksum = "2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476"
 
 [[package]]
 name = "dbus"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "async_zip",
  "fig_os_shim",
@@ -3014,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "fig-api-mock"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "async-trait",
  "clap",
@@ -3027,7 +3027,7 @@ dependencies = [
 
 [[package]]
 name = "fig_api_client"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "amzn-codewhisperer-client",
  "amzn-codewhisperer-streaming-client",
@@ -3062,7 +3062,7 @@ dependencies = [
 
 [[package]]
 name = "fig_auth"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "async-trait",
  "aws-credential-types",
@@ -3096,7 +3096,7 @@ dependencies = [
 
 [[package]]
 name = "fig_aws_common"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "aws-runtime",
  "aws-smithy-runtime",
@@ -3110,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "fig_desktop"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "accessibility-sys",
  "anyhow",
@@ -3202,7 +3202,7 @@ dependencies = [
 
 [[package]]
 name = "fig_desktop_api"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "anstream",
  "async-trait",
@@ -3239,7 +3239,7 @@ dependencies = [
 
 [[package]]
 name = "fig_diagnostic"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "cfg-if",
  "clap",
@@ -3259,7 +3259,7 @@ dependencies = [
 
 [[package]]
 name = "fig_input_method"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "apple-bundle",
  "fig_ipc",
@@ -3280,7 +3280,7 @@ dependencies = [
 
 [[package]]
 name = "fig_install"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "bitflags 2.9.1",
  "bytes",
@@ -3319,7 +3319,7 @@ dependencies = [
 
 [[package]]
 name = "fig_integrations"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "accessibility-sys",
  "async-trait",
@@ -3352,7 +3352,7 @@ dependencies = [
 
 [[package]]
 name = "fig_ipc"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -3375,7 +3375,7 @@ dependencies = [
 
 [[package]]
 name = "fig_log"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "fig_util",
  "parking_lot",
@@ -3388,7 +3388,7 @@ dependencies = [
 
 [[package]]
 name = "fig_os_shim"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "cfg-if",
  "dirs 5.0.1",
@@ -3401,7 +3401,7 @@ dependencies = [
 
 [[package]]
 name = "fig_proto"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "arbitrary",
  "bytes",
@@ -3424,7 +3424,7 @@ dependencies = [
 
 [[package]]
 name = "fig_remote_ipc"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3442,7 +3442,7 @@ dependencies = [
 
 [[package]]
 name = "fig_request"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -3467,7 +3467,7 @@ dependencies = [
 
 [[package]]
 name = "fig_settings"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "fd-lock",
  "fig_util",
@@ -3487,7 +3487,7 @@ dependencies = [
 
 [[package]]
 name = "fig_telemetry"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "amzn-codewhisperer-client",
  "amzn-toolkit-telemetry-client",
@@ -3521,7 +3521,7 @@ dependencies = [
 
 [[package]]
 name = "fig_telemetry_core"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "amzn-codewhisperer-client",
  "amzn-toolkit-telemetry-client",
@@ -3535,7 +3535,7 @@ dependencies = [
 
 [[package]]
 name = "fig_test_macro"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "quote",
  "syn 2.0.104",
@@ -3543,7 +3543,7 @@ dependencies = [
 
 [[package]]
 name = "fig_test_utils"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "bytes",
  "fig_os_shim",
@@ -3561,7 +3561,7 @@ dependencies = [
 
 [[package]]
 name = "fig_util"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "appkit-nsworkspace-bindings",
  "bstr",
@@ -3600,7 +3600,7 @@ dependencies = [
 
 [[package]]
 name = "figterm"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -3664,7 +3664,7 @@ dependencies = [
 
 [[package]]
 name = "figterm2"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4838,7 +4838,7 @@ dependencies = [
  "httpdate",
  "itoa 1.0.15",
  "pin-project-lite",
- "socket2",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4918,7 +4918,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2",
+ "socket2 0.5.10",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -5206,6 +5206,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab08d7cd2c5897f2c949e5383ea7c7db03fb19130ffcfbf7eda795137ae3cb83"
 dependencies = [
  "rustversion",
+]
+
+[[package]]
+name = "io-uring"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93587f37623a1a17d94ef2bc9ada592f5465fe7732084ab7beefabe5c77c0c4"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -5702,7 +5713,7 @@ dependencies = [
 
 [[package]]
 name = "macos-utils"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "accessibility",
  "accessibility-sys",
@@ -7707,7 +7718,7 @@ dependencies = [
 
 [[package]]
 name = "q_cli"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "amzn-codewhisperer-client",
  "amzn-codewhisperer-streaming-client",
@@ -7836,7 +7847,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls 0.23.28",
- "socket2",
+ "socket2 0.5.10",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -7873,7 +7884,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2",
+ "socket2 0.5.10",
  "tracing",
  "windows-sys 0.59.0",
 ]
@@ -8744,7 +8755,7 @@ dependencies = [
 
 [[package]]
 name = "semantic_search_client"
-version = "1.13.2"
+version = "1.14.1"
 dependencies = [
  "anyhow",
  "bm25",
@@ -9118,9 +9129,9 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04dc19736151f35336d325007ac991178d504a119863a2fcb3758cdb5e52c50d"
+checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 
 [[package]]
 name = "smallvec"
@@ -9136,6 +9147,16 @@ checksum = "e22376abed350d73dd1cd119b57ffccad95b4e585a7cda43e286245ce23c0678"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9866,21 +9887,23 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.45.1"
+version = "1.47.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75ef51a33ef1da925cea3e4eb122833cb377c61439ca401b770f54902b806779"
+checksum = "89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038"
 dependencies = [
  "backtrace",
  "bytes",
+ "io-uring",
  "libc",
  "mio",
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2",
+ "slab",
+ "socket2 0.6.0",
  "tokio-macros",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -9928,9 +9951,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.15"
+version = "0.7.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
+checksum = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5"
 dependencies = [
  "bytes",
  "futures-core",

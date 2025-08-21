@@ -71,7 +71,7 @@ pub(crate) fn get_client_id_inner(is_test: bool, env: &Env, state: &State, setti
     }
 }
 
-/// We accidently generates some clientIds in the settings file, we want to include those in the
+/// We accidentally generates some clientIds in the settings file, we want to include those in the
 /// telemetry events so we corolate those users with the correct clientIds
 fn old_client_id_inner(settings: &Settings) -> Option<Uuid> {
     settings

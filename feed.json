@@ -12,17 +12,97 @@
     },
     {
       "type": "release",
-      "date": "2025-08-05",
+      "date": "2025-08-21",
+      "version": "1.14.1",
+      "title": "Version 1.14.1",
+      "changes": [
+        {
+          "type": "fixed",
+          "description": "Tool permission issue in agent - [#2619](https://github.com/aws/amazon-q-developer-cli/pull/2619)"
+        },
+        {
+          "type": "added",
+          "description": "MCP admin-level configuration with GetProfile - [#2639](https://github.com/aws/amazon-q-developer-cli/pull/2639)"
+        },
+        {
+          "type": "added",
+          "description": "Wildcard pattern matching support for agent allowedTools - [#2612](https://github.com/aws/amazon-q-developer-cli/pull/2612)"
+        },
+        {
+          "type": "added",
+          "description": "Agent hot swap capability - [#2637](https://github.com/aws/amazon-q-developer-cli/pull/2637)"
+        },
+        {
+          "type": "fixed",
+          "description": "Agent default profile printing issue in `use_aws`, plus minor doc updates - [#2617](https://github.com/aws/amazon-q-developer-cli/pull/2617)"
+        },
+        {
+          "type": "changed",
+          "description": "Knowledge beta improvements (phase 2): Refactored async_client and added BM25 support - [#2608](https://github.com/aws/amazon-q-developer-cli/pull/2608)"
+        }
+      ]
+    },
+    {
+      "type": "release",
+      "date": "2025-08-15",
+      "version": "1.14.0",
+      "title": "Version 1.14.0",
+      "changes": [
+        {
+          "type": "added",
+          "description": "Additional supported models in `q chat`, see `/model` - [#2419](https://github.com/aws/amazon-q-developer-cli/pull/2419)"
+        },
+        {
+          "type": "added",
+          "description": "`--include` and `--exclude` flags for the `/knowledge add` command - [#2545](https://github.com/aws/amazon-q-developer-cli/pull/2545)"
+        },
+        {
+          "type": "added",
+          "description": "Notifications on API retries - [#2607](https://github.com/aws/amazon-q-developer-cli/pull/2607)"
+        }
+      ]
+    },
+    {
+      "type": "release",
+      "date": "2025-08-11",
+      "version": "1.13.3",
+      "title": "Version 1.13.3",
+      "changes": [
+        {
+          "type": "added",
+          "description": "Support for setting denied shell commands with `toolsSettings.execute_bash.deniedCommands` - [#2512](https://github.com/aws/amazon-q-developer-cli/pull/2512)"
+        },
+        {
+          "type": "added",
+          "description": "Support for setting denied AWS services with `toolsSettings.use_aws.deniedServices` - [#2512](https://github.com/aws/amazon-q-developer-cli/pull/2512)"
+        },
+        {
+          "type": "added",
+          "description": "Support for setting denied file paths for `fs_read` and `fs_write` using `deniedPaths` in `toolsSettings` - [#2512](https://github.com/aws/amazon-q-developer-cli/pull/2512)"
+        },
+        {
+          "type": "added",
+          "description": "Support for setting environment variables in MCP config - [#2241](https://github.com/aws/amazon-q-developer-cli/pull/2241)"
+        },
+        {
+          "type": "fixed",
+          "description": "`q mcp add` from failing when the targeted `mcp.json` file does not exist - [#2561](https://github.com/aws/amazon-q-developer-cli/pull/2561)"
+        }
+      ]
+    },
+    {
+      "type": "release",
+      "date": "2025-08-08",
       "version": "1.13.2",
       "title": "Version 1.13.2",
       "changes": [
         {
           "type": "added",
-          "description": "A new preview model GPT-OSS-120b from OpenAI - [#2500](https://github.com/aws/amazon-q-developer-cli/pull/2500)"
+          "description": "Regex matching for the `toolsSettings.execute_bash.allowedCommands` agent configuration - [#2483](https://github.com/aws/amazon-q-developer-cli/pull/2483)"
         },
         {
           "type": "added",
-          "description": "Regex matching for the `toolsSettings.execute_bash.allowedCommands` agent configuration - [#2483](https://github.com/aws/amazon-q-developer-cli/pull/2483)"
+          "description": "Support for workspace `mcp.json` configuration when `useLegacyMcpJson` is enabled - [#2516](https://github.com/aws/amazon-q-developer-cli/pull/2516)"
         },
         {
           "type": "added",
