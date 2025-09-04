@@ -12,6 +12,7 @@ pub mod platform;
 pub mod profile;
 pub mod settings;
 pub mod state;
+pub mod subscription;
 pub mod telemetry;
 pub mod update;
 

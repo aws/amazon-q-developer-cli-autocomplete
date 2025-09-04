@@ -46,6 +46,8 @@ message ClientOriginatedMessage {
     GetPlatformInfoRequest get_platform_info_request = 152;
     ListAvailableProfilesRequest list_available_profiles_request = 155;
     SetProfileRequest set_profile_request = 156;
+    GetUsageLimitsRequest get_usage_limits_request = 157;
+    GenerateConsoleUrlRequest generate_console_url_request = 158;
   }
 
   reserved 115;
@@ -78,6 +80,8 @@ message ServerOriginatedMessage {
     AuthCancelPkceAuthorizationResponse auth_cancel_pkce_authorization_response = 124;
     GetPlatformInfoResponse get_platform_info_response = 125;
     ListAvailableProfilesResponse list_available_profiles_response = 155;
+    GetUsageLimitsResponse get_usage_limits_response = 157;
+    GenerateConsoleUrlResponse generate_console_url_response = 158;
 
     Notification notification = 1000;
   }
@@ -394,6 +398,42 @@ message ListAvailableProfilesResponse {
 
 message SetProfileRequest {
   Profile profile = 1;
+}
+
+/// Subscription
+enum SubscriptionTier {
+  SUBSCRIPTION_TIER_FREE = 0;
+  SUBSCRIPTION_TIER_PRO = 1;
+  SUBSCRIPTION_TIER_PRO_PLUS = 2;
+}
+
+/// Usage
+message GetUsageLimitsRequest {}
+
+message GetUsageLimitsResponse {
+  UsageBreakdown usage_breakdown = 1;
+  SubscriptionInfo subscription_info = 2;
+  OverageInfo overage_info = 3;
+}
+
+message OverageInfo {
+  bool enabled = 1;
+}
+
+message SubscriptionInfo {
+  SubscriptionTier tier = 1;
+}
+
+message UsageBreakdown {
+  int32 current_usage = 1;
+  int32 usage_limit = 2;
+  double overage_charges = 3;
+  string reset_date = 4;
+}
+
+message GenerateConsoleUrlRequest {}
+message GenerateConsoleUrlResponse {
+  string url = 1;
 }
 
 /// User

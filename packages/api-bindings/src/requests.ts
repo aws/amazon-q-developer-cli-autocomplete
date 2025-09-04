@@ -41,6 +41,9 @@ import {
   DestinationOfSymbolicLinkResponse,
   DragWindowRequest,
   DragWindowRequestSchema,
+  GenerateConsoleUrlRequest,
+  GenerateConsoleUrlRequestSchema,
+  GenerateConsoleUrlResponse,
   GetLocalStateRequest,
   GetLocalStateRequestSchema,
   GetLocalStateResponse,
@@ -50,6 +53,9 @@ import {
   GetSettingsPropertyRequest,
   GetSettingsPropertyRequestSchema,
   GetSettingsPropertyResponse,
+  GetUsageLimitsRequest,
+  GetUsageLimitsRequestSchema,
+  GetUsageLimitsResponse,
   HistoryQueryRequest,
   HistoryQueryRequestSchema,
   HistoryQueryResponse,
@@ -676,6 +682,64 @@ export async function sendListAvailableProfilesRequest(
             reject(
               Error(
                 `Invalid response '${response?.case}' for 'ListAvailableProfilesRequest'`,
+              ),
+            );
+        }
+      },
+    );
+  });
+}
+
+export async function sendGetUsageLimitsRequest(
+  request: Omit<GetUsageLimitsRequest, "$typeName" | "$unknown">,
+): Promise<GetUsageLimitsResponse> {
+  return new Promise((resolve, reject) => {
+    sendMessage(
+      {
+        case: "getUsageLimitsRequest",
+        value: create(GetUsageLimitsRequestSchema, request),
+      },
+      (response) => {
+        switch (response?.case) {
+          case "getUsageLimitsResponse":
+            resolve(response.value);
+            break;
+          case "error":
+            reject(Error(response.value));
+            break;
+          default:
+            reject(
+              Error(
+                `Invalid response '${response?.case}' for 'GetUsageLimitsRequest'`,
+              ),
+            );
+        }
+      },
+    );
+  });
+}
+
+export async function sendGenerateConsoleUrlRequest(
+  request: Omit<GenerateConsoleUrlRequest, "$typeName" | "$unknown">,
+): Promise<GenerateConsoleUrlResponse> {
+  return new Promise((resolve, reject) => {
+    sendMessage(
+      {
+        case: "generateConsoleUrlRequest",
+        value: create(GenerateConsoleUrlRequestSchema, request),
+      },
+      (response) => {
+        switch (response?.case) {
+          case "generateConsoleUrlResponse":
+            resolve(response.value);
+            break;
+          case "error":
+            reject(Error(response.value));
+            break;
+          default:
+            reject(
+              Error(
+                `Invalid response '${response?.case}' for 'GenerateConsoleUrlRequest'`,
               ),
             );
         }

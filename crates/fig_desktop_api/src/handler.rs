@@ -176,9 +176,11 @@ where
                 CreateDirectoryRequest,
                 DestinationOfSymbolicLinkRequest,
                 DragWindowRequest,
+                GenerateConsoleUrlRequest,
                 GetLocalStateRequest,
                 GetPlatformInfoRequest,
                 GetSettingsPropertyRequest,
+                GetUsageLimitsRequest,
                 HistoryQueryRequest,
                 InsertTextRequest,
                 InstallRequest,
@@ -203,6 +205,7 @@ where
             };
             use requests::*;
 
+            print!("submessage: {:?}", submessage);
             match submessage {
                 // figterm
                 InsertTextRequest(request) => event_handler.insert_text(request!(request)).await,
@@ -269,6 +272,8 @@ where
                 UserLogoutRequest(request) => event_handler.user_logout(request!(request)).await,
                 ListAvailableProfilesRequest(request) => profile::list_available_profiles(request).await,
                 SetProfileRequest(request) => profile::set_profile(request).await,
+                GetUsageLimitsRequest(request) => subscription::get_usage_limits(request).await,
+                GenerateConsoleUrlRequest(request) => subscription::generate_console_url(request).await,
             }
         },
         None => {

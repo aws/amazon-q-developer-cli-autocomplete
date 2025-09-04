@@ -19,6 +19,7 @@ import * as Types from "./types.js";
 import * as User from "./user.js";
 import * as WindowPosition from "./position.js";
 import * as Profile from "./profile.js";
+import * as Subscription from "./subscription.js";
 
 const lib = {
   Auth,
@@ -41,6 +42,7 @@ const lib = {
   User,
   WindowPosition,
   Profile,
+  Subscription,
 };
 
 export {
@@ -65,6 +67,7 @@ export {
   User,
   WindowPosition,
   Profile,
+  Subscription,
 };
 
 declare global {

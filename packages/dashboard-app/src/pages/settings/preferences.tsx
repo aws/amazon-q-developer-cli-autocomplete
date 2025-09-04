@@ -3,7 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@/components/ui/link";
 import settings from "@/data/preferences";
 import { useAuth } from "@/hooks/store/useAuth";
-import { Native, User } from "@aws/amazon-q-developer-cli-api-bindings";
+import {
+  Native,
+  User,
+  Subscription,
+} from "@aws/amazon-q-developer-cli-api-bindings";
 import { State, Profile } from "@aws/amazon-q-developer-cli-api-bindings";
 import { useEffect, useState } from "react";
 import {
@@ -14,13 +18,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-
+import {
+  BUILDER_ID_DEFAULT_CONSOLE_URL,
+  IAM_PRICING_DOCS_URL,
+} from "@/lib/constants";
 type Profile = { profileName: string; arn: string };
 
 export default function Page() {
   const auth = useAuth();
   const [profile, setProfile] = useState<Profile | undefined>(undefined);
   const [profiles, setProfiles] = useState<Profile[] | undefined>(undefined);
+  const [usageLimits, setUsageLimits] =
+    useState<Subscription.UsageLimits | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(true);
+  const [generatingUrl, setGeneratingUrl] = useState(false);
 
   useEffect(() => {
     Profile.listAvailableProfiles()
@@ -45,10 +56,36 @@ export default function Page() {
     });
   }, []);
 
+  useEffect(() => {
+    Subscription.getUsageLimits()
+      .then(setUsageLimits)
+      .catch(console.error)
+      .finally(() => setLoadingUsage(false));
+  }, []);
+
   const onProfileChange = (profile: Profile | undefined) => {
     setProfile(profile);
     if (profile) {
       Profile.setProfile(profile.profileName, profile.arn);
+    }
+  };
+
+  const handleSubscriptionClick = async () => {
+    if (generatingUrl) return;
+
+    setGeneratingUrl(true);
+    try {
+      const url = await Subscription.generateConsoleUrl();
+      await Native.open(url);
+    } catch (error) {
+      console.error("Failed to generate console URL:", error);
+      const defaultUrl =
+        auth.authKind === "BuilderId"
+          ? BUILDER_ID_DEFAULT_CONSOLE_URL
+          : IAM_PRICING_DOCS_URL;
+      await Native.open(defaultUrl);
+    } finally {
+      setGeneratingUrl(false);
     }
   };
 
@@ -151,6 +188,66 @@ export default function Page() {
                 </div>
               </>
             )}
+
+            {/* Subscription Section */}
+            <div className="py-4">
+              <h3 className="font-medium leading-none mb-2">Subscription</h3>
+              {loadingUsage ? (
+                <Skeleton className="w-40 h-10" />
+              ) : usageLimits ? (
+                <>
+                  <p className="text-sm mb-2">
+                    {usageLimits.subscriptionTier === "pro"
+                      ? "Pro tier"
+                      : usageLimits.subscriptionTier === "proPlus"
+                        ? "Pro Plus tier"
+                        : "Free tier"}
+                  </p>
+                  <Button
+                    variant="outline"
+                    onClick={handleSubscriptionClick}
+                    disabled={generatingUrl}
+                  >
+                    {generatingUrl
+                      ? "Loading..."
+                      : auth.authKind === "BuilderId"
+                        ? "Upgrade Subscription"
+                        : "Learn More"}
+                  </Button>
+                </>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Unable to load subscription status
+                </p>
+              )}
+            </div>
+
+            {/* Usage Section */}
+            <div className="py-4">
+              <h3 className="font-medium leading-none mb-2">Usage</h3>
+              {loadingUsage ? (
+                <div className="flex flex-col gap-1">
+                  <Skeleton className="w-60 h-4" />
+                  <Skeleton className="w-48 h-4" />
+                  <Skeleton className="w-52 h-4" />
+                </div>
+              ) : usageLimits ? (
+                <div className="text-sm space-y-1">
+                  <p>{`${usageLimits.currentUsage}/${usageLimits.usageLimit} queries used`}</p>
+                  <p>
+                    {usageLimits.overageEnabled
+                      ? `$${usageLimits.overageCharges.toFixed(2)} incurred in overages`
+                      : "Overage disabled by admin"}
+                  </p>
+                  <p>{`Limits reset on ${usageLimits.resetDate}`}</p>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  Usage information unavailable
+                </p>
+              )}
+            </div>
+
             <div className="pt-2">
               <Button
                 variant="outline"

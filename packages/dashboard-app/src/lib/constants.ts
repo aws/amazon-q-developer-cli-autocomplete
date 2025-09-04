@@ -24,3 +24,9 @@ export const Q_MIGRATION_URL =
 export const AMZN_START_URL = "https://amzn.awsapps.com/start";
 
 export const NOTIFICATIONS_SEEN_STATE_KEY = "dashboard.notificationsSeen";
+
+export const BUILDER_ID_DEFAULT_CONSOLE_URL =
+  "https://us-east-1.console.aws.amazon.com/amazonq/developer/home#/subscriptions";
+
+export const IAM_PRICING_DOCS_URL =
+  "https://docs.aws.amazon.com/console/amazonq/subscriptions";
