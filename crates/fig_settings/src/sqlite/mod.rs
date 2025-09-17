@@ -215,15 +215,16 @@ impl Db {
         let conn = self.pool.get()?;
         let mut stmt = conn.prepare(&format!("SELECT key, value FROM {table}"))?;
         let rows = stmt.query_map([], |row| {
-            let key = row.get(0)?;
-            let value = row.get(1)?;
+            let key: String = row.get(0)?;
+            let value: serde_json::Value = row.get(1)?;
             Ok((key, value))
         })?;
 
         let mut map = Map::new();
         for row in rows {
-            let (key, value) = row?;
-            map.insert(key, value);
+            if let Ok((key, value)) = row {
+                map.insert(key, value);
+            }
         }
 
         Ok(map)
