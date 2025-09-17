@@ -221,10 +221,8 @@ impl Db {
         })?;
 
         let mut map = Map::new();
-        for row in rows {
-            if let Ok((key, value)) = row {
-                map.insert(key, value);
-            }
+        for (key, value) in rows.flatten() {
+            map.insert(key, value);
         }
 
         Ok(map)
