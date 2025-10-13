@@ -76,6 +76,42 @@ pub struct ApiClient {
 }
 
 impl ApiClient {
+    /// Get the profile ARN, checking for q_dev_profile.json file first
+    async fn get_profile_arn(&self) -> Option<String> {
+        // Check for q_dev_profile.json file under ~/.aws/amazon_q
+        let q_dev_profile_path = dirs::home_dir()
+            .map(|home| home.join(".aws/amazon_q/q_dev_profile.json"))?;
+        
+        if q_dev_profile_path.exists() {
+            match std::fs::read_to_string(q_dev_profile_path) {
+                Ok(content) => {
+                    match serde_json::from_str::<serde_json::Value>(&content) {
+                        Ok(profile_data) => {
+                            if let Some(profile_arn) = profile_data.get("q_dev_profile_arn").and_then(|v| v.as_str()) {
+                                debug!("Using profile ARN from q_dev_profile.json: {}", profile_arn);
+                                return Some(profile_arn.to_string());
+                            } else if let Some(profile_arn) = profile_data.get("profile_arn").and_then(|v| v.as_str()) {
+                                debug!("Using profile ARN from q_dev_profile.json: {}", profile_arn);
+                                return Some(profile_arn.to_string());
+                            } else {
+                                debug!("No profileArn or profile_arn field found in q_dev_profile.json");
+                            }
+                        },
+                        Err(e) => {
+                            debug!("Failed to parse q_dev_profile.json: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    debug!("Failed to read q_dev_profile.json: {}", e);
+                }
+            }
+        }
+        
+        // Fall back to the existing profile from database
+        self.profile.as_ref().map(|p| p.arn.clone())
+    }
+
     pub async fn new(
         env: &Env,
         fs: &Fs,
@@ -201,7 +237,7 @@ impl ApiClient {
                 true => OptOutPreference::OptIn,
                 false => OptOutPreference::OptOut,
             })
-            .set_profile_arn(self.profile.as_ref().map(|p| p.arn.clone()))
+            .set_profile_arn(self.get_profile_arn().await)
             .set_model_id(model)
             .send()
             .await?;
@@ -279,7 +315,7 @@ impl ApiClient {
             match client
                 .generate_assistant_response()
                 .conversation_state(conversation_state)
-                .set_profile_arn(self.profile.as_ref().map(|p| p.arn.clone()))
+                .set_profile_arn(self.get_profile_arn().await)
                 .send()
                 .await
             {

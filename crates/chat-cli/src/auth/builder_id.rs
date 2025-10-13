@@ -303,6 +303,43 @@ impl BuilderIdToken {
 
     /// Load the token from the keychain, refresh the token if it is expired and return it
     pub async fn load(database: &Database) -> Result<Option<Self>, AuthError> {
+        // Check for Q_IDC_USER_APPLICATION first
+        if std::env::var("Q_IDC_USER_APPLICATION").is_ok_and(|v| !v.is_empty()) {
+            debug!("Q_IDC_USER_APPLICATION detected, continuing to find access token");
+            // Continue with token loading logic for IDC user application case
+        }
+        
+        // First check if there are IDC tokens and extract the actual token
+            if has_idc_tokens().await {
+                debug!("IDC tokens detected, attempting to load token");
+                
+                let home_dir = match dirs::home_dir() {
+                    Some(dir) => dir,
+                    None => {
+                        debug!("Unable to determine home directory for IDC token");
+                        return Err(AuthError::NoToken.into());
+                    }
+                };
+
+                let token_file_path = home_dir.join(".aws").join("sso").join("idc_access_token.json");
+                
+                // Directly read the known token file
+                if let Ok(content) = std::fs::read_to_string(&token_file_path) {
+                    if let Ok(token_data) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(access_token) = token_data.get("idc_access_token").and_then(|v| v.as_str()) {
+                            debug!("Found IDC access token from idc_access_token.json");
+                            // Create a BuilderIdToken from the IDC token
+                            let token = BuilderIdToken {
+                                access_token: access_token.to_string().into(),
+                                expires_at: time::OffsetDateTime::now_utc() + time::Duration::minutes(5),
+                                region: Some(OIDC_BUILDER_ID_REGION.to_string())
+                            };
+                            return Ok(Some(token));
+                        }
+                    }
+                }
+                debug!("Could not read or parse idc_access_token.json");
+            }
         trace!("loading builder id token from the secret store");
         match database.get_secret(Self::SECRET_KEY).await {
             Ok(Some(secret)) => {
@@ -535,6 +572,13 @@ pub async fn is_logged_in(database: &mut Database) -> bool {
         return true;
     }
 
+    // First check if there are IDC tokens available
+    if has_idc_tokens().await {
+        debug!("logged in using IDC tokens");
+        return true;
+    }
+
+    // Fall back to checking existing BuilderIdToken
     match BuilderIdToken::load(database).await {
         Ok(Some(_)) => true,
         Ok(None) => {
@@ -587,13 +631,21 @@ impl ResolveIdentity for BearerResolver {
         _config_bag: &'a ConfigBag,
     ) -> IdentityFuture<'a> {
         IdentityFuture::new_boxed(Box::pin(async {
+            
+            // Fall back to database lookup for Builder ID tokens
             let database = Database::new().await?;
             match BuilderIdToken::load(&database).await? {
-                Some(token) => Ok(Identity::new(
-                    Token::new(token.access_token.0.clone(), Some(token.expires_at.into())),
-                    Some(token.expires_at.into()),
-                )),
-                None => Err(AuthError::NoToken.into()),
+                Some(token) => {
+                    debug!("Using Builder ID token from database");
+                    Ok(Identity::new(
+                        Token::new(token.access_token.0.clone(), Some(token.expires_at.into())),
+                        Some(token.expires_at.into()),
+                    ))
+                },
+                None => {
+                    debug!("secret stored in the database was empty");
+                    Err(AuthError::NoToken.into())
+                }
             }
         }))
     }
@@ -603,11 +655,63 @@ pub async fn is_idc_user(database: &Database) -> Result<bool> {
     if cfg!(test) {
         return Ok(false);
     }
+    
+    // First check if there are IDC tokens in ~/.aws/sso/
+    if has_idc_tokens().await {
+        debug!("Found IDC tokens in ~/.aws/sso/");
+        return Ok(true);
+    }
+    
+    // Fall back to checking existing BuilderIdToken
     if let Ok(Some(token)) = BuilderIdToken::load(database).await {
         Ok(token.token_type() == TokenType::IamIdentityCenter)
     } else {
         Err(eyre!("No auth token found - is the user signed in?"))
     }
+}
+
+/// Check if there are IDC tokens in the AWS SSO cache directory
+async fn has_idc_tokens() -> bool {
+    let home_dir = match dirs::home_dir() {
+        Some(dir) => dir,
+        None => {
+            debug!("Unable to determine home directory");
+            return false;
+        }
+    };
+    
+    let sso_cache_dir = home_dir.join(".aws").join("sso").join("cache");
+    
+    if !sso_cache_dir.exists() {
+        debug!("AWS SSO cache directory does not exist: {:?}", sso_cache_dir);
+        return false;
+    }
+    
+    let entries = match std::fs::read_dir(&sso_cache_dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            debug!("Failed to read SSO directory: {}", e);
+            return false;
+        }
+    };
+    
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        
+        let path = entry.path();
+        
+        // Check if it's a JSON file (IDC tokens are stored as JSON)
+        if path.extension().and_then(|s| s.to_str()) == Some("json") {
+            debug!("Found IDC token file: {:?}", path);
+            return true;
+        }
+    };
+    
+    debug!("No IDC token files found in AWS SSO Directory");
+    false
 }
 
 #[cfg(test)]

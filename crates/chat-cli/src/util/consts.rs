@@ -67,7 +67,11 @@ pub mod env_var {
         Q_BUNDLE_METADATA_PATH = "Q_BUNDLE_METADATA_PATH",
 
         /// Identifier for the client application or service using the chat-cli
-        Q_CLI_CLIENT_APPLICATION = "Q_CLI_CLIENT_APPLICATION"
+        Q_CLI_CLIENT_APPLICATION = "Q_CLI_CLIENT_APPLICATION",
+
+        /// Identifier for services using IDC tokens for Authentication
+        Q_IDC_USER_APPLICATION = "Q_IDC_USER_APPLICATION"
+
     }
 }
 
