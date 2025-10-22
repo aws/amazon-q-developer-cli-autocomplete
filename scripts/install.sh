@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -eu
 
 # =============================================================================
 # Q CLI Installation Script
@@ -32,7 +32,7 @@ log() {
 }
 
 success() {
-    echo "✅ $1" >&2
+    echo "🎉 $1" >&2
 }
 
 error() {
@@ -107,7 +107,7 @@ check_dependencies() {
 # Download function that works with both curl and wget
 download_file() {
     local url="$1"
-    local output="$2"
+    local output="${2:-}"
     
     if command -v curl >/dev/null 2>&1; then
         if [[ -n "$output" ]]; then
@@ -164,8 +164,29 @@ detect_platform() {
         arm64|aarch64) arch="aarch64" ;;
         *) error "Unsupported architecture: $(uname -m)" ;;
     esac
+}
 
-    log "Detected platform: $os-$arch"
+# Minimum required glibc version
+GLIBC_MIN_MAJOR=2
+GLIBC_MIN_MINOR=34
+
+# Check if a glibc version meets the minimum requirement
+is_glibc_version_sufficient() {
+    local version="$1"
+    local major minor
+
+    IFS='.' read -r major minor <<EOF
+$version
+EOF
+    if [[ -z "$minor" ]]; then
+        minor=0
+    fi
+
+    if (( major > GLIBC_MIN_MAJOR || (major == GLIBC_MIN_MAJOR && minor >= GLIBC_MIN_MINOR) )); then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # Check glibc version for Linux
@@ -175,94 +196,103 @@ check_glibc() {
     fi
     
     local glibc_version
-    if command -v ldd >/dev/null 2>&1; then
-        glibc_version=$(ldd --version 2>/dev/null | head -1 | grep -o '[0-9]\+\.[0-9]\+' | head -1)
-        log "Detected glibc version: $glibc_version"
-        
-        # Check if we need musl version (glibc < 2.34)
-        if [[ -n "$glibc_version" ]]; then
-            local major minor
-            IFS='.' read -r major minor <<< "$glibc_version"
-            if (( major < 2 || (major == 2 && minor < 34) )); then
-                use_musl=true
-                log "Using musl version for older glibc"
+
+    # Method 1: Try common libc.so.6 locations
+    for LIBC_PATH in /lib64/libc.so.6 /lib/libc.so.6 /usr/lib/x86_64-linux-gnu/libc.so.6 \
+        /lib/aarch64-linux-gnu/libc.so.6; do
+        if [[ -f "$LIBC_PATH" ]]; then
+            glibc_version=$("$LIBC_PATH" | sed -n 's/^GNU C Library (.*) stable release version \([0-9]*\)\.\([0-9]*\).*$/\1.\2/p')
+            if [[ -n "$glibc_version" ]]; then
+                if is_glibc_version_sufficient "$glibc_version"; then
+                    return 0
+                else
+                    use_musl=true
+                    return 0
+                fi
             fi
         fi
-    else
-        # Check for musl directly
-        if [[ -f /lib/libc.musl-x86_64.so.1 ]] || [[ -f /lib/libc.musl-aarch64.so.1 ]] || \
-           ldd /bin/ls 2>&1 | grep -q musl; then
-            use_musl=true
-            log "Detected musl system"
+    done
+
+    # Method 2: Try ldd --version as a more reliable alternative
+    if command -v ldd >/dev/null 2>&1; then
+        glibc_version=$(ldd --version 2>/dev/null | head -n 1 | grep -o '[0-9]\+\.[0-9]\+' | head -n 1)
+        if [[ -n "$glibc_version" ]]; then
+            if is_glibc_version_sufficient "$glibc_version"; then
+                return 0
+            else
+                use_musl=true
+                return 0
+            fi
         fi
     fi
+
+    # Method 3: Try getconf as a fallback
+    if command -v getconf >/dev/null 2>&1; then
+        glibc_version=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
+        if [[ -n "$glibc_version" ]]; then
+            if is_glibc_version_sufficient "$glibc_version"; then
+                return 0
+            else
+                use_musl=true
+                return 0
+            fi
+        fi
+    fi
+
+    # Check for musl directly
+    if [[ -f /lib/libc.musl-x86_64.so.1 ]] || [[ -f /lib/libc.musl-aarch64.so.1 ]] || \
+       ldd /bin/ls 2>&1 | grep -q musl; then
+        use_musl=true
+        return 0
+    fi
+
+    use_musl=true
+    return 0
 }
 
 # =============================================================================
 # Download and Installation Functions
 # =============================================================================
 
-# Get download URL and filename based on platform
-get_download_info() {
-    if [[ "$os" == "darwin" ]]; then
-        filename="Amazon Q.dmg"
-        download_url="${BASE_URL}/latest/Amazon%20Q.dmg"
-    else
-        # Linux
-        if [[ "$use_musl" == "true" ]]; then
-            filename="q-${arch}-linux-musl.zip"
-        else
-            filename="q-${arch}-linux.zip"
-        fi
-        download_url="${BASE_URL}/latest/$filename"
-    fi
-    
-    log "Download URL: $download_url"
-    log "Filename: $filename"
-}
-
 # Download and verify file
 download_and_verify() {
+    local download_url="$1"
+    local filename="$2"
+
     mkdir -p "$DOWNLOAD_DIR"
-    
+
     local file_path="$DOWNLOAD_DIR/$filename"
     downloaded_files+=("$file_path")
-    
-    log "Downloading $CLI_NAME to $file_path..."
+
+    log "Downloading $CLI_NAME..."
     download_file "$download_url" "$file_path"
-    
-    log "Downloading index for verification..."
+
+    log "Verifying download..."
     local index_json
     index_json=$(download_file "$INDEX_URL")
-    
-    log "Verifying checksum..."
+
     local expected_checksum
     expected_checksum=$(get_checksum "$index_json" "$filename")
-    
+
     if [[ -z "$expected_checksum" ]] || [[ ! "$expected_checksum" =~ ^[a-f0-9]{64}$ ]]; then
         error "Could not find valid checksum for $filename"
     fi
-    
+
     local actual_checksum
     if [[ "$os" == "darwin" ]]; then
         actual_checksum=$(shasum -a 256 "$file_path" | cut -d' ' -f1)
     else
         actual_checksum=$(sha256sum "$file_path" | cut -d' ' -f1)
     fi
-    
+
     if [[ "$actual_checksum" != "$expected_checksum" ]]; then
         rm -f "$file_path"
         error "Checksum verification failed. Expected: $expected_checksum, Got: $actual_checksum"
     fi
-    
-    success "Checksum verified successfully"
-    
-    echo "$file_path"
 }
 
 # Install on macOS
 install_macos() {
-    log "Mounting DMG..."
     local dmg_path="$1"
     if [[ ! -f "$dmg_path" ]]; then
         error "DMG file not found: $dmg_path"
@@ -276,7 +306,6 @@ install_macos() {
     
     # Find the .app bundle
     local app_bundle
-    echo "Mount Point: $mount_path"
     app_bundle=$(find "$mount_path" -name "*.app" -maxdepth 1 -type d | head -1)
     
     if [[ -z "$app_bundle" ]]; then
@@ -287,8 +316,6 @@ install_macos() {
     local app_name
     app_name=$(basename "$app_bundle")
     
-    log "Installing $app_name to $MACOS_APP_DIR..."
-    
     # Check if app already exists and warn user
     if [[ -d "$MACOS_APP_DIR/$app_name" ]]; then
         warning "Existing $app_name found in $MACOS_APP_DIR"
@@ -298,18 +325,14 @@ install_macos() {
             hdiutil detach "$mount_path" -quiet
             error "Installation cancelled by user"
         fi
-        log "Removing existing $app_name..."
+        log "Replacing existing $app_name..."
         rm -rf "$MACOS_APP_DIR/$app_name"
     fi
     
     cp -R "$app_bundle" "$MACOS_APP_DIR/"
-
-    success "$CLI_NAME installed successfully to $MACOS_APP_DIR"
     
-    log "Unmounting DMG..."
     hdiutil detach "$mount_path" -quiet
     
-    log "Starting $app_name..."
     open "$MACOS_APP_DIR/$app_name"
 }
 
@@ -354,21 +377,23 @@ install_linux() {
 
 # Cleanup function - only removes files/dirs we created
 cleanup() {
-    log "Cleaning up temporary files..."
-    
     # Remove downloaded files
-    for file in "${downloaded_files[@]}"; do
-        if [[ -f "$file" ]]; then
-            rm -f "$file"
-        fi
-    done
+    if [[ ${#downloaded_files[@]} -gt 0 ]]; then
+        for file in "${downloaded_files[@]}"; do
+            if [[ -f "$file" ]]; then
+                rm -f "$file"
+            fi
+        done
+    fi
     
     # Remove temporary directories we created
-    for dir in "${temp_dirs[@]}"; do
-        if [[ -d "$dir" ]]; then
-            rm -rf "$dir"
-        fi
-    done
+    if [[ ${#temp_dirs[@]} -gt 0 ]]; then
+        for dir in "${temp_dirs[@]}"; do
+            if [[ -d "$dir" ]]; then
+                rm -rf "$dir"
+            fi
+        done
+    fi
 }
 
 # =============================================================================
@@ -376,8 +401,7 @@ cleanup() {
 # =============================================================================
 
 main() {
-    echo "🚀 Installing $CLI_NAME..."
-    echo
+    log "Installing $CLI_NAME..."
     
     # Parse command line arguments
     parse_args "$@"
@@ -391,11 +415,23 @@ main() {
     check_glibc
     
     # Get download information
-    get_download_info
+    local download_url filename
+    if [[ "$os" == "darwin" ]]; then
+        filename="Amazon Q.dmg"
+        download_url="${BASE_URL}/latest/Amazon%20Q.dmg"
+    else
+        # Linux
+        if [[ "$use_musl" == "true" ]]; then
+            filename="q-${arch}-linux-musl.zip"
+        else
+            filename="q-${arch}-linux.zip"
+        fi
+        download_url="${BASE_URL}/latest/$filename"
+    fi
     
     # Download and verify
-    download_and_verify
-    downloaded_file="$DOWNLOAD_DIR/$filename"
+    download_and_verify "$download_url" "$filename"
+    local downloaded_file="$DOWNLOAD_DIR/$filename"
 
     # Install based on platform
     if [[ "$os" == "darwin" ]]; then
@@ -406,7 +442,7 @@ main() {
     
     
     echo
-    success "🎉 $CLI_NAME installation completed successfully!"
+    success "$CLI_NAME installation completed successfully!"
     echo
     echo "Next steps:"
     echo "1. Run: $COMMAND_NAME --help to get started"
