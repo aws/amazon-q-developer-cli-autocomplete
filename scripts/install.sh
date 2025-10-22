@@ -11,7 +11,7 @@ BINARY_NAME="q"
 CLI_NAME="Q CLI"
 COMMAND_NAME="q"
 BASE_URL="https://desktop-release.q.us-east-1.amazonaws.com"
-INDEX_URL="${BASE_URL}/index.json"
+MANIFEST_URL="${BASE_URL}/latest/manifest.json"
 
 # Installation directories
 MACOS_APP_DIR="/Applications"
@@ -126,25 +126,28 @@ download_file() {
     fi
 }
 
-# Simple JSON parser for when jq is not available
-parse_json_value() {
-    local json="$1"
-    local key="$2"
-    
-    # Remove whitespace and extract value
-    echo "$json" | sed -n "s/.*\"$key\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -1
-}
-
-# Get checksum from index.json
+# Get checksum from manifest.json
 get_checksum() {
     local json="$1"
     local filename="$2"
     
     if command -v jq >/dev/null 2>&1; then
-        # Use jq to find the package with matching download filename from the latest version
-        echo "$json" | jq -r ".versions[-1].packages[] | select(.download | endswith(\"$filename\")) | .sha256 // empty"
+        # Use jq to find the package with matching download filename
+        echo "$json" | jq -r ".packages[] | select(.download | endswith(\"$filename\")) | .sha256 // empty"
     else
-        error "jq is required for checksum verification. Please install jq and try again."
+        # Fallback: parse JSON manually
+        # Normalize to single line
+        local package_obj
+        package_obj=$(echo "$json" | tr -d '\n\r' | grep -o '{[^}]*"download"[^}]*'"$filename"'[^}]*}')
+
+        if [[ -n "$package_obj" ]]; then
+            if [[ $package_obj =~ \"sha256\"[[:space:]]*:[[:space:]]*\"([a-f0-9]{64})\" ]]; then
+                echo "${BASH_REMATCH[1]}"
+                return 0
+            fi
+        fi
+
+        return 1
     fi
 }
 
@@ -268,11 +271,11 @@ download_and_verify() {
     download_file "$download_url" "$file_path"
 
     log "Verifying download..."
-    local index_json
-    index_json=$(download_file "$INDEX_URL")
+    local manifest_json
+    manifest_json=$(download_file "$MANIFEST_URL")
 
     local expected_checksum
-    expected_checksum=$(get_checksum "$index_json" "$filename")
+    expected_checksum=$(get_checksum "$manifest_json" "$filename")
 
     if [[ -z "$expected_checksum" ]] || [[ ! "$expected_checksum" =~ ^[a-f0-9]{64}$ ]]; then
         error "Could not find valid checksum for $filename"
@@ -333,7 +336,9 @@ install_macos() {
     
     hdiutil detach "$mount_path" -quiet
     
-    open "$MACOS_APP_DIR/$app_name"
+    mkdir -p "$HOME/.local/bin"
+    local macos_bin="$MACOS_APP_DIR/$app_name/Contents/MacOS"
+    cp -f "$macos_bin/q" "$macos_bin/qchat" "$macos_bin/qterm" "$HOME/.local/bin/"
 }
 
 # Install on Linux
@@ -357,23 +362,7 @@ install_linux() {
     log "Running installer..."
     chmod +x "$install_script"
     "$install_script"
-    
-    success "$CLI_NAME installed successfully"
 }
-
-# # Install shell integrations
-# install_integrations() {
-#     log "Installing shell integrations..."
-    
-#     # Check if q command is available
-#     if command -v "$COMMAND_NAME" >/dev/null 2>&1; then
-#         "$COMMAND_NAME" integrations install all || warning "Failed to install shell integrations"
-#         success "Shell integrations installed"
-#     else
-#         warning "Could not find $COMMAND_NAME command. You may need to restart your shell or add it to your PATH."
-#         echo "After restarting your shell, run: $COMMAND_NAME integrations install"
-#     fi
-# }
 
 # Cleanup function - only removes files/dirs we created
 cleanup() {
