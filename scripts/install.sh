@@ -294,6 +294,26 @@ download_and_verify() {
     fi
 }
 
+# Create symlink, overwriting if it exists and is invalid
+create_symlink() {
+    local src="$1"
+    local dst="$2"
+
+    # Check if link already exists and points to the right place
+    if [[ -L "$dst" ]]; then
+        local current_target
+        current_target=$(readlink "$dst")
+        if [[ "$current_target" == "$src" ]]; then
+            return 0
+        fi
+        rm -f "$dst"
+    elif [[ -e "$dst" ]]; then
+        rm -f "$dst"
+    fi
+
+    ln -s "$src" "$dst"
+}
+
 # Install on macOS
 install_macos() {
     local dmg_path="$1"
@@ -338,7 +358,10 @@ install_macos() {
     
     mkdir -p "$HOME/.local/bin"
     local macos_bin="$MACOS_APP_DIR/$app_name/Contents/MacOS"
-    cp -f "$macos_bin/q" "$macos_bin/qchat" "$macos_bin/qterm" "$HOME/.local/bin/"
+
+    create_symlink "$macos_bin/q" "$HOME/.local/bin/q"
+    create_symlink "$macos_bin/qchat" "$HOME/.local/bin/qchat"
+    create_symlink "$macos_bin/qterm" "$HOME/.local/bin/qterm"
 }
 
 # Install on Linux
