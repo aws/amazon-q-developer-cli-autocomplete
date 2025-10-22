@@ -18,25 +18,8 @@ MACOS_APP_DIR="/Applications"
 LINUX_INSTALL_DIR="$HOME/.local/bin"
 DOWNLOAD_DIR="$HOME/.${BINARY_NAME}/downloads"
 
-# GPG Configuration
-GPG_KEY_ID="50DC7A8DC24C5667"
-GPG_PUBLIC_KEY="-----BEGIN PGP PUBLIC KEY BLOCK-----
- 
-mDMEZig60RYJKwYBBAHaRw8BAQdAy/+G05U5/EOA72WlcD4WkYn5SInri8pc4Z6D
-BKNNGOm0JEFtYXpvbiBRIENMSSBUZWFtIDxxLWNsaUBhbWF6b24uY29tPoiZBBMW
-CgBBFiEEmvYEF+gnQskUPgPsUNx6jcJMVmcFAmYoOtECGwMFCQPCZwAFCwkIBwIC
-IgIGFQoJCAsCBBYCAwECHgcCF4AACgkQUNx6jcJMVmef5QD/QWWEGG/cOnbDnp68
-SJXuFkwiNwlH2rPw9ZRIQMnfAS0A/0V6ZsGB4kOylBfc7CNfzRFGtovdBBgHqA6P
-zQ/PNscGuDgEZig60RIKKwYBBAGXVQEFAQEHQC4qleONMBCq3+wJwbZSr0vbuRba
-D1xr4wUPn4Avn4AnAwEIB4h+BBgWCgAmFiEEmvYEF+gnQskUPgPsUNx6jcJMVmcF
-AmYoOtECGwwFCQPCZwAACgkQUNx6jcJMVmchMgEA6l3RveCM0YHAGQaSFMkguoAo
-vK6FgOkDawgP0NPIP2oA/jIAO4gsAntuQgMOsPunEdDeji2t+AhV02+DQIsXZpoB
-=f8yY
------END PGP PUBLIC KEY BLOCK-----"
-
 # Global variables
 use_musl=false
-skip_gpg=false
 downloaded_files=()
 temp_dirs=()
 
@@ -65,10 +48,6 @@ warning() {
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --skip-gpg)
-                skip_gpg=true
-                shift
-                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -87,15 +66,13 @@ $CLI_NAME Installation Script
 Usage: $0 [OPTIONS]
 
 Options:
-    --skip-gpg    Skip GPG signature verification (not recommended)
     --help, -h    Show this help message
 
 This script will:
 1. Detect your platform and architecture
 2. Download the appropriate $CLI_NAME package
-3. Verify checksums and GPG signatures (if available)
+3. Verify checksums
 4. Install $CLI_NAME on your system
-5. Set up shell integrations
 
 For more information, visit: https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-installing.html
 EOF
@@ -120,13 +97,6 @@ check_dependencies() {
         missing_deps+=("shasum")
     elif [[ "$os" == "linux" ]] && ! command -v sha256sum >/dev/null 2>&1; then
         missing_deps+=("sha256sum")
-    fi
-    
-    # Check for GPG (optional)
-    if [[ "$skip_gpg" == "false" ]] && ! command -v gpg >/dev/null 2>&1; then
-        warning "GPG not found. Signature verification will be skipped."
-        warning "Install gpg for enhanced security verification."
-        skip_gpg=true
     fi
     
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
@@ -175,61 +145,6 @@ get_checksum() {
         echo "$json" | jq -r ".versions[-1].packages[] | select(.download | endswith(\"$filename\")) | .sha256 // empty"
     else
         error "jq is required for checksum verification. Please install jq and try again."
-    fi
-}
-
-# =============================================================================
-# GPG Functions
-# =============================================================================
-
-setup_gpg() {
-    if [[ "$skip_gpg" == "true" ]]; then
-        return 0
-    fi
-    
-    log "Setting up GPG verification..."
-    
-    # Create download directory if it doesn't exist
-    mkdir -p "$DOWNLOAD_DIR"
-    
-    # Create temporary key file
-    local key_file="$DOWNLOAD_DIR/amazon-q-public.key"
-    echo "$GPG_PUBLIC_KEY" > "$key_file"
-    downloaded_files+=("$key_file")
-    
-    # Import the key
-    if gpg --import "$key_file" >/dev/null 2>&1; then
-        success "Amazon Q public key imported"
-    else
-        warning "Failed to import GPG key. Skipping signature verification."
-        skip_gpg=true
-    fi
-}
-
-verify_gpg_signature() {
-    if [[ "$skip_gpg" == "true" ]]; then
-        return 0
-    fi
-    
-    local file_path="$1"
-    local sig_url="$2"
-    local sig_path="${file_path}.sig"
-    
-    log "Downloading GPG signature..."
-    if ! download_file "$sig_url" "$sig_path"; then
-        warning "Failed to download signature file. Skipping GPG verification."
-        return 0
-    fi
-    
-    downloaded_files+=("$sig_path")
-    
-    log "Verifying GPG signature..."
-    if gpg --verify "$sig_path" "$file_path" >/dev/null 2>&1; then
-        success "GPG signature verified successfully"
-        return 0
-    else
-        warning "GPG signature verification failed"
-        return 1
     fi
 }
 
@@ -292,7 +207,6 @@ get_download_info() {
     if [[ "$os" == "darwin" ]]; then
         filename="Amazon Q.dmg"
         download_url="${BASE_URL}/latest/Amazon%20Q.dmg"
-        sig_url="" # No GPG signature for DMG files
     else
         # Linux
         if [[ "$use_musl" == "true" ]]; then
@@ -301,7 +215,6 @@ get_download_info() {
             filename="q-${arch}-linux.zip"
         fi
         download_url="${BASE_URL}/latest/$filename"
-        sig_url="${download_url}.sig"
     fi
     
     log "Download URL: $download_url"
@@ -343,11 +256,6 @@ download_and_verify() {
     fi
     
     success "Checksum verified successfully"
-    
-    # Verify GPG signature for Linux packages
-    if [[ "$os" == "linux" ]] && [[ -n "$sig_url" ]]; then
-        verify_gpg_signature "$file_path" "$sig_url"
-    fi
     
     echo "$file_path"
 }
@@ -482,11 +390,6 @@ main() {
     check_dependencies
     check_glibc
     
-    # Set up GPG if available
-    if [[ "$os" == "linux" ]]; then
-        setup_gpg
-    fi
-    
     # Get download information
     get_download_info
     
@@ -510,12 +413,6 @@ main() {
     echo "2. Run: $COMMAND_NAME chat to start an interactive session"
     echo "3. Run: $COMMAND_NAME integrations install --help to install terminal integrations"
     echo
-    
-    if [[ "$skip_gpg" == "true" ]]; then
-        warning "GPG signature verification was skipped."
-        echo "   For enhanced security, install gpg and run this script again."
-        echo
-    fi
 }
 
 # Run main function
