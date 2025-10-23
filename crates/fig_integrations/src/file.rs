@@ -134,21 +134,21 @@ mod tests {
             integration.describe()
         );
 
-        // ensure no intgration is marked as not installed
+        // ensure no integration is marked as not installed
         assert!(matches!(
             integration.is_installed().await,
             Err(Error::FileDoesNotExist(_))
         ));
 
-        // ensure the intgration can be installed
+        // ensure the integration can be installed
         integration.install().await.unwrap();
         assert!(integration.is_installed().await.is_ok());
 
-        // ensure the intgration can be installed while already installed
+        // ensure the integration can be installed while already installed
         integration.install().await.unwrap();
         assert!(integration.is_installed().await.is_ok());
 
-        // ensure the intgration can be uninstalled
+        // ensure the integration can be uninstalled
         integration.uninstall().await.unwrap();
         assert!(matches!(
             integration.is_installed().await,

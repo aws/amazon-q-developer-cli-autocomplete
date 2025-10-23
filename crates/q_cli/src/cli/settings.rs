@@ -6,6 +6,7 @@ use clap::{
     Args,
     Parser,
     Subcommand,
+    ValueEnum,
 };
 use eyre::{
     Result,
@@ -35,13 +36,24 @@ use crate::util::desktop::{
 use crate::util::{
     CliContext,
     app_not_running_message,
+    qchat_path,
 };
 
 #[derive(Debug, Subcommand, PartialEq, Eq)]
 pub enum SettingsSubcommands {
     /// Open the settings file
     Open,
-    /// List all the settings
+    /// List settings
+    List {
+        /// Show all available settings
+        #[arg(long)]
+        all: bool,
+        /// Format of the output
+        #[arg(long, short, value_enum, default_value_t)]
+        format: OutputFormat,
+    },
+    /// List configured settings
+    #[command(hide = true)]
     All {
         /// Format of the output
         #[arg(long, short, value_enum, default_value_t)]
@@ -52,7 +64,7 @@ pub enum SettingsSubcommands {
 #[derive(Debug, Args, PartialEq, Eq)]
 #[command(subcommand_negates_reqs = true)]
 #[command(args_conflicts_with_subcommands = true)]
-#[command(group(ArgGroup::new("vals").requires("key").args(&["value", "delete", "format"])))]
+#[command(group(ArgGroup::new("vals").requires("key").args(&["value", "format"])))]
 pub struct SettingsArgs {
     #[command(subcommand)]
     cmd: Option<SettingsSubcommands>,
@@ -60,7 +72,7 @@ pub struct SettingsArgs {
     key: Option<String>,
     /// value
     value: Option<String>,
-    /// Delete a value
+    /// Delete a key (No value needed)
     #[arg(long, short)]
     delete: bool,
     /// Format of the output
@@ -89,25 +101,45 @@ impl SettingsArgs {
                     bail!("The EDITOR environment variable is not set")
                 }
             },
-            Some(SettingsSubcommands::All { format }) => {
-                let settings = fig_settings::OldSettings::load()?.map().clone();
-
-                match format {
-                    OutputFormat::Plain => {
-                        for (key, value) in settings {
-                            println!("{key} = {value}");
-                        }
-                    },
-                    OutputFormat::Json => println!("{}", serde_json::to_string(&settings)?),
-                    OutputFormat::JsonPretty => {
-                        println!("{}", serde_json::to_string_pretty(&settings)?);
-                    },
+            Some(SettingsSubcommands::List { all, format }) => {
+                let mut args = vec!["settings".to_string(), "list".to_string()];
+                if all {
+                    args.push("--all".to_string());
+                }
+                if format != OutputFormat::default() {
+                    args.push("--format".to_string());
+                    args.push(format.to_possible_value().unwrap().get_name().to_string());
                 }
 
-                Ok(ExitCode::SUCCESS)
+                let status = tokio::process::Command::new(qchat_path()?).args(&args).status().await?;
+
+                Ok(if status.success() {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                })
+            },
+            Some(SettingsSubcommands::All { format }) => {
+                let mut args = vec!["settings".to_string(), "list".to_string()];
+
+                if format != OutputFormat::default() {
+                    args.push("--format".to_string());
+                    args.push(format.to_possible_value().unwrap().get_name().to_string());
+                }
+
+                let status = tokio::process::Command::new(qchat_path()?).args(&args).status().await?;
+
+                Ok(if status.success() {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                })
             },
             None => match &self.key {
                 Some(key) => match (&self.value, self.delete) {
+                    (Some(_), true) => Err(eyre::eyre!(
+                        "the argument '--delete' cannot be used with '[VALUE]'\n Usage: q settings --delete {key}"
+                    )),
                     (None, false) => match fig_settings::settings::get_value(key)? {
                         Some(value) => {
                             match self.format {
@@ -161,9 +193,14 @@ impl SettingsArgs {
 
                         Ok(ExitCode::SUCCESS)
                     },
-                    _ => Ok(ExitCode::SUCCESS),
                 },
                 None => {
+                    if self.delete {
+                        return Err(eyre::eyre!(
+                            "the argument '--delete' requires a <KEY>\n Usage: q settings --delete <KEY>"
+                        ));
+                    }
+
                     if manifest::is_minimal() || system_info::is_remote() {
                         Cli::parse_from([CLI_BINARY_NAME, "settings", "--help"]);
                         return Ok(ExitCode::SUCCESS);

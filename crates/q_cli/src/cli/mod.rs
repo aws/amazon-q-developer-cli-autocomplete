@@ -25,7 +25,6 @@ use std::io::{
     Write as _,
     stdout,
 };
-use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anstream::{
@@ -61,7 +60,6 @@ use fig_log::{
 };
 use fig_proto::local::UiElement;
 use fig_settings::sqlite::database;
-use fig_util::directories::home_local_bin;
 use fig_util::{
     CLI_BINARY_NAME,
     PRODUCT_NAME,
@@ -88,6 +86,7 @@ use crate::util::desktop::{
 use crate::util::{
     CliContext,
     assert_logged_in,
+    qchat_path,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -597,37 +596,6 @@ async fn launch_dashboard(help_fallback: bool) -> Result<ExitCode> {
         .context("Failed to open dashboard")?;
 
     Ok(ExitCode::SUCCESS)
-}
-
-#[cfg(target_os = "linux")]
-fn qchat_path() -> Result<PathBuf> {
-    use fig_os_shim::Context;
-    use fig_util::consts::CHAT_BINARY_NAME;
-
-    let ctx = Context::new();
-    if let Some(path) = ctx.process_info().current_pid().exe() {
-        // This is required for deb installations.
-        if path.starts_with("/usr/bin") {
-            return Ok(PathBuf::from("/usr/bin").join(CHAT_BINARY_NAME));
-        }
-    }
-
-    if let Ok(local_bin_path) = home_local_bin() {
-        let local_bin_path = local_bin_path.join(CHAT_BINARY_NAME);
-        if local_bin_path.exists() {
-            return Ok(local_bin_path);
-        }
-    }
-
-    Ok(PathBuf::from(CHAT_BINARY_NAME))
-}
-
-#[cfg(target_os = "macos")]
-fn qchat_path() -> Result<PathBuf> {
-    use fig_util::consts::CHAT_BINARY_NAME;
-    use macos_utils::bundle::get_bundle_path_for_executable;
-
-    Ok(get_bundle_path_for_executable(CHAT_BINARY_NAME).unwrap_or(home_local_bin()?.join(CHAT_BINARY_NAME)))
 }
 
 #[cfg(test)]

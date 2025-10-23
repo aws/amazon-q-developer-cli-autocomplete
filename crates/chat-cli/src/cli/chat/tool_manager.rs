@@ -1000,7 +1000,7 @@ impl ToolManager {
                             Ok(candidates.first().map(|s| s.as_str()).unwrap())
                         } else if candidates.len() > 1 {
                             let mut content = candidates.iter().fold(
-                                "There are multilple tools with given tool name: ".to_string(),
+                                "There are multiple tools with given tool name: ".to_string(),
                                 |mut acc, name| {
                                     acc.push_str(name);
                                     acc.push_str(", ");
