@@ -22,6 +22,8 @@ DOWNLOAD_DIR="$HOME/.${BINARY_NAME}/downloads"
 use_musl=false
 downloaded_files=()
 temp_dirs=()
+mounted_dmg=""
+SUCCESS=false
 
 # =============================================================================
 # Utility Functions
@@ -322,17 +324,17 @@ install_macos() {
     fi
 
     local mount_path
-    mount_path=$(hdiutil attach "$dmg_path" -nobrowse | grep Volumes | cut -f 3)
+    mount_path=$(hdiutil attach "$dmg_path" -nobrowse -readonly | grep Volumes | cut -f 3)
     if [[ -z "$mount_path" ]]; then
         error "Failed to mount DMG"
     fi
+    mounted_dmg="$mount_path"
     
     # Find the .app bundle
     local app_bundle
     app_bundle=$(find "$mount_path" -name "*.app" -maxdepth 1 -type d | head -1)
     
     if [[ -z "$app_bundle" ]]; then
-        hdiutil detach "$mount_path" -quiet
         error "Could not find application bundle in DMG"
     fi
     
@@ -345,7 +347,6 @@ install_macos() {
         echo "Do you want to replace it? (y/N): "
         read -r response
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
-            hdiutil detach "$mount_path" -quiet
             error "Installation cancelled by user"
         fi
         log "Replacing existing $app_name..."
@@ -353,8 +354,6 @@ install_macos() {
     fi
     
     cp -R "$app_bundle" "$MACOS_APP_DIR/"
-    
-    hdiutil detach "$mount_path" -quiet
     
     mkdir -p "$HOME/.local/bin"
     local macos_bin="$MACOS_APP_DIR/$app_name/Contents/MacOS"
@@ -389,6 +388,15 @@ install_linux() {
 
 # Cleanup function - only removes files/dirs we created
 cleanup() {
+    if [ "$SUCCESS" = false ]; then
+        error "Installation failed. Cleaning up..."
+    fi
+
+    # Detach mounted DMG if any
+    if [[ -n "$mounted_dmg" ]]; then
+        hdiutil detach "$mounted_dmg" -quiet 2>/dev/null || true
+    fi
+
     # Remove downloaded files
     if [[ ${#downloaded_files[@]} -gt 0 ]]; then
         for file in "${downloaded_files[@]}"; do
@@ -397,7 +405,7 @@ cleanup() {
             fi
         done
     fi
-    
+
     # Remove temporary directories we created
     if [[ ${#temp_dirs[@]} -gt 0 ]]; then
         for dir in "${temp_dirs[@]}"; do
@@ -452,6 +460,7 @@ main() {
         install_linux "$downloaded_file"
     fi
     
+    SUCCESS=true
     
     echo
     success "$CLI_NAME installation completed successfully!"
