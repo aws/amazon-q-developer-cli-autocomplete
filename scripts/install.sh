@@ -383,7 +383,7 @@ install_linux() {
     
     log "Running installer..."
     chmod +x "$install_script"
-    "$install_script"
+    Q_SKIP_SETUP=1 "$install_script"
 }
 
 # Cleanup function - only removes files/dirs we created
@@ -465,10 +465,18 @@ main() {
     echo
     success "$CLI_NAME installation completed successfully!"
     echo
+
+    # Check if ~/.local/bin is on PATH
+    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+        warning "$HOME/.local/bin is not on your PATH"
+        echo "Add it to your PATH by adding this line to your shell configuration file:"
+        echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+        echo
+    fi
+
     echo "Next steps:"
     echo "1. Run: $COMMAND_NAME --help to get started"
     echo "2. Run: $COMMAND_NAME chat to start an interactive session"
-    echo "3. Run: $COMMAND_NAME integrations install --help to install terminal integrations"
     echo
 }
 
