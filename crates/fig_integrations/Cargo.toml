@@ -47,8 +47,5 @@ core-foundation = "0.10.0"
 plist = "1.7.1"
 objc.workspace = true
 
-[build-dependencies]
-fig_util.workspace = true
-
 [dev-dependencies]
 tempfile.workspace = true
