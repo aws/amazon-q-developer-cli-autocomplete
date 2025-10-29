@@ -4,39 +4,39 @@
 #--------------------------------------------------------------------#
 
 # Disable suggestions
-_q_autosuggest_disable() {
-	typeset -g _Q_AUTOSUGGEST_DISABLED
-	_q_autosuggest_clear
+_{{CLI_BINARY_NAME}}_autosuggest_disable() {
+	typeset -g _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED
+	_{{CLI_BINARY_NAME}}_autosuggest_clear
 }
 
 # Enable suggestions
-_q_autosuggest_enable() {
-	unset _Q_AUTOSUGGEST_DISABLED
+_{{CLI_BINARY_NAME}}_autosuggest_enable() {
+	unset _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED
 
 	if (( $#BUFFER )); then
-		_q_autosuggest_fetch
+		_{{CLI_BINARY_NAME}}_autosuggest_fetch
 	fi
 }
 
 # Toggle suggestions (enable/disable)
-_q_autosuggest_toggle() {
-	if (( ${+_Q_AUTOSUGGEST_DISABLED} )); then
-		_q_autosuggest_enable
+_{{CLI_BINARY_NAME}}_autosuggest_toggle() {
+	if (( ${+_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED} )); then
+		_{{CLI_BINARY_NAME}}_autosuggest_enable
 	else
-		_q_autosuggest_disable
+		_{{CLI_BINARY_NAME}}_autosuggest_disable
 	fi
 }
 
 # Clear the suggestion
-_q_autosuggest_clear() {
+_{{CLI_BINARY_NAME}}_autosuggest_clear() {
 	# Remove the suggestion
 	unset POSTDISPLAY
 
-	_q_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
 }
 
 # Modify the buffer and get a new suggestion
-_q_autosuggest_modify() {
+_{{CLI_BINARY_NAME}}_autosuggest_modify() {
 	local -i retval
 
 	# Only available in zsh >= 5.4
@@ -50,7 +50,7 @@ _q_autosuggest_modify() {
 	unset POSTDISPLAY
 
 	# Original widget may modify the buffer
-	_q_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
 	retval=$?
 
 	emulate -L zsh
@@ -68,14 +68,14 @@ _q_autosuggest_modify() {
 	fi
 
 	# Bail out if suggestions are disabled
-	if (( ${+_Q_AUTOSUGGEST_DISABLED} )); then
+	if (( ${+_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED} )); then
 		return $?
 	fi
 
 	# Get a new suggestion if the buffer is not empty after modification
 	if (( $#BUFFER > 0 )); then
-		if [[ -z "$Q_AUTOSUGGEST_BUFFER_MAX_SIZE" ]] || (( $#BUFFER <= $Q_AUTOSUGGEST_BUFFER_MAX_SIZE )); then
-			_q_autosuggest_fetch
+		if [[ -z "${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUFFER_MAX_SIZE" ]] || (( $#BUFFER <= ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUFFER_MAX_SIZE )); then
+			_{{CLI_BINARY_NAME}}_autosuggest_fetch
 		fi
 	fi
 
@@ -83,18 +83,18 @@ _q_autosuggest_modify() {
 }
 
 # Fetch a new suggestion based on what's currently in the buffer
-_q_autosuggest_fetch() {
-	if (( ${+Q_AUTOSUGGEST_USE_ASYNC} )); then
-		_q_autosuggest_async_request "$BUFFER"
+_{{CLI_BINARY_NAME}}_autosuggest_fetch() {
+	if (( ${+{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_USE_ASYNC} )); then
+		_{{CLI_BINARY_NAME}}_autosuggest_async_request "$BUFFER"
 	else
 		local suggestion
-		_q_autosuggest_fetch_suggestion "$BUFFER"
-		_q_autosuggest_suggest "$suggestion"
+		_{{CLI_BINARY_NAME}}_autosuggest_fetch_suggestion "$BUFFER"
+		_{{CLI_BINARY_NAME}}_autosuggest_suggest "$suggestion"
 	fi
 }
 
 # Offer a suggestion
-_q_autosuggest_suggest() {
+_{{CLI_BINARY_NAME}}_autosuggest_suggest() {
 	emulate -L zsh
 
 	local suggestion="$1"
@@ -107,7 +107,7 @@ _q_autosuggest_suggest() {
 }
 
 # Accept the entire suggestion
-_q_autosuggest_accept() {
+_{{CLI_BINARY_NAME}}_autosuggest_accept() {
 	local -i retval max_cursor_pos=$#BUFFER
 
 	# When vicmd keymap is active, the cursor can't move all the way
@@ -119,11 +119,11 @@ _q_autosuggest_accept() {
 	# If we're not in a valid state to accept a suggestion, just run the
 	# original widget and bail out
 	if (( $CURSOR != $max_cursor_pos || !$#POSTDISPLAY )); then
-		_q_autosuggest_invoke_original_widget $@
+		_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
 		return
 	fi
 
-	(q _ inline-shell-completion-accept --buffer "$BUFFER" --suggestion "$POSTDISPLAY" > /dev/null 2>&1 &)
+	({{CLI_BINARY_NAME}} _ inline-shell-completion-accept --buffer "$BUFFER" --suggestion "$POSTDISPLAY" > /dev/null 2>&1 &)
 
 	# Only accept if the cursor is at the end of the buffer
 	# Add the suggestion to the buffer
@@ -134,7 +134,7 @@ _q_autosuggest_accept() {
 
 	# Run the original widget before manually moving the cursor so that the
 	# cursor movement doesn't make the widget do something unexpected
-	_q_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
 	retval=$?
 
 	# Move the cursor to the end of the buffer
@@ -148,9 +148,9 @@ _q_autosuggest_accept() {
 }
 
 # Accept the entire suggestion and execute it
-_q_autosuggest_execute() {
+_{{CLI_BINARY_NAME}}_autosuggest_execute() {
 	# background so we don't block the terminal
-	(q _ inline-shell-completion-accept --buffer "$BUFFER" --suggestion "$POSTDISPLAY" > /dev/null 2>&1 &)
+	({{CLI_BINARY_NAME}} _ inline-shell-completion-accept --buffer "$BUFFER" --suggestion "$POSTDISPLAY" > /dev/null 2>&1 &)
 
 	# Add the suggestion to the buffer
 	BUFFER="$BUFFER$POSTDISPLAY"
@@ -160,11 +160,11 @@ _q_autosuggest_execute() {
 
 	# Call the original `accept-line` to handle syntax highlighting or
 	# other potential custom behavior
-	_q_autosuggest_invoke_original_widget "accept-line"
+	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget "accept-line"
 }
 
 # Partially accept the suggestion
-_q_autosuggest_partial_accept() {
+_{{CLI_BINARY_NAME}}_autosuggest_partial_accept() {
 	local -i retval cursor_loc
 
 	# Save the contents of the buffer so we can restore later if needed
@@ -174,7 +174,7 @@ _q_autosuggest_partial_accept() {
 	BUFFER="$BUFFER$POSTDISPLAY"
 
 	# Original widget moves the cursor
-	_q_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
 	retval=$?
 
 	# Normalize cursor location across vi/emacs modes
@@ -199,9 +199,9 @@ _q_autosuggest_partial_accept() {
 }
 
 () {
-	typeset -ga _Q_AUTOSUGGEST_BUILTIN_ACTIONS
+	typeset -ga _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUILTIN_ACTIONS
 
-	_Q_AUTOSUGGEST_BUILTIN_ACTIONS=(
+	_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUILTIN_ACTIONS=(
 		clear
 		fetch
 		suggest
@@ -213,16 +213,16 @@ _q_autosuggest_partial_accept() {
 	)
 
 	local action
-	for action in $_Q_AUTOSUGGEST_BUILTIN_ACTIONS modify partial_accept; do
-		eval "_q_autosuggest_widget_$action() {
+	for action in $_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUILTIN_ACTIONS modify partial_accept; do
+		eval "_{{CLI_BINARY_NAME}}_autosuggest_widget_$action() {
 			local -i retval
 
-			_q_autosuggest_highlight_reset
+			_{{CLI_BINARY_NAME}}_autosuggest_highlight_reset
 
-			_q_autosuggest_$action \$@
+			_{{CLI_BINARY_NAME}}_autosuggest_$action \$@
 			retval=\$?
 
-			_q_autosuggest_highlight_apply
+			_{{CLI_BINARY_NAME}}_autosuggest_highlight_apply
 
 			zle -R
 
@@ -230,7 +230,7 @@ _q_autosuggest_partial_accept() {
 		}"
 	done
 
-	for action in $_Q_AUTOSUGGEST_BUILTIN_ACTIONS; do
-		zle -N autosuggest-$action _q_autosuggest_widget_$action
+	for action in $_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUILTIN_ACTIONS; do
+		zle -N autosuggest-$action _{{CLI_BINARY_NAME}}_autosuggest_widget_$action
 	done
 }

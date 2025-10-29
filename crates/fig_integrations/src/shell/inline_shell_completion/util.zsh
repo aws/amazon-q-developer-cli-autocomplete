@@ -3,7 +3,7 @@
 # Utility Functions                                                  #
 #--------------------------------------------------------------------#
 
-_q_autosuggest_escape_command() {
+_{{CLI_BINARY_NAME}}_autosuggest_escape_command() {
 	setopt localoptions EXTENDED_GLOB
 
 	# Escape special chars in the string (requires EXTENDED_GLOB)

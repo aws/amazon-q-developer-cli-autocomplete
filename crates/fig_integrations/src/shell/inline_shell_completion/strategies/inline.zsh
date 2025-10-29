@@ -5,6 +5,6 @@
 # Suggests the inline_shell_completion command.
 #
 
-_q_autosuggest_strategy_inline_shell_completion() {
-	typeset -g suggestion="$(command -v q >/dev/null 2>&1 && q _ inline-shell-completion --buffer "${BUFFER}")"
+_{{CLI_BINARY_NAME}}_autosuggest_strategy_inline_shell_completion() {
+	typeset -g suggestion="$(command -v {{CLI_BINARY_NAME}} >/dev/null 2>&1 && {{CLI_BINARY_NAME}} _ inline-shell-completion --buffer "${BUFFER}")"
 }

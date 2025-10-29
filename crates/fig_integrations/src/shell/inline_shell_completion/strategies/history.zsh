@@ -6,7 +6,7 @@
 # prefix.
 #
 
-_q_autosuggest_strategy_history() {
+_{{CLI_BINARY_NAME}}_autosuggest_strategy_history() {
 	# Reset options to defaults and enable LOCAL_OPTIONS
 	emulate -L zsh
 
@@ -22,8 +22,8 @@ _q_autosuggest_strategy_history() {
 	# Get the history items that match the prefix, excluding those that match
 	# the ignore pattern
 	local pattern="$prefix*"
-	if [[ -n $Q_AUTOSUGGEST_HISTORY_IGNORE ]]; then
-		pattern="($pattern)~($Q_AUTOSUGGEST_HISTORY_IGNORE)"
+	if [[ -n ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_HISTORY_IGNORE ]]; then
+		pattern="($pattern)~(${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_HISTORY_IGNORE)"
 	fi
 
 	# Give the first history item matching the pattern as the suggestion
