@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from const import APPLE_TEAM_ID
+from const import APPLE_TEAM_ID, APP_NAME, CLI_BINARY_NAME, PTY_BINARY_NAME, CHAT_BINARY_NAME
 
 
 class CdSigningType(Enum):
@@ -52,21 +52,21 @@ def manifest(
 
 def app_manifest():
     return manifest(
-        name="Amazon Q.app",
+        name=f"{APP_NAME}.app",
         identifier="com.amazon.codewhisperer",
         entitlements=True,
         embedded_requirements=[
             EmbeddedRequirement(
-                path="Contents/MacOS/q",
-                identifier="com.amazon.q",
+                path=f"Contents/MacOS/{CLI_BINARY_NAME}",
+                identifier=f"com.amazon.{CLI_BINARY_NAME}",
             ),
             EmbeddedRequirement(
-                path="Contents/MacOS/qterm",
-                identifier="com.amazon.qterm",
+                path=f"Contents/MacOS/{PTY_BINARY_NAME}",
+                identifier=f"com.amazon.{PTY_BINARY_NAME}",
             ),
             EmbeddedRequirement(
-                path="Contents/MacOS/qchat",
-                identifier="com.amazon.qchat",
+                path=f"Contents/MacOS/{CHAT_BINARY_NAME}",
+                identifier=f"com.amazon.{CHAT_BINARY_NAME}",
             ),
         ],
     )
