@@ -123,7 +123,7 @@ nix.workspace = true
 dbus = { path = "../dbus" }
 freedesktop-icons = "0.2.2"
 gtk = "0.18"
-x11rb = "0.13.0"
+x11rb = "0.13.2"
 zbus = { path = "../zbus" }
 
 [target.'cfg(target_os="macos")'.dependencies]
