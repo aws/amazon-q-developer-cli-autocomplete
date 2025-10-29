@@ -13,7 +13,7 @@ export TTY
 export SHELL_PID="$$"
 
 if [[ -z "${Q_SHELL:-}" ]]; then
-  Q_SHELL=$(q _ get-shell)
+  Q_SHELL=$({{CLI_BINARY_NAME}} _ get-shell)
 fi
 
 # shellcheck disable=SC2059
@@ -165,8 +165,8 @@ fig_precmd() {
 
   Q_HAS_SET_PROMPT=1
 
-  if command -v q >/dev/null 2>&1; then
-    (command q _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
+  if command -v {{CLI_BINARY_NAME}} >/dev/null 2>&1; then
+    (command {{CLI_BINARY_NAME}} _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
   fi
 }
 
@@ -190,4 +190,4 @@ fi
 
 fi
 
-(command q _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
+(command {{CLI_BINARY_NAME}} _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1

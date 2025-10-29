@@ -7,7 +7,7 @@ def pathadd [path: string] {
 }
 
 let-env PATH = pathadd $"($env.HOME)/.local/bin"
-let-env Q_SHELL = (^q _ get-shell)
+let-env Q_SHELL = (^{{CLI_BINARY_NAME}} _ get-shell)
 
 let-env PATH = $env.PATH
 
@@ -143,7 +143,7 @@ def-env fig_pre_prompt_hook [] {
     # }
   
     if (which fig | length) >= 1 {
-      let result = (q _ pre-cmd | complete)
+      let result = ({{CLI_BINARY_NAME}} _ pre-cmd | complete)
       if $result.stdout == "EXEC_NEW_SHELL" {
         let-env Q_DOTFILES_SOURCED = $nothing
         exec nu
@@ -208,4 +208,4 @@ if "PROCESS_LAUNCHED_BY_Q" in $env {
   print_fig_osc "DoneSourcing"
 }
 
-(^q _ pre-cmd | complete | ignore)
+(^{{CLI_BINARY_NAME}} _ pre-cmd | complete | ignore)

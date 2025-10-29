@@ -26,7 +26,7 @@ if "Q_SET_PARENT_CHECK" not-in $env {
 }
 
 
-let result = (^q _ should-figterm-launch | complete)
+let result = (^{{CLI_BINARY_NAME}} _ should-figterm-launch | complete)
 let-env SHOULD_QTERM_LAUNCH = $result.exit_code
 
 let should_launch = (
@@ -36,7 +36,7 @@ let should_launch = (
 )
 
 if $should_launch {
-  let Q_SHELL = (q _ get-shell | complete).stdout
+  let Q_SHELL = ({{CLI_BINARY_NAME}} _ get-shell | complete).stdout
   
   let fig_term_name = "nu (figterm)"
   let figterm_path = if ([$env.HOME ".fig" "bin" $fig_term_name] | path join | path exists) {

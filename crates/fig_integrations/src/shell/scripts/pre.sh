@@ -24,7 +24,7 @@ fi
 
 # 0 = Yes, 1 = No, 2 = Fallback to Q_TERM
 if [ -z "${SHOULD_QTERM_LAUNCH:-}" ]; then
-  q _ should-figterm-launch 1>/dev/null 2>&1
+  {{CLI_BINARY_NAME}} _ should-figterm-launch 1>/dev/null 2>&1
   SHOULD_QTERM_LAUNCH=$?
 fi
 
@@ -33,12 +33,12 @@ fi
 # It is not necessary in Fish.
 if   [[ -t 1 ]] \
   && [[ -z "${PROCESS_LAUNCHED_BY_Q:-}" ]] \
-  && command -v qterm 1>/dev/null 2>&1 \
+  && command -v {{PTY_BINARY_NAME}} 1>/dev/null 2>&1 \
   && [[ ("${SHOULD_QTERM_LAUNCH}" -eq 0) || (("${SHOULD_QTERM_LAUNCH}" -eq 2) && (-z "${Q_TERM:-}" || (-z "${Q_TERM_TMUX:-}" && -n "${TMUX:-}"))) ]]
 then
   # Pty module sets Q_TERM or Q_TERM_TMUX to avoid running twice.
   if [ -z "${Q_SHELL:-}" ]; then
-    Q_SHELL=$(q _ get-shell)
+    Q_SHELL=$({{CLI_BINARY_NAME}} _ get-shell)
   fi
   Q_IS_LOGIN_SHELL="${Q_IS_LOGIN_SHELL:='0'}"
 
@@ -50,12 +50,12 @@ then
 
   # Do not launch figterm in non-interactive shells (like VSCode Tasks)
   if [[ $- == *i* ]]; then
-    Q_TERM_NAME="$(basename "${Q_SHELL}") (qterm)"
+    Q_TERM_NAME="$(basename "${Q_SHELL}") ({{PTY_BINARY_NAME}})"
     if [[ -z "${Q_TERM_PATH:-}" ]]; then
       if [[ -x "${HOME}/.local/bin/${Q_TERM_NAME}" ]]; then
         Q_TERM_PATH="${HOME}/.local/bin/${Q_TERM_NAME}"
       else
-        Q_TERM_PATH="$(command -v qterm || echo "${HOME}/.local/bin/qterm")"
+        Q_TERM_PATH="$(command -v {{PTY_BINARY_NAME}} || echo "${HOME}/.local/bin/{{PTY_BINARY_NAME}}")"
       fi
     fi
 

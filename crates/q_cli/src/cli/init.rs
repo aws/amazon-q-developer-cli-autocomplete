@@ -204,7 +204,7 @@ async fn shell_init(shell: &Shell, when: &When, rcfile: &Option<String>) -> Resu
     }
 
     let shell_integration_source = shell.get_fig_integration_source(when);
-    to_source.push(shell_integration_source.into());
+    to_source.push(shell_integration_source);
 
     if when == &When::Pre && is_jetbrains_terminal {
         // Manually call JetBrains shell integration after exec-ing to figterm.

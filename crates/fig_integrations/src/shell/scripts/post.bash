@@ -17,7 +17,7 @@ Q_LAST_PS2="$PS2"
 Q_LAST_PS3="$PS3"
 
 if [[ -z "${Q_SHELL:-}" ]]; then
-  Q_SHELL=$(q _ get-shell)
+  Q_SHELL=$({{CLI_BINARY_NAME}} _ get-shell)
 fi
 
 # Construct Operating System Command.
@@ -68,8 +68,8 @@ function __fig_pre_prompt () {
   fig_osc "Log=%s" "${Q_LOG_LEVEL}"
   fig_osc "User=%s" "${USER:-root}"
 
-  if command -v q >/dev/null 2>&1; then
-    (command q _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
+  if command -v {{CLI_BINARY_NAME}} >/dev/null 2>&1; then
+    (command {{CLI_BINARY_NAME}} _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
   fi
 
   # Work around bug in CentOS 7.2 where preexec doesn't run if you press ^C
@@ -180,4 +180,4 @@ fi
 
 fi
 
-(command q _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
+(command {{CLI_BINARY_NAME}} _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1

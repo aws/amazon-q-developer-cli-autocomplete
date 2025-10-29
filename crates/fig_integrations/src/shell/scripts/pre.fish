@@ -16,31 +16,31 @@ end
 
 if test -z "$SHOULD_QTERM_LAUNCH"
     # 0 = Yes, 1 = No, 2 = Fallback to Q_TERM
-    q _ should-figterm-launch 1>/dev/null 2>&1
+    {{CLI_BINARY_NAME}} _ should-figterm-launch 1>/dev/null 2>&1
     set SHOULD_QTERM_LAUNCH $status
 end
 
 if test -t 1
     and test -z "$PROCESS_LAUNCHED_BY_Q"
-    and command -v qterm 1>/dev/null 2>/dev/null
+    and command -v {{PTY_BINARY_NAME}} 1>/dev/null 2>/dev/null
     and test "$SHOULD_QTERM_LAUNCH" -eq 0 -o \( "$SHOULD_QTERM_LAUNCH" -eq 2 -a \( -z "$Q_TERM" -o \( -z "$Q_TERM_TMUX" -a -n "$TMUX" \) \) \)
 
     if test -z "$Q_SHELL"
-        set Q_SHELL (q _ get-shell)
+        set Q_SHELL ({{CLI_BINARY_NAME}} _ get-shell)
     end
     set Q_IS_LOGIN_SHELL 0
     if status --is-login
         set Q_IS_LOGIN_SHELL 1
     end
 
-    # Do not launch qterm in non-interactive shells (like VSCode Tasks)
+    # Do not launch {{PTY_BINARY_NAME}} in non-interactive shells (like VSCode Tasks)
     if status --is-interactive
-        set Q_TERM_NAME (command basename "$Q_SHELL")" (qterm)"
+        set Q_TERM_NAME (command basename "$Q_SHELL")" ({{PTY_BINARY_NAME}})"
         if not set -q Q_TERM_PATH
             if test -x "$HOME/.local/bin/$Q_TERM_NAME"
                 set Q_TERM_PATH "$HOME/.local/bin/$Q_TERM_NAME"
             else
-                set Q_TERM_PATH (command -v qterm || echo "$HOME/.local/bin/qterm")
+                set Q_TERM_PATH (command -v {{PTY_BINARY_NAME}} || echo "$HOME/.local/bin/{{PTY_BINARY_NAME}}")
             end
         end
 

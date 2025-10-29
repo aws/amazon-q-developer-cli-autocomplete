@@ -6,7 +6,7 @@ set --export TTY
 
 set --export SHELL_PID $fish_pid
 
-set --query Q_SHELL; or set Q_SHELL (q _ get-shell)
+set --query Q_SHELL; or set Q_SHELL ({{CLI_BINARY_NAME}} _ get-shell)
 
 function fig_osc
     builtin printf "\033]697;$argv[1]\007" $argv[2..-1]
@@ -98,8 +98,8 @@ function fig_precmd --on-event fish_prompt
 
     set fig_has_set_prompt 1
 
-    if command -v q &>/dev/null
-        begin; command q _ pre-cmd --alias (alias) &> /dev/null &; end
+    if command -v {{CLI_BINARY_NAME}} &>/dev/null
+        begin; command {{CLI_BINARY_NAME}} _ pre-cmd --alias (alias) &> /dev/null &; end
     end
 end
 
@@ -109,4 +109,4 @@ if test -n "$PROCESS_LAUNCHED_BY_Q"
     fig_osc DoneSourcing
 end
 
-begin; command q _ pre-cmd --alias (alias) &> /dev/null &; end
+begin; command {{CLI_BINARY_NAME}} _ pre-cmd --alias (alias) &> /dev/null &; end
