@@ -48,6 +48,7 @@ use crate::logging::{
 use crate::os::Os;
 use crate::util::directories::logs_dir;
 use crate::util::{
+    CHAT_BINARY_NAME,
     CLI_BINARY_NAME,
     GOV_REGIONS,
 };
@@ -216,7 +217,11 @@ impl Cli {
             },
             log_to_stdout: std::env::var_os("Q_LOG_STDOUT").is_some() || self.verbose > 0,
             log_file_path: match subcommand {
-                RootSubcommand::Chat { .. } => Some(logs_dir().expect("home dir must be set").join("qchat.log")),
+                RootSubcommand::Chat { .. } => Some(
+                    logs_dir()
+                        .expect("home dir must be set")
+                        .join(format!("{CHAT_BINARY_NAME}.log")),
+                ),
                 _ => None,
             },
             delete_old_log_file: false,

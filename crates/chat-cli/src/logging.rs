@@ -14,6 +14,7 @@ use tracing_subscriber::{
     fmt,
 };
 
+use crate::util::consts::CHAT_BINARY_NAME;
 use crate::util::env_var::Q_LOG_LEVEL;
 
 const MAX_FILE_SIZE: u64 = 10 * 1024 * 1024;
@@ -76,7 +77,7 @@ pub fn initialize_logging<T: AsRef<Path>>(args: LogArgs<T>) -> Result<LogGuard, 
 
             // Make the log path parent directory if it doesn't exist.
             if let Some(parent) = log_path.parent() {
-                if log_path.ends_with("qchat.log") {
+                if log_path.ends_with(format!("{CHAT_BINARY_NAME}.log")) {
                     mcp_path = Some(parent.to_path_buf());
                 }
                 std::fs::create_dir_all(parent)?;
