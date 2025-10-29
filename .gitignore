@@ -49,4 +49,3 @@ book/
 .env*
 
 run-build.sh
-REBRANDING_GUIDE.md
