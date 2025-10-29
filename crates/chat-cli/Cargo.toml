@@ -144,7 +144,7 @@ tokio-util = { version = "0.7.16", features = ["codec", "compat"] }
 toml = "0.8.12"
 tracing = { version = "0.1.40", features = ["log"] }
 tracing-appender = "0.2.2"
-tracing-subscriber = { version = "0.3.19", features = [
+tracing-subscriber = { version = "0.3.20", features = [
     "env-filter",
     "fmt",
     "parking_lot",
