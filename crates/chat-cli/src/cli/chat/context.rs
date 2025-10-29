@@ -251,6 +251,7 @@ impl ContextManager {
     ///
     /// # Returns
     /// A Result containing a vector of profile names, with "default" always first
+    #[cfg_attr(target_os = "windows", allow(dead_code))]
     pub fn list_profiles_blocking(&self, os: &Os) -> Result<Vec<String>> {
         let _ = self;
 
