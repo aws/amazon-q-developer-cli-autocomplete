@@ -3,12 +3,14 @@ import pathlib
 
 APP_NAME = "Amazon Q"
 CLI_BINARY_NAME = "q"
+CLI_BINARY_NAME_MINIMAL = "q-minimal"
 CHAT_BINARY_NAME = "qchat"
 PTY_BINARY_NAME = "qterm"
 DESKTOP_BINARY_NAME = "q-desktop"
 URL_SCHEMA = "q"
 TAURI_PRODUCT_NAME = "q_desktop"
 LINUX_PACKAGE_NAME = "amazon-q"
+CHAT_BINARY_BRANCH = "prod"
 
 # macos specific
 MACOS_BUNDLE_ID = "com.amazon.codewhisperer"
