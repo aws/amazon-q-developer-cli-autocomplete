@@ -10,6 +10,7 @@ set -eu
 BINARY_NAME="q"
 CLI_NAME="Q CLI"
 COMMAND_NAME="q"
+DESKTOP_BINARY_NAME="q_desktop"
 BASE_URL="https://desktop-release.q.us-east-1.amazonaws.com"
 MANIFEST_URL="${BASE_URL}/latest/manifest.json"
 MACOS_FILENAME="Amazon Q.dmg"
@@ -360,7 +361,7 @@ install_macos() {
     mkdir -p "$HOME/.local/bin"
     local macos_bin="$MACOS_APP_DIR/$app_name/Contents/MacOS"
 
-    "$macos_bin/q_desktop" --no-dashboard > /dev/null 2>&1 &
+    "$macos_bin/$DESKTOP_BINARY_NAME" --no-dashboard > /dev/null 2>&1 &
 }
 
 # Install on Linux

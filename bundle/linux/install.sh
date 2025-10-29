@@ -7,6 +7,9 @@ set -o errexit
 set -o nounset
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+CLI_BINARY_NAME="q"
+CHAT_BINARY_NAME="qchat"
+PTY_BINARY_NAME="qterm"
 
 log_error() {
     printf '\e[31m[ERROR]\e[0m %s\n' "$1" >&2
@@ -136,22 +139,22 @@ if is_target_triple_gnu && ! check_glibc_version; then
 fi
 
 if [ -n "${Q_INSTALL_GLOBAL:-}" ]; then
-    install -m 755 "$SCRIPT_DIR/bin/q" /usr/local/bin/
-    install -m 755 "$SCRIPT_DIR/bin/qchat" /usr/local/bin/
-    install -m 755 "$SCRIPT_DIR/bin/qterm" /usr/local/bin/
+    install -m 755 "$SCRIPT_DIR/bin/$CLI_BINARY_NAME" /usr/local/bin/
+    install -m 755 "$SCRIPT_DIR/bin/$CHAT_BINARY_NAME" /usr/local/bin/
+    install -m 755 "$SCRIPT_DIR/bin/$PTY_BINARY_NAME" /usr/local/bin/
 
     if [ -z "${Q_SKIP_SETUP:-}" ]; then
-        /usr/local/bin/q integrations install dotfiles
-        /usr/local/bin/q setup --global "$@"
+        /usr/local/bin/$CLI_BINARY_NAME integrations install dotfiles
+        /usr/local/bin/$CLI_BINARY_NAME setup --global "$@"
     fi
 else
     mkdir -p "$HOME/.local/bin"
 
-    install -m 755 "$SCRIPT_DIR/bin/q" "$HOME/.local/bin/"
-    install -m 755 "$SCRIPT_DIR/bin/qchat" "$HOME/.local/bin/"
-    install -m 755 "$SCRIPT_DIR/bin/qterm" "$HOME/.local/bin/"
+    install -m 755 "$SCRIPT_DIR/bin/$CLI_BINARY_NAME" "$HOME/.local/bin/"
+    install -m 755 "$SCRIPT_DIR/bin/$CHAT_BINARY_NAME" "$HOME/.local/bin/"
+    install -m 755 "$SCRIPT_DIR/bin/$PTY_BINARY_NAME" "$HOME/.local/bin/"
 
     if [ -z "${Q_SKIP_SETUP:-}" ]; then
-        "$HOME/.local/bin/q" setup "$@"
+        "$HOME/.local/bin/$CLI_BINARY_NAME" setup "$@"
     fi
 fi
