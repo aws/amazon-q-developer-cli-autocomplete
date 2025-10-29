@@ -201,7 +201,7 @@ def cd_build_signed_package(exe_path: pathlib.Path):
     ```
     package
     ├─ EXECUTABLES_TO_SIGN
-    | ├─ qchat
+    | ├─ {chat_binary}
     ```
     """
     # Trying a different format without manifest.yaml and placing EXECUTABLES_TO_SIGN
@@ -376,7 +376,7 @@ def sign_and_notarize(signing_data: CdSigningData, chat_path: pathlib.Path) -> p
 
 def build_macos(chat_path: pathlib.Path, signing_data: CdSigningData | None):
     """
-    Creates a qchat.zip under the build directory.
+    Creates a chat binary zip under the build directory.
     """
     chat_dst = BUILD_DIR / CHAT_BINARY_NAME
     chat_dst.unlink(missing_ok=True)
@@ -495,7 +495,7 @@ def build_linux(chat_path: pathlib.Path, signer: GpgSigner | None):
     Creates tar.gz, tar.xz, tar.zst, and zip archives under `BUILD_DIR`.
 
     Each archive has the following structure:
-    - archive/qchat
+    - archive/{chat_binary}
     """
     archive_name = CHAT_BINARY_NAME
 
