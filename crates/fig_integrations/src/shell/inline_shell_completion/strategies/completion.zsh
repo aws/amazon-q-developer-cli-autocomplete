@@ -5,7 +5,7 @@
 # Fetches a suggestion from the completion engine
 #
 
-_{{CLI_BINARY_NAME}}_autosuggest_capture_postcompletion() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_postcompletion() {
 	# Always insert the first completion into the buffer
 	compstate[insert]=1
 
@@ -13,12 +13,12 @@ _{{CLI_BINARY_NAME}}_autosuggest_capture_postcompletion() {
 	unset 'compstate[list]'
 }
 
-_{{CLI_BINARY_NAME}}_autosuggest_capture_completion_widget() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_completion_widget() {
 	# Add a post-completion hook to be called after all completions have been
 	# gathered. The hook can modify compstate to affect what is done with the
 	# gathered completions.
 	local -a +h comppostfuncs
-	comppostfuncs=(_{{CLI_BINARY_NAME}}_autosuggest_capture_postcompletion)
+	comppostfuncs=(_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_postcompletion)
 
 	# Only capture completions at the end of the buffer
 	CURSOR=$#BUFFER
@@ -42,9 +42,9 @@ _{{CLI_BINARY_NAME}}_autosuggest_capture_completion_widget() {
 	echo -nE - $'\0'$BUFFER$'\0'
 }
 
-zle -N autosuggest-capture-completion _{{CLI_BINARY_NAME}}_autosuggest_capture_completion_widget
+zle -N autosuggest-capture-completion _{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_completion_widget
 
-_{{CLI_BINARY_NAME}}_autosuggest_capture_setup() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_setup() {
 	# There is a bug in zpty module in older zsh versions by which a
 	# zpty that exits will kill all zpty processes that were forked
 	# before it. Here we set up a zsh exit hook to SIGKILL the zpty
@@ -69,14 +69,14 @@ _{{CLI_BINARY_NAME}}_autosuggest_capture_setup() {
 	bindkey '^I' autosuggest-capture-completion
 }
 
-_{{CLI_BINARY_NAME}}_autosuggest_capture_completion_sync() {
-	_{{CLI_BINARY_NAME}}_autosuggest_capture_setup
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_completion_sync() {
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_setup
 
 	zle autosuggest-capture-completion
 }
 
-_{{CLI_BINARY_NAME}}_autosuggest_capture_completion_async() {
-	_{{CLI_BINARY_NAME}}_autosuggest_capture_setup
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_completion_async() {
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_setup
 
 	zmodload zsh/parameter 2>/dev/null || return # For `$functions`
 
@@ -93,7 +93,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_capture_completion_async() {
 	vared 1
 }
 
-_{{CLI_BINARY_NAME}}_autosuggest_strategy_completion() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_strategy_completion() {
 	# Reset options to defaults and enable LOCAL_OPTIONS
 	emulate -L zsh
 
@@ -114,9 +114,9 @@ _{{CLI_BINARY_NAME}}_autosuggest_strategy_completion() {
 
 	# Zle will be inactive if we are in async mode
 	if zle; then
-		zpty ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_COMPLETIONS_PTY_NAME _{{CLI_BINARY_NAME}}_autosuggest_capture_completion_sync
+		zpty ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_COMPLETIONS_PTY_NAME _{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_completion_sync
 	else
-		zpty ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_COMPLETIONS_PTY_NAME _{{CLI_BINARY_NAME}}_autosuggest_capture_completion_async "\$1"
+		zpty ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_COMPLETIONS_PTY_NAME _{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_capture_completion_async "\$1"
 		zpty -w ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_COMPLETIONS_PTY_NAME $'\t'
 	fi
 

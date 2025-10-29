@@ -55,12 +55,15 @@ pub mod inline_shell_completion_plugin {
             assert!(ZSH_SCRIPT.contains("Copyright"));
 
             // Ensure script has _q_autosuggest_strategy_inline_shell_completion()
+            let cli_binary_name_underscore = CLI_BINARY_NAME.replace('-', "_");
             assert!(ZSH_SCRIPT.contains(&format!(
-                "_{CLI_BINARY_NAME}_autosuggest_strategy_inline_shell_completion()"
+                "_{cli_binary_name_underscore}_autosuggest_strategy_inline_shell_completion()"
             )));
 
             // Ensure script adds precmd hook
-            assert!(ZSH_SCRIPT.contains(&format!("add-zsh-hook precmd _{CLI_BINARY_NAME}_autosuggest_start")));
+            assert!(ZSH_SCRIPT.contains(&format!(
+                "add-zsh-hook precmd _{cli_binary_name_underscore}_autosuggest_start"
+            )));
         }
     }
 }

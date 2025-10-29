@@ -4,7 +4,7 @@
 #--------------------------------------------------------------------#
 
 # If there was a highlight, remove it
-_{{CLI_BINARY_NAME}}_autosuggest_highlight_reset() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_highlight_reset() {
 	typeset -g _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_LAST_HIGHLIGHT
 
 	if [[ -n "$_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_LAST_HIGHLIGHT" ]]; then
@@ -14,7 +14,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_highlight_reset() {
 }
 
 # If there's a suggestion, highlight it
-_{{CLI_BINARY_NAME}}_autosuggest_highlight_apply() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_highlight_apply() {
 	typeset -g _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_LAST_HIGHLIGHT
 
 	if (( $#POSTDISPLAY )); then

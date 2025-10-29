@@ -6,7 +6,7 @@
 # prefix.
 #
 
-_{{CLI_BINARY_NAME}}_autosuggest_strategy_history() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_strategy_history() {
 	# Reset options to defaults and enable LOCAL_OPTIONS
 	emulate -L zsh
 

@@ -4,39 +4,39 @@
 #--------------------------------------------------------------------#
 
 # Disable suggestions
-_{{CLI_BINARY_NAME}}_autosuggest_disable() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_disable() {
 	typeset -g _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED
-	_{{CLI_BINARY_NAME}}_autosuggest_clear
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_clear
 }
 
 # Enable suggestions
-_{{CLI_BINARY_NAME}}_autosuggest_enable() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_enable() {
 	unset _{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED
 
 	if (( $#BUFFER )); then
-		_{{CLI_BINARY_NAME}}_autosuggest_fetch
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_fetch
 	fi
 }
 
 # Toggle suggestions (enable/disable)
-_{{CLI_BINARY_NAME}}_autosuggest_toggle() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_toggle() {
 	if (( ${+_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_DISABLED} )); then
-		_{{CLI_BINARY_NAME}}_autosuggest_enable
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_enable
 	else
-		_{{CLI_BINARY_NAME}}_autosuggest_disable
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_disable
 	fi
 }
 
 # Clear the suggestion
-_{{CLI_BINARY_NAME}}_autosuggest_clear() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_clear() {
 	# Remove the suggestion
 	unset POSTDISPLAY
 
-	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_invoke_original_widget $@
 }
 
 # Modify the buffer and get a new suggestion
-_{{CLI_BINARY_NAME}}_autosuggest_modify() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_modify() {
 	local -i retval
 
 	# Only available in zsh >= 5.4
@@ -50,7 +50,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_modify() {
 	unset POSTDISPLAY
 
 	# Original widget may modify the buffer
-	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_invoke_original_widget $@
 	retval=$?
 
 	emulate -L zsh
@@ -75,7 +75,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_modify() {
 	# Get a new suggestion if the buffer is not empty after modification
 	if (( $#BUFFER > 0 )); then
 		if [[ -z "${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUFFER_MAX_SIZE" ]] || (( $#BUFFER <= ${{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUFFER_MAX_SIZE )); then
-			_{{CLI_BINARY_NAME}}_autosuggest_fetch
+			_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_fetch
 		fi
 	fi
 
@@ -83,18 +83,18 @@ _{{CLI_BINARY_NAME}}_autosuggest_modify() {
 }
 
 # Fetch a new suggestion based on what's currently in the buffer
-_{{CLI_BINARY_NAME}}_autosuggest_fetch() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_fetch() {
 	if (( ${+{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_USE_ASYNC} )); then
-		_{{CLI_BINARY_NAME}}_autosuggest_async_request "$BUFFER"
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_async_request "$BUFFER"
 	else
 		local suggestion
-		_{{CLI_BINARY_NAME}}_autosuggest_fetch_suggestion "$BUFFER"
-		_{{CLI_BINARY_NAME}}_autosuggest_suggest "$suggestion"
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_fetch_suggestion "$BUFFER"
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_suggest "$suggestion"
 	fi
 }
 
 # Offer a suggestion
-_{{CLI_BINARY_NAME}}_autosuggest_suggest() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_suggest() {
 	emulate -L zsh
 
 	local suggestion="$1"
@@ -107,7 +107,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_suggest() {
 }
 
 # Accept the entire suggestion
-_{{CLI_BINARY_NAME}}_autosuggest_accept() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_accept() {
 	local -i retval max_cursor_pos=$#BUFFER
 
 	# When vicmd keymap is active, the cursor can't move all the way
@@ -119,7 +119,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_accept() {
 	# If we're not in a valid state to accept a suggestion, just run the
 	# original widget and bail out
 	if (( $CURSOR != $max_cursor_pos || !$#POSTDISPLAY )); then
-		_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
+		_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_invoke_original_widget $@
 		return
 	fi
 
@@ -134,7 +134,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_accept() {
 
 	# Run the original widget before manually moving the cursor so that the
 	# cursor movement doesn't make the widget do something unexpected
-	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_invoke_original_widget $@
 	retval=$?
 
 	# Move the cursor to the end of the buffer
@@ -148,7 +148,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_accept() {
 }
 
 # Accept the entire suggestion and execute it
-_{{CLI_BINARY_NAME}}_autosuggest_execute() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_execute() {
 	# background so we don't block the terminal
 	({{CLI_BINARY_NAME}} _ inline-shell-completion-accept --buffer "$BUFFER" --suggestion "$POSTDISPLAY" > /dev/null 2>&1 &)
 
@@ -160,11 +160,11 @@ _{{CLI_BINARY_NAME}}_autosuggest_execute() {
 
 	# Call the original `accept-line` to handle syntax highlighting or
 	# other potential custom behavior
-	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget "accept-line"
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_invoke_original_widget "accept-line"
 }
 
 # Partially accept the suggestion
-_{{CLI_BINARY_NAME}}_autosuggest_partial_accept() {
+_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_partial_accept() {
 	local -i retval cursor_loc
 
 	# Save the contents of the buffer so we can restore later if needed
@@ -174,7 +174,7 @@ _{{CLI_BINARY_NAME}}_autosuggest_partial_accept() {
 	BUFFER="$BUFFER$POSTDISPLAY"
 
 	# Original widget moves the cursor
-	_{{CLI_BINARY_NAME}}_autosuggest_invoke_original_widget $@
+	_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_invoke_original_widget $@
 	retval=$?
 
 	# Normalize cursor location across vi/emacs modes
@@ -214,15 +214,15 @@ _{{CLI_BINARY_NAME}}_autosuggest_partial_accept() {
 
 	local action
 	for action in $_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUILTIN_ACTIONS modify partial_accept; do
-		eval "_{{CLI_BINARY_NAME}}_autosuggest_widget_$action() {
+		eval "_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_widget_$action() {
 			local -i retval
 
-			_{{CLI_BINARY_NAME}}_autosuggest_highlight_reset
+			_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_highlight_reset
 
-			_{{CLI_BINARY_NAME}}_autosuggest_$action \$@
+			_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_$action \$@
 			retval=\$?
 
-			_{{CLI_BINARY_NAME}}_autosuggest_highlight_apply
+			_{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_highlight_apply
 
 			zle -R
 
@@ -231,6 +231,6 @@ _{{CLI_BINARY_NAME}}_autosuggest_partial_accept() {
 	done
 
 	for action in $_{{CLI_BINARY_NAME_UPPER}}_AUTOSUGGEST_BUILTIN_ACTIONS; do
-		zle -N autosuggest-$action _{{CLI_BINARY_NAME}}_autosuggest_widget_$action
+		zle -N autosuggest-$action _{{CLI_BINARY_NAME_UNDERSCORE}}_autosuggest_widget_$action
 	done
 }

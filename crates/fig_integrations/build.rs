@@ -1,7 +1,6 @@
-const CODEX_FOLDER: &str = "src/shell/inline_shell_completion";
+use fig_util::CLI_BINARY_NAME;
 
-// Binary name constants for parameterization
-const CLI_BINARY_NAME: &str = "q";
+const CODEX_FOLDER: &str = "src/shell/inline_shell_completion";
 
 // The order here is very specific, do no edit without understanding the implications
 const CODEX_FILES: &[&str] = &[
@@ -36,9 +35,11 @@ fn main() {
     }
 
     // Substitute placeholders with actual binary names
-    let cli_binary_name_upper = CLI_BINARY_NAME.to_uppercase();
+    let cli_binary_name_underscore = CLI_BINARY_NAME.replace('-', "_");
+    let cli_binary_name_upper = cli_binary_name_underscore.to_uppercase();
     inline_shell_completion = inline_shell_completion
         .replace("{{CLI_BINARY_NAME}}", CLI_BINARY_NAME)
+        .replace("{{CLI_BINARY_NAME_UNDERSCORE}}", &cli_binary_name_underscore)
         .replace("{{CLI_BINARY_NAME_UPPER}}", &cli_binary_name_upper);
 
     std::fs::write(out_dir.join("inline_shell_completion.zsh"), inline_shell_completion).unwrap();
