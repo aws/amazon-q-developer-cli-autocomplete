@@ -231,7 +231,7 @@ pub trait ReadHalf: std::fmt::Debug + Send + Sync + 'static {
     /// The default implementation simply panics. Implementers must override either `read_message`
     /// or this method.
     async fn recvmsg(&mut self, _buf: &mut [u8]) -> RecvmsgResult {
-        unimplemented!("`ReadHalf` implementers must either override `read_message` or `recvmsg`");
+        panic!("`ReadHalf` implementers must either override `read_message` or `recvmsg`");
     }
 
     /// Return whether passing file descriptors is supported.
@@ -299,7 +299,7 @@ pub trait WriteHalf: std::fmt::Debug + Send + Sync + 'static {
     /// The default implementation simply panics. Implementers must override either `send_message`
     /// or this method.
     async fn sendmsg(&mut self, _buffer: &[u8], #[cfg(unix)] _fds: &[BorrowedFd<'_>]) -> io::Result<usize> {
-        unimplemented!("`WriteHalf` implementers must either override `send_message` or `sendmsg`");
+        panic!("`WriteHalf` implementers must either override `send_message` or `sendmsg`");
     }
 
     /// The dbus daemon on `freebsd` and `dragonfly` currently requires sending the zero byte
