@@ -290,9 +290,9 @@ mod tests {
         let all_count = all_re.find_iter(&replaced_config_text).count();
         assert_eq!(all_count, 2);
 
-        // count the number of "Amazon" to ensure match is replaced
-        let amazon_re = Regex::new(r"# Amazon").unwrap();
-        let amazon_count = amazon_re.find_iter(&replaced_config_text).count();
-        assert_eq!(amazon_count, 1);
+        // count the number of product name comments to ensure match is replaced
+        let product_re = Regex::new(&format!(r"# {}", regex::escape(PRODUCT_NAME))).unwrap();
+        let product_count = product_re.find_iter(&replaced_config_text).count();
+        assert_eq!(product_count, 1);
     }
 }
