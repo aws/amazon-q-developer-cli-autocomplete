@@ -116,7 +116,7 @@ rustyline = { version = "15.0.0", features = [
 ], default-features = false }
 semantic_search_client = { path = "../semantic_search_client" }
 semver = { version = "1.0.26", features = ["serde"] }
-serde = { version = "1.0.219", features = ["derive", "rc"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = { version = "1.0.140", features = ["preserve_order"] }
 sha2 = "0.10.9"
 shell-color = "1.0.0"
@@ -199,6 +199,6 @@ tracing-test = "0.2.4"
 convert_case = "0.8.0"
 prettyplease = "0.2.32"
 quote = "1.0.40"
-serde = { version = "1.0.219", features = ["derive", "rc"] }
+serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.140"
 syn = "2.0.101"
