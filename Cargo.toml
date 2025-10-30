@@ -149,7 +149,7 @@ time = { version = "0.3.39", features = [
     "serde",
 ] }
 tokio = { version = "1.47.1", features = ["full"] }
-tokio-tungstenite = "0.26.2"
+tokio-tungstenite = "0.28.0"
 tokio-util = { version = "0.7.16", features = ["codec", "compat"] }
 toml = "0.8.12"
 tracing = { version = "0.1.40", features = ["log"] }
