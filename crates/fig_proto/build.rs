@@ -133,7 +133,7 @@ fn download_protoc_windows(protoc_version: &str, tmp_folder: &tempfile::TempDir)
     // Verify checksum using PowerShell
     let mut checksum_command = Command::new("powershell");
     checksum_command.arg("-Command").arg(format!(
-        "(Get-FileHash -Path '{}' -Algorithm SHA256).Hash.ToLower()",
+        "(Get-FileHash -Path '{}' -Algorithm SHA256).Hash",
         tmp_folder.path().join("protoc.zip").display()
     ));
     let checksum_output = checksum_command.output().unwrap();
@@ -141,11 +141,9 @@ fn download_protoc_windows(protoc_version: &str, tmp_folder: &tempfile::TempDir)
 
     eprintln!("checksum: {checksum_output:?}");
     assert_eq!(
-        checksum_output,
-        checksum.to_lowercase(),
+        checksum_output, checksum,
         "Checksum verification failed. Expected: {}, Got: {}",
-        checksum.to_lowercase(),
-        checksum_output
+        checksum, checksum_output
     );
 
     // Extract using PowerShell
@@ -169,7 +167,9 @@ fn download_protoc_windows(protoc_version: &str, tmp_folder: &tempfile::TempDir)
     ));
     assert!(copy_command.spawn().unwrap().wait().unwrap().success());
 
-    std::env::set_var("PROTOC", out_bin);
+    unsafe {
+        std::env::set_var("PROTOC", out_bin);
+    }
 }
 
 fn main() -> Result<()> {

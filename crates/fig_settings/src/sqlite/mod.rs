@@ -16,10 +16,7 @@ use rusqlite::{
     params,
 };
 use serde_json::Map;
-use tracing::{
-    debug,
-    info,
-};
+use tracing::info;
 
 use crate::Result;
 use crate::error::DbOpenError;
@@ -100,7 +97,6 @@ impl Db {
             let metadata = std::fs::metadata(path)?;
             let mut permissions = metadata.permissions();
             if permissions.mode() & 0o777 != 0o600 {
-                debug!(?path, "Setting database file permissions to 0600");
                 permissions.set_mode(0o600);
                 std::fs::set_permissions(path, permissions)?;
             }
