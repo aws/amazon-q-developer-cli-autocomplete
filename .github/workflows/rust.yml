@@ -90,8 +90,8 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --lib --bins --test '*' --exclude fig_desktop-fuzz
 
-  cargo-clippy-windows-chat-cli:
-    name: Clippy Windows (chat_cli)
+  cargo-clippy-windows:
+    name: Clippy Windows
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -107,11 +107,11 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: cargo-clippy-windows-chat-cli-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
-      - run: cargo clippy --locked -p chat_cli --color always -- -D warnings
+          key: cargo-clippy-windows-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
+      - run: cargo clippy --locked -p q_cli --color always -- -D warnings
 
-  cargo-test-windows-chat-cli:
-    name: Test Windows (chat_cli)
+  cargo-test-windows:
+    name: Test Windows
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -127,9 +127,9 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: cargo-test-windows-chat-cli-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
+          key: cargo-test-windows-${{ hashFiles('**/Cargo.lock') }}-${{ steps.toolchain.outputs.cachekey }}
       - name: Run tests
-        run: cargo test --locked -p chat_cli
+        run: cargo test --locked -p q_cli
 
   cargo-fmt:
     name: Fmt
