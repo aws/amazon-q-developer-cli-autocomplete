@@ -1,5 +1,5 @@
 pub const APP_BUNDLE_ID: &str = "com.amazon.codewhisperer";
-pub const APP_BUNDLE_NAME: &str = "Kiro-Cli.app";
+pub const APP_BUNDLE_NAME: &str = "Kiro CLI.app";
 
 #[cfg(target_os = "macos")]
 pub const APP_PROCESS_NAME: &str = "kiro_cli_desktop";
