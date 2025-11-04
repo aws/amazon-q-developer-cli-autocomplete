@@ -10,11 +10,16 @@ import Tab, { ProfileTab } from "./tabs";
 import { useLocalStateZodDefault } from "@/hooks/store/useState";
 import { z } from "zod";
 import { Link } from "@/components/ui/link";
-import { Q_MIGRATION_URL } from "@/lib/constants";
+import {
+  Q_MIGRATION_URL,
+  PRODUCT_NAME,
+  PREVIOUS_PRODUCT_NAME,
+} from "@/lib/constants";
 import { useAuth, useAuthRequest, useRefreshAuth } from "@/hooks/store/useAuth";
 
 export default function LoginModal({ next }: { next: () => void }) {
   const midway = window?.fig?.constants?.midway ?? false;
+  const isRemote = window?.fig?.constants?.isRemote ?? false;
 
   const [loginState, setLoginState] = useState<
     "not started" | "loading" | "logged in"
@@ -61,6 +66,81 @@ export default function LoginModal({ next }: { next: () => void }) {
     // to the user.
     setAuthRequestId("");
   }, [loginMethod, setAuthRequestId]);
+
+  async function handleUnifiedPortalLogin() {
+    try {
+      setError(null);
+      setLoginState("loading");
+      const res = await Auth.startUnifiedPortal({});
+
+      // Handle social login (Google/GitHub)
+      if (res.kind === "social") {
+        Internal.sendWindowFocusRequest({});
+        await refreshAuth();
+        setLoginState("logged in");
+        next();
+        return;
+      }
+
+      // Handle SSO login (builderid/awsidc/internal)
+      const isSsoKind =
+        res.kind === "internal" ||
+        res.kind === "awsidc" ||
+        res.kind === "builderid";
+
+      if (isSsoKind && res.issuerUrl && res.idcRegion) {
+        // Start PKCE auth
+        setPkceTimedOut(false);
+        setAuthRequestId(undefined);
+
+        const init = await Auth.startPkceAuthorization({
+          issuerUrl: res.issuerUrl,
+          region: res.idcRegion,
+        }).catch((err) => {
+          setLoginState("not started");
+          setError(err.message);
+          console.error(err);
+          throw err;
+        });
+
+        setAuthRequestId(init.authRequestId);
+
+        Native.open(init.url).catch((err) => {
+          console.error(err);
+          setError(
+            "Failed to open the browser. As an alternative, try logging in with device code.",
+          );
+        });
+
+        await Auth.finishPkceAuthorization({
+          authRequestId: init.authRequestId,
+        })
+          .then(() => {
+            Internal.sendWindowFocusRequest({});
+            if (res.kind === "awsidc" || res.kind === "internal") {
+              setShowProfileTab(true);
+            } else {
+              refreshAuth();
+              next();
+            }
+          })
+          .catch((err) => {
+            if (currAuthRequestId() === init.authRequestId) {
+              setLoginState("not started");
+              setError(err.message);
+              console.error(err);
+            }
+          });
+        return;
+      }
+
+      throw new Error("Unknown portal result");
+    } catch (err) {
+      console.error(err);
+      setLoginState("not started");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function handleLogin(startUrl?: string, region?: string) {
     if (loginMethod === "pkce") {
@@ -147,8 +227,12 @@ export default function LoginModal({ next }: { next: () => void }) {
       .then(() => {
         setLoginState("logged in");
         Internal.sendWindowFocusRequest({});
-        refreshAuth();
-        next();
+        if (tab === "iam") {
+          setShowProfileTab(true);
+        } else {
+          refreshAuth();
+          next();
+        }
       })
       .catch((err) => {
         setLoginState("not started");
@@ -166,6 +250,185 @@ export default function LoginModal({ next }: { next: () => void }) {
     if (loginState !== "logged in" || showProfileTab) return;
     next();
   }, [loginState, showProfileTab, next]);
+
+  // ===== LOCAL ENVIRONMENT =====
+  if (!isRemote) {
+    if (showProfileTab) {
+      return (
+        <ProfileTab
+          next={() => {
+            refreshAuth();
+            setLoginState("logged in");
+            setShowProfileTab(false);
+          }}
+          back={() => {
+            setLoginState("not started");
+            setShowProfileTab(false);
+            setLoginMethod("pkce");
+          }}
+        />
+      );
+    }
+
+    return (
+      <div className="flex flex-col items-center gap-8 gradient-q-secondary-light -m-10 pt-10 p-4 rounded-lg text-white">
+        <div className="flex flex-col items-center gap-8">
+          <Lockup />
+          {!completedOnboarding && (
+            <h2 className="text-xl text-white font-semibold select-none leading-none font-ember tracking-tight">
+              Sign in to get started
+            </h2>
+          )}
+        </div>
+
+        {error && (
+          <div className="flex flex-col items-center gap-2 w-full bg-red-200 border border-red-600 rounded py-2 px-2">
+            <p className="text-black dark:text-white font-semibold text-center">
+              Failed to login
+            </p>
+            <p className="text-black dark:text-white text-center">{error}</p>
+            {loginMethod === "pkce" && loginState === "loading" && (
+              <Button
+                variant="ghost"
+                className="self-center mx-auto text-black hover:bg-white/40 mt-2"
+                onClick={() => {
+                  setLoginMethod("deviceCode");
+                  setLoginState("not started");
+                  setError(null);
+                  Auth.cancelPkceAuthorization().catch(console.error);
+                }}
+              >
+                Login with Device Code
+              </Button>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-col items-center gap-4 text-white text-sm">
+          {/* ===== PORTAL LOADING STATE ===== */}
+          {loginState === "loading" && loginMethod === "pkce" ? (
+            <>
+              <p className="text-center w-80">
+                Waiting for authentication in the browser to complete...
+              </p>
+
+              {pkceTimedOut && (
+                <div className="text-center w-80">
+                  <p>Browser not opening?</p>
+                  <Button
+                    variant="ghost"
+                    className="h-auto p-1 px-2 hover:bg-white/20 hover:text-white italic mt-2"
+                    onClick={() => {
+                      setLoginMethod("deviceCode");
+                      setLoginState("not started");
+                      setError(null);
+                      Auth.cancelPkceAuthorization().catch(console.error);
+                    }}
+                  >
+                    Try authenticating with device code
+                  </Button>
+                </div>
+              )}
+
+              <Button
+                variant="glass"
+                className="self-center w-32"
+                onClick={() => {
+                  setLoginState("not started");
+                  setError(null);
+                  Auth.cancelPkceAuthorization().catch(console.error);
+                }}
+              >
+                Back
+              </Button>
+            </>
+          ) : /* ===== DEVICE CODE SELECTION (NOT LOADING) ===== */
+          loginState === "not started" && loginMethod === "deviceCode" ? (
+            <>
+              <p className="text-center text-sm text-white/70 mb-2">
+                Note: Social login is not supported in device code mode
+              </p>
+
+              <Tab
+                tab={tab}
+                handleLogin={handleLogin}
+                toggleTab={
+                  tab === "builderId"
+                    ? () => setTab("iam")
+                    : () => setTab("builderId")
+                }
+                signInText={completedOnboarding ? "Log back in" : "Sign in"}
+              />
+              <Button
+                variant="ghost"
+                className="h-auto p-1 px-2 hover:bg-white/20 hover:text-white text-xs mt-2"
+                onClick={() => {
+                  setLoginMethod("pkce");
+                  setLoginState("not started");
+                  setError(null);
+                }}
+              >
+                ← Quit device code
+              </Button>
+            </>
+          ) : /* ===== DEVICE CODE LOADING STATE ===== */
+          loginState === "loading" &&
+            loginMethod === "deviceCode" &&
+            loginCode &&
+            loginUrl ? (
+            <>
+              <p className="text-center w-80">
+                Confirm code <span className="font-bold">{loginCode}</span> in
+                the login page at the following link:
+              </p>
+              <p className="text-center">{loginUrl}</p>
+              <Button
+                variant="ghost"
+                className="h-auto p-1 px-2 hover:bg-white/20 hover:text-white"
+                onClick={() => {
+                  navigator.clipboard.writeText(loginUrl);
+                  setCopyToClipboardText("Copied!");
+                }}
+              >
+                {copyToClipboardText}
+              </Button>
+              <Button
+                variant="glass"
+                className="self-center w-32"
+                onClick={() => {
+                  setLoginState("not started");
+                  setLoginCode(null);
+                  setError(null);
+                }}
+              >
+                Back
+              </Button>
+            </>
+          ) : (
+            /* ===== INITIAL STATE: SINGLE SIGN IN BUTTON ===== */
+            <>
+              <div className="text-center mb-6">
+                <h2 className="text-xl font-semibold text-white mb-3">
+                  Welcome to {PRODUCT_NAME}
+                </h2>
+                <p className="text-base text-white">
+                  Click below to open the auth portal and sign in
+                </p>
+              </div>
+
+              <Button
+                variant="glass"
+                className="self-center w-40"
+                onClick={handleUnifiedPortalLogin}
+              >
+                {completedOnboarding ? "Log back in" : "Sign in"}
+              </Button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return showProfileTab ? (
     <ProfileTab
@@ -189,12 +452,20 @@ export default function LoginModal({ next }: { next: () => void }) {
           </h2>
         )}
         {completedOnboarding && tab == "builderId" && (
-          <div className="text-center flex flex-col">
+          <div
+            className="text-center flex flex-col p-4"
+            style={{
+              backgroundColor: "var(--banner-bg)",
+              border: "1px solid var(--banner-border)",
+              borderRadius: "var(--banner-radius)",
+            }}
+          >
             <div className="font-ember font-bold">
-              CodeWhisperer is now Amazon Q
+              {PREVIOUS_PRODUCT_NAME} CLI is now {PRODUCT_NAME} CLI
             </div>
+            All existing features remain unchanged.{" "}
             <Link href={Q_MIGRATION_URL} className="text-sm">
-              Read the announcement blog post
+              Learn more
             </Link>
           </div>
         )}

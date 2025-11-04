@@ -72,6 +72,9 @@
     --ring: 240 10% 3.9%;
 
     --radius: 0.5rem;
+    --banner-bg: #262626;
+    --banner-border: #C6A0FF;
+    --banner-radius: 13px;
   }
 
   body {
@@ -125,8 +128,8 @@
       ellipse farthest-corner at 100% 0%,
       #a7f8ff 0%,
       #008dff 40%,
-      #4a00c8 80%,
-      #39127d 100%
+      #8700ff 80%,
+      #5500b3 100%
     );
   }
 
@@ -134,8 +137,8 @@
     background: radial-gradient(
       ellipse farthest-corner at 100% 0%,
       #008dff 0%,
-      #4a00c8 50%,
-      #39127d 100%
+      #8700ff 50%,
+      #5500b3 100%
     );
   }
 
@@ -152,15 +155,15 @@
       ),
       radial-gradient(
         100% 100% at 100% 0%,
-        #6e3bf1 7.53%,
-        rgba(110, 59, 241, 0) 100%
+        #c19aff 7.53%,
+        rgba(193, 154, 255, 0) 100%
       ),
       radial-gradient(
         100% 86.61% at 100% 100%,
         #538bf7 0%,
         rgba(83, 139, 247, 0) 100%
       ),
-      #301673;
+      #8a6bb8;
   }
 }
 

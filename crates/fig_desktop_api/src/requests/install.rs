@@ -228,12 +228,12 @@ where
                     .env()
                     .current_dir()
                     .map_err(super::Error::from_std)?
-                    .join("share/applications/q-desktop.desktop");
+                    .join("share/applications/kiro-cli-desktop.desktop");
                 let icon_path = ctx
                     .env()
                     .current_dir()
                     .map_err(super::Error::from_std)?
-                    .join("share/icons/hicolor/128x128/apps/q-desktop.png");
+                    .join("share/icons/hicolor/128x128/apps/kiro-cli-desktop.png");
                 let desktop_integration =
                     DesktopEntryIntegration::new(ctx, Some(entry_path), Some(icon_path), Some(exec_path.into()));
                 match action {
@@ -409,7 +409,9 @@ mod tests {
         let entry_path = appimage_desktop_entry_path(&ctx).unwrap();
         let icon_path = appimage_desktop_entry_icon_path(&ctx).unwrap();
         fs.create_dir_all(entry_path.parent().unwrap()).await.unwrap();
-        fs.write(&entry_path, "[Desktop Entry]\nExec=q-desktop").await.unwrap();
+        fs.write(&entry_path, "[Desktop Entry]\nExec=kiro-cli-desktop")
+            .await
+            .unwrap();
         fs.create_dir_all(icon_path.parent().unwrap()).await.unwrap();
         fs.write(&icon_path, "image").await.unwrap();
         let ctx = TestContext {

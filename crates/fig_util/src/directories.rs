@@ -508,7 +508,10 @@ pub fn appimage_desktop_entry_path<Ctx: EnvProvider>(ctx: &Ctx) -> Result<PathBu
     if !ctx.env().in_appimage() {
         return Err(DirectoryError::NotAppImage);
     }
-    Ok(ctx.env().current_dir()?.join("share/applications/q-desktop.desktop"))
+    Ok(ctx
+        .env()
+        .current_dir()?
+        .join("share/applications/kiro-cli-desktop.desktop"))
 }
 
 /// The path to the icon bundled with the AppImage to be used for the desktop entry file.
@@ -521,7 +524,7 @@ pub fn appimage_desktop_entry_icon_path<Ctx: EnvProvider>(ctx: &Ctx) -> Result<P
     Ok(ctx
         .env()
         .current_dir()?
-        .join("share/icons/hicolor/128x128/apps/q-desktop.png"))
+        .join("share/icons/hicolor/128x128/apps/kiro-cli-desktop.png"))
 }
 
 /// The path to the data directory auto-created by the Linux windowing application.
@@ -702,7 +705,7 @@ mod tests {
     #[test]
     fn snapshot_themes_dir() {
         linux!(themes_dir(&Context::new()), @"/usr/share/fig/themes");
-        macos!(themes_dir(&Context::new()), @"/Applications/Amazon Q.app/Contents/Resources/themes");
+        macos!(themes_dir(&Context::new()), @"/Applications/Kiro CLI.app/Contents/Resources/themes");
         windows!(themes_dir(&Context::new()), @r"C:\Users\$USER\AppData\Local\AmazonQ\resources\themes");
     }
 

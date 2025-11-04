@@ -220,7 +220,6 @@ pub async fn login(proxy: &EventLoopProxy) -> LocalResult {
                     dry_run: false,
                 },
                 WindowEvent::Reload,
-                WindowEvent::Show,
             ]),
         })
         .map_err(|err| error!(?err))
@@ -240,7 +239,7 @@ pub async fn logout(proxy: &EventLoopProxy) -> LocalResult {
     proxy
         .send_event(Event::WindowEvent {
             window_id: DASHBOARD_ID,
-            window_event: WindowEvent::Batch(vec![WindowEvent::Reload, WindowEvent::Show]),
+            window_event: WindowEvent::Reload,
         })
         .map_err(|err| error!(?err))
         .ok();

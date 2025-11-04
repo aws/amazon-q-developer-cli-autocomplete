@@ -4,6 +4,8 @@ import {
   AuthStartPkceAuthorizationResponse,
   AuthStatusResponse_AuthKind,
   AuthBuilderIdPollCreateTokenResponse_PollStatus as PollStatus,
+  AuthStartUnifiedPortalRequest,
+  AuthStartUnifiedPortalResponse,
 } from "@aws/amazon-q-developer-cli-proto/fig";
 import {
   sendAuthBuilderIdStartDeviceAuthorizationRequest,
@@ -12,19 +14,31 @@ import {
   sendAuthStatusRequest,
   sendAuthStartPkceAuthorizationRequest,
   sendAuthCancelPkceAuthorizationRequest,
+  sendAuthStartUnifiedPortalRequest,
 } from "./requests.js";
 import { AuthFinishPkceAuthorizationResponse } from "@aws/amazon-q-developer-cli-proto/fig";
 import { AuthFinishPkceAuthorizationRequest } from "@aws/amazon-q-developer-cli-proto/fig";
 
 export function status() {
   return sendAuthStatusRequest({}).then((res) => {
-    let authKind: "BuilderId" | "IamIdentityCenter" | undefined;
+    let authKind:
+      | "BuilderId"
+      | "IamIdentityCenter"
+      | "Google"
+      | "Github"
+      | undefined;
     switch (res.authKind) {
       case AuthStatusResponse_AuthKind.BUILDER_ID:
         authKind = "BuilderId";
         break;
       case AuthStatusResponse_AuthKind.IAM_IDENTITY_CENTER:
         authKind = "IamIdentityCenter";
+        break;
+      case AuthStatusResponse_AuthKind.SOCIAL_GOOGLE:
+        authKind = "Google";
+        break;
+      case AuthStatusResponse_AuthKind.SOCIAL_GITHUB:
+        authKind = "Github";
         break;
       default:
         break;
@@ -104,4 +118,10 @@ export async function builderIdPollCreateToken({
         throw new Error(`Unknown poll status: ${pollStatus.status}`);
     }
   }
+}
+
+export function startUnifiedPortal(
+  _req: Omit<AuthStartUnifiedPortalRequest, "$typeName"> = {},
+): Promise<AuthStartUnifiedPortalResponse> {
+  return sendAuthStartUnifiedPortalRequest({});
 }

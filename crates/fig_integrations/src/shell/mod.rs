@@ -45,7 +45,6 @@ pub mod inline_shell_completion_plugin {
 
     #[cfg(test)]
     mod tests {
-        use fig_util::CLI_BINARY_NAME;
 
         use super::*;
 

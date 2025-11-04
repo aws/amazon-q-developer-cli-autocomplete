@@ -393,8 +393,8 @@ mod tests {
 
     const TEST_DESKTOP_ENTRY: &str = r#"[Desktop Entry]
 Categories=Development;
-Exec=q-desktop
-Icon=q-desktop
+Exec=kiro-cli-desktop
+Icon=kiro-cli-desktop
 Name=q_desktop
 Terminal=false
 Type=Application"#;

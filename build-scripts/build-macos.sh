@@ -50,9 +50,8 @@ done
 export CARGO_HOME="$PWD/../.cargo"
 RUSTUP_HOME="$PWD/../.rustup"
 
-# TODO: reenable once mise fixes http issues
-# mise install --verbose
-# eval "$(mise activate bash --shims)"
+mise install --verbose
+eval "$(mise activate bash --shims)"
 
 # clean up old install
 rm -rf "$CARGO_HOME"

@@ -1,9 +1,9 @@
 type: :app # no need to change this for .pkg, .dmg and executables
 os: :osx
-name: Amazon Q.app
+name: Kiro CLI.app
 outputs:
   - label: macos
-    path: Amazon Q.app
+    path: Kiro CLI.app
 app:
   :identifier: com.amazon.codewhisperer # this has to be same as Bundle identifier value in info.plist
   signing_requirements:
@@ -12,9 +12,9 @@ app:
     signing_args:
       entitlements_path: SIGNING_METADATA/entitlements.plist
   embedded_requirements:
-    Contents/MacOS/q:
-      :identifier: com.amazon.q
+    Contents/MacOS/kiro-cli:
+      :identifier: com.amazon.kiro-cli
       signing_args:
-    Contents/MacOS/qterm:
-      :identifier: com.amazon.qterm
+    Contents/MacOS/kiro-cli-term:
+      :identifier: com.amazon.kiro-cli-term
       signing_args:

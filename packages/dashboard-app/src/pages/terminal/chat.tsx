@@ -2,6 +2,7 @@ import { UserPrefView } from "@/components/preference/list";
 import { Terminal } from "@/components/ui/terminal";
 import settings, { intro } from "@/data/chat";
 import chatDemo from "@assets/images/chat_demo.gif";
+import { PRODUCT_NAME } from "@/lib/constants";
 
 export default function Page() {
   return (
@@ -16,9 +17,10 @@ export default function Page() {
         </h2>
         <div className="flex flex-col gap-6 mt-4">
           <p className="font-light leading-tight">
-            Amazon Q is an agentic AI assistant capable of performing complex,
-            multi-step actions on your behalf. Amazon Q can write files locally,
-            query AWS resources, and execute bash commands for you.
+            {PRODUCT_NAME} is an agentic AI assistant capable of performing
+            complex, multi-step actions on your behalf. {PRODUCT_NAME} can write
+            files locally, query AWS resources, and execute bash commands for
+            you.
           </p>
           <Terminal title="Chat">
             <Terminal.Tab>

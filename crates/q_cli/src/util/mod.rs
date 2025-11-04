@@ -319,9 +319,12 @@ pub fn dialoguer_theme() -> ColorfulTheme {
         ..ColorfulTheme::default()
     }
 }
+pub async fn is_logged_in_check() -> bool {
+    std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty()) || fig_auth::is_logged_in().await
+}
 
 pub async fn assert_logged_in() -> Result<(), Error> {
-    if !(fig_os_shim::Env::new().amazon_q_sigv4() || fig_auth::is_logged_in().await) {
+    if !is_logged_in_check().await {
         bail!(
             "You are not logged in, please log in with {}",
             format!("{CLI_BINARY_NAME} login",).bold()

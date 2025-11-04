@@ -43,6 +43,7 @@ from const import (
     CLI_PACKAGE_NAME,
     DESKTOP_BINARY_NAME,
     DESKTOP_PACKAGE_NAME,
+    TAURI_PRODUCT_NAME,
     DESKTOP_PACKAGE_PATH,
     DMG_NAME,
     LINUX_ARCHIVE_NAME,
@@ -52,8 +53,8 @@ from const import (
     MACOS_BUNDLE_ID,
     PTY_BINARY_NAME,
     PTY_PACKAGE_NAME,
-    TAURI_PRODUCT_NAME,
     URL_SCHEMA,
+    CHAT_BINARY_BRANCH,
 )
 
 BUILD_DIR_RELATIVE = pathlib.Path(os.environ.get("BUILD_DIR") or "build")

@@ -12,10 +12,11 @@ phases:
     commands:
       - export AWS_MAX_ATTEMPTS=10
       - echo "path - $PATH"
+      - echo "user - $(whoami)"
       - AWS_ACCOUNT=`aws sts get-caller-identity | jq -r '.Account'`
       # For now assume there is a suitable EC2 instance running. Obviously, we could add a StepFunction here to
       # get a new one, but this is a start
-      - INSTANCE_ID=`aws ec2 describe-instances --filters "Name=tag:Name,Values=FigIoDesktop MacOS aarch64 Build Server 1" "Name=instance-state-name,Values=running" | jq -r '.Reservations[0].Instances[0].InstanceId'`
+      - INSTANCE_ID=`aws ec2 describe-instances --filters "Name=tag:Name,Values=FigIoDesktop MacOS aarch64 Build Server V2" "Name=instance-state-name,Values=running" | jq -r '.Reservations[0].Instances[0].InstanceId'`
       - echo "ec2 instance id - $INSTANCE_ID"
       # The name of the SSM document has to change every time its deployed, so go look for it
       # We can make this an environment variable passed into CodeBuild.
@@ -36,6 +37,7 @@ phases:
       # TODO(grant): change bucket name to env var
       - aws s3 cp --recursive s3://fig-io-desktop-build-output-$AWS_ACCOUNT-$AWS_REGION/staging .
       - aws s3 rm --recursive s3://fig-io-desktop-build-output-$AWS_ACCOUNT-$AWS_REGION/staging
+      - ls -la
 
 artifacts:
   files:

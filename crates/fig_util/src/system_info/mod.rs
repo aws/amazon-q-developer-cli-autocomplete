@@ -1,6 +1,8 @@
 pub mod linux;
 
 use std::borrow::Cow;
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::OnceLock;
 
 use cfg_if::cfg_if;
@@ -364,6 +366,32 @@ pub fn get_arch() -> &'static str {
         over_ride
     } else {
         std::env::consts::ARCH
+    }
+}
+
+pub fn is_mwinit_available() -> bool {
+    static MWINIT_AVAILABLE: OnceLock<bool> = OnceLock::new();
+    *MWINIT_AVAILABLE.get_or_init(|| which_mwinit().is_some())
+}
+
+pub fn which_mwinit() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    let cmd = ("where.exe", "mwinit");
+
+    #[cfg(not(target_os = "windows"))]
+    let cmd = ("which", "mwinit");
+
+    let output = Command::new(cmd.0).arg(cmd.1).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let path = stdout.lines().next()?.trim();
+    if path.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(path))
     }
 }
 

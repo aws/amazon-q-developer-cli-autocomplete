@@ -11,13 +11,13 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    Ssooidc(#[from] Box<aws_sdk_ssooidc::Error>),
+    Ssooidc(Box<aws_sdk_ssooidc::Error>),
     #[error(transparent)]
-    SdkRegisterClient(#[from] SdkError<RegisterClientError>),
+    SdkRegisterClient(Box<SdkError<RegisterClientError>>),
     #[error(transparent)]
-    SdkCreateToken(#[from] SdkError<CreateTokenError>),
+    SdkCreateToken(Box<SdkError<CreateTokenError>>),
     #[error(transparent)]
-    SdkStartDeviceAuthorization(#[from] SdkError<StartDeviceAuthorizationError>),
+    SdkStartDeviceAuthorization(Box<SdkError<StartDeviceAuthorizationError>>),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -48,15 +48,52 @@ pub enum Error {
     OAuthMissingCode,
     #[error("OAuth error: {0}")]
     OAuthCustomError(String),
+    #[error(transparent)]
+    Reqwest(#[from] reqwest::Error),
+    #[error("HTTP error: {0}")]
+    HttpStatus(reqwest::StatusCode),
+    // Social auth specific errors
+    #[error(
+        "Authentication failed: The identity provider denied access. Please ensure you grant all required permissions."
+    )]
+    SocialAuthProviderDeniedAccess,
+    #[error("Authentication failed: The identity provider reported an error: {0}")]
+    SocialAuthProviderFailure(String),
+    #[error("Invalid access code. Please check your invitation code and try again.")]
+    SocialInvalidInvitationCode,
+}
+
+impl From<aws_sdk_ssooidc::Error> for Error {
+    fn from(value: aws_sdk_ssooidc::Error) -> Self {
+        Self::Ssooidc(Box::new(value))
+    }
+}
+
+impl From<SdkError<RegisterClientError>> for Error {
+    fn from(value: SdkError<RegisterClientError>) -> Self {
+        Self::SdkRegisterClient(Box::new(value))
+    }
+}
+
+impl From<SdkError<CreateTokenError>> for Error {
+    fn from(value: SdkError<CreateTokenError>) -> Self {
+        Self::SdkCreateToken(Box::new(value))
+    }
+}
+
+impl From<SdkError<StartDeviceAuthorizationError>> for Error {
+    fn from(err: SdkError<StartDeviceAuthorizationError>) -> Self {
+        Error::SdkStartDeviceAuthorization(Box::new(err))
+    }
 }
 
 impl Error {
     pub fn to_verbose_string(&self) -> String {
         match self {
             Error::Ssooidc(s) => DisplayErrorContext(s).to_string(),
-            Error::SdkRegisterClient(s) => DisplayErrorContext(s).to_string(),
-            Error::SdkCreateToken(s) => DisplayErrorContext(s).to_string(),
-            Error::SdkStartDeviceAuthorization(s) => DisplayErrorContext(s).to_string(),
+            Error::SdkRegisterClient(s) => DisplayErrorContext(&**s).to_string(),
+            Error::SdkCreateToken(s) => DisplayErrorContext(&**s).to_string(),
+            Error::SdkStartDeviceAuthorization(s) => DisplayErrorContext(&**s).to_string(),
             other => other.to_string(),
         }
     }

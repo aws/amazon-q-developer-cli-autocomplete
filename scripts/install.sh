@@ -3,18 +3,17 @@
 set -eu
 
 # =============================================================================
-# Q CLI Installation Script
+# Kiro CLI Installation Script
 # =============================================================================
 
 # Configuration
-BINARY_NAME="q"
-CLI_NAME="Q CLI"
-COMMAND_NAME="q"
-DESKTOP_BINARY_NAME="q_desktop"
+BINARY_NAME="kiro-cli"
+CLI_NAME="Kiro CLI"
+COMMAND_NAME="kiro-cli"
 BASE_URL="https://desktop-release.q.us-east-1.amazonaws.com"
 MANIFEST_URL="${BASE_URL}/latest/manifest.json"
-MACOS_FILENAME="Amazon Q.dmg"
-MACOS_FILENAME_ESCAPED="Amazon%20Q.dmg"
+MACOS_FILENAME="Kiro CLI.dmg"
+MACOS_FILENAME_ESCAPED="Kiro%20CLI.dmg"
 
 # Installation directories
 MACOS_APP_DIR="/Applications"
@@ -357,11 +356,9 @@ install_macos() {
     fi
     
     cp -R "$app_bundle" "$MACOS_APP_DIR/"
-    
-    mkdir -p "$HOME/.local/bin"
-    local macos_bin="$MACOS_APP_DIR/$app_name/Contents/MacOS"
 
-    "$macos_bin/$DESKTOP_BINARY_NAME" --no-dashboard > /dev/null 2>&1 &
+    open -g -a "$MACOS_APP_DIR/$app_name" --args --no-dashboard
+    sleep 3
 }
 
 # Install on Linux
@@ -384,7 +381,7 @@ install_linux() {
     
     log "Running installer..."
     chmod +x "$install_script"
-    Q_SKIP_SETUP=1 "$install_script"
+    KIRO_CLI_SKIP_SETUP=1 "$install_script"
 }
 
 # Cleanup function - only removes files/dirs we created
@@ -422,8 +419,6 @@ cleanup() {
 # =============================================================================
 
 main() {
-    log "Installing $CLI_NAME..."
-    
     # Parse command line arguments
     parse_args "$@"
     
@@ -453,6 +448,8 @@ main() {
     # Download and verify
     download_and_verify "$download_url" "$filename"
     local downloaded_file="$DOWNLOAD_DIR/$filename"
+
+    log "Installing $CLI_NAME..."
 
     # Install based on platform
     if [[ "$os" == "darwin" ]]; then

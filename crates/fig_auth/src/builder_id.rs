@@ -53,7 +53,6 @@ use time::OffsetDateTime;
 use tracing::{
     debug,
     error,
-    info,
     trace,
     warn,
 };
@@ -128,7 +127,7 @@ pub struct DeviceRegistration {
 }
 
 impl DeviceRegistration {
-    const SECRET_KEY: &'static str = "codewhisperer:odic:device-registration";
+    pub const SECRET_KEY: &'static str = "codewhisperer:odic:device-registration";
 
     pub fn from_output(
         output: RegisterClientOutput,
@@ -293,7 +292,7 @@ pub struct BuilderIdToken {
 }
 
 impl BuilderIdToken {
-    const SECRET_KEY: &'static str = "codewhisperer:odic:token";
+    pub const SECRET_KEY: &'static str = "codewhisperer:odic:token";
 
     #[cfg(test)]
     fn test() -> Self {
@@ -571,39 +570,6 @@ pub async fn is_amzn_user() -> Result<bool> {
     Ok(builder_id_token().await?.is_some_and(|t| t.is_amzn_user()))
 }
 
-pub async fn is_logged_in() -> bool {
-    match builder_id_token().await {
-        Ok(Some(_)) => true,
-        Ok(None) => {
-            info!("not logged in - no valid token found");
-            false
-        },
-        Err(err) => {
-            warn!(?err, "failed to try to load a builder id token");
-            false
-        },
-    }
-}
-
-pub async fn logout() -> Result<()> {
-    let Ok(secret_store) = SecretStore::new().await else {
-        return Ok(());
-    };
-
-    let (builder_res, device_res) = tokio::join!(
-        secret_store.delete(BuilderIdToken::SECRET_KEY),
-        secret_store.delete(DeviceRegistration::SECRET_KEY),
-    );
-
-    let profile_res = fig_settings::state::remove_value("api.codewhisperer.profile");
-
-    builder_res?;
-    device_res?;
-    profile_res?;
-
-    Ok(())
-}
-
 #[derive(Debug, Clone)]
 pub struct BearerResolver;
 
@@ -685,12 +651,6 @@ mod tests {
         token.start_url = Some(AMZN_START_URL.into());
         assert_eq!(token.token_type(), TokenType::IamIdentityCenter);
         assert!(token.is_amzn_user());
-    }
-
-    #[ignore = "not in ci"]
-    #[tokio::test]
-    async fn logout_test() {
-        logout().await.unwrap();
     }
 
     #[ignore = "login flow"]

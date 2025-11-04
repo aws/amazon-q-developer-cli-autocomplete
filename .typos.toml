@@ -1,4 +1,18 @@
 [files]
+extend-exclude = [
+  "*.png",
+  "*.jpg", 
+  "*.jpeg",
+  "*.gif",
+  "*.ico",
+  "*.icns",
+  "*.svg",
+  "*.woff",
+  "*.woff2",
+  "*.ttf",
+  "*.eot",
+  "crates/fig_desktop/icons/**"
+]
 
 [default.extend-words]
 mmaped = "mmaped"

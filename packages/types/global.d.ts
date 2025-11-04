@@ -27,6 +27,7 @@ declare global {
           // TODO: add actual types
           linux?: unknown;
           midway?: boolean;
+          isRemote?: boolean;
         }
       | undefined;
     let settings: Record<string, unknown>;

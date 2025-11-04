@@ -169,6 +169,7 @@ where
                 AuthCancelPkceAuthorizationRequest,
                 AuthFinishPkceAuthorizationRequest,
                 AuthStartPkceAuthorizationRequest,
+                AuthStartUnifiedPortalRequest,
                 AuthStatusRequest,
                 CheckForUpdatesRequest,
                 CodewhispererListCustomizationRequest,
@@ -257,6 +258,7 @@ where
                 AuthBuilderIdStartDeviceAuthorizationRequest(request) => {
                     auth::builder_id_start_device_authorization(request, &ctx).await
                 },
+                AuthStartUnifiedPortalRequest(request) => auth::start_unified_portal(request).await,
                 AuthBuilderIdPollCreateTokenRequest(request) => auth::builder_id_poll_create_token(request, &ctx).await,
                 // codewhisperer api
                 CodewhispererListCustomizationRequest(request) => codewhisperer::list_customization(request).await,

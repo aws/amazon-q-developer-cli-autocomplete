@@ -110,6 +110,7 @@ async fn replace_bins(bin_dir: &Path) -> Result<(), Error> {
             }
         }
     }
+
     res
 }
 

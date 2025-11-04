@@ -6,7 +6,7 @@ use std::sync::{
 use amzn_codewhisperer_streaming_client::Client as CodewhispererStreamingClient;
 use amzn_qdeveloper_streaming_client::Client as QDeveloperStreamingClient;
 use aws_types::request_id::RequestId;
-use fig_auth::builder_id::BearerResolver;
+use fig_auth::session::UnifiedBearerResolver;
 use fig_aws_common::{
     UserAgentOverrideInterceptor,
     app_name,
@@ -80,7 +80,7 @@ impl StreamingClient {
             .http_client(fig_aws_common::http_client::client())
             .interceptor(OptOutInterceptor::new())
             .interceptor(UserAgentOverrideInterceptor::new())
-            .bearer_token_resolver(BearerResolver)
+            .bearer_token_resolver(UnifiedBearerResolver)
             .app_name(app_name())
             .endpoint_url(endpoint.url())
             .stalled_stream_protection(stalled_stream_protection_config())

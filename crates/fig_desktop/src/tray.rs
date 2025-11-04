@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 
-use cfg_if::cfg_if;
 use fig_install::{
     InstallComponents,
     UpdateOptions,
@@ -354,25 +353,16 @@ pub async fn build_tray(
         .build()
 }
 
-pub fn get_icon(is_logged_in: bool) -> Icon {
+pub fn get_icon(_is_logged_in: bool) -> Icon {
     let (icon_rgba, icon_width, icon_height) = {
-        let bytes = if is_logged_in {
-            cfg_if! {
-                if #[cfg(target_os = "linux")] {
-                    include_bytes!("../icons/icon-monochrome-light.png").to_vec()
-                } else {
-                    include_bytes!("../icons/icon-monochrome.png").to_vec()
-                }
+        let bytes = {
+            #[cfg(target_os = "linux")]
+            {
+                include_bytes!("../icons/icon-monochrome-light.png").to_vec()
             }
-        } else {
-            cfg_if! {
-                if #[cfg(target_os = "linux")] {
-                    // This is intentionally the same as when logged in since Linux tray icons
-                    // don't really seem to work that well when multiple choices are available.
-                    include_bytes!("../icons/icon-monochrome-light.png").to_vec()
-                } else {
-                    include_bytes!("../icons/not-logged-in.png").to_vec()
-                }
+            #[cfg(not(target_os = "linux"))]
+            {
+                include_bytes!("../icons/icon-monochrome.png").to_vec()
             }
         };
         let image = image::load_from_memory(&bytes)

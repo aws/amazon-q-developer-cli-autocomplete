@@ -23,6 +23,10 @@ export default function Page() {
   const [profiles, setProfiles] = useState<Profile[] | undefined>(undefined);
 
   useEffect(() => {
+    if (auth.authKind !== "IamIdentityCenter") {
+      return;
+    }
+
     Profile.listAvailableProfiles()
       .then(async (res) => {
         setProfiles(
@@ -35,7 +39,7 @@ export default function Page() {
       .catch((err) => {
         console.error(err);
       });
-  }, []);
+  }, [auth.authKind]);
 
   useEffect(() => {
     State.get("api.codewhisperer.profile").then((profile) => {
@@ -60,6 +64,12 @@ export default function Page() {
     case "IamIdentityCenter":
       authKind = "AWS IAM Identity Center";
       break;
+    case "Google":
+      authKind = "Google";
+      break;
+    case "Github":
+      authKind = "Github";
+      break;
   }
 
   function logout() {
@@ -83,8 +93,8 @@ export default function Page() {
           <div className="flex flex-col gap-1">
             <h3 className="font-medium leading-none">Account type</h3>
             <p className="font-light leading-tight text-sm">
-              Users can log in with either AWS Builder ID or AWS IAM Identity
-              Center
+              Users can log in with either AWS Builder ID, AWS IAM Identity
+              Center, Google, or Github
             </p>
             <p className="font-light leading-tight text-sm text-black/50 dark:text-white/50">
               {auth.authed

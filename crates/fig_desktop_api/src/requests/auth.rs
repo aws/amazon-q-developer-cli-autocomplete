@@ -13,7 +13,13 @@ use fig_auth::pkce::{
     PkceClient,
     PkceRegistration,
 };
+use fig_auth::portal::{
+    PortalResult,
+    finish_unified_portal,
+    init_unified_portal,
+};
 use fig_auth::secret_store::SecretStore;
+use fig_auth::social::SocialProvider;
 use fig_proto::fig::auth_builder_id_poll_create_token_response::PollStatus;
 use fig_proto::fig::auth_status_response::AuthKind;
 use fig_proto::fig::server_originated_message::Submessage as ServerOriginatedSubMessage;
@@ -28,9 +34,12 @@ use fig_proto::fig::{
     AuthFinishPkceAuthorizationResponse,
     AuthStartPkceAuthorizationRequest,
     AuthStartPkceAuthorizationResponse,
+    AuthStartUnifiedPortalRequest,
+    AuthStartUnifiedPortalResponse,
     AuthStatusRequest,
     AuthStatusResponse,
 };
+use fig_util::open_url_async;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{
     Receiver,
@@ -218,24 +227,37 @@ impl<T: PkceClient + Send + Sync + 'static> PkceState<T> {
 }
 
 pub async fn status(_request: AuthStatusRequest) -> RequestResult {
-    let token = fig_auth::builder_id_token().await;
+    let builder_id_token = fig_auth::builder_id_token().await;
+    let secret_store = SecretStore::new()
+        .await
+        .map_err(|err| format!("Failed to load secret store: {err}"))?;
+    let social_token = fig_auth::social::social_token(&secret_store).await;
+
+    let authed = matches!(builder_id_token, Ok(Some(_))) || matches!(social_token, Ok(Some(_)));
+
+    let auth_kind = if let Ok(Some(social)) = &social_token {
+        Some(match social.provider {
+            SocialProvider::Google => AuthKind::SocialGoogle.into(),
+            SocialProvider::Github => AuthKind::SocialGithub.into(),
+        })
+    } else if let Ok(Some(auth)) = &builder_id_token {
+        Some(match auth.token_type() {
+            TokenType::BuilderId => AuthKind::BuilderId.into(),
+            TokenType::IamIdentityCenter => AuthKind::IamIdentityCenter.into(),
+        })
+    } else {
+        None
+    };
+    let (start_url, region) = match &builder_id_token {
+        Ok(Some(auth)) => (auth.start_url.clone(), auth.region.clone()),
+        _ => (None, None),
+    };
+
     Ok(ServerOriginatedSubMessage::AuthStatusResponse(AuthStatusResponse {
-        authed: matches!(token, Ok(Some(_))),
-        auth_kind: match &token {
-            Ok(Some(auth)) => match auth.token_type() {
-                TokenType::BuilderId => Some(AuthKind::BuilderId.into()),
-                TokenType::IamIdentityCenter => Some(AuthKind::IamIdentityCenter.into()),
-            },
-            _ => None,
-        },
-        start_url: match &token {
-            Ok(Some(auth)) => auth.start_url.clone(),
-            _ => None,
-        },
-        region: match &token {
-            Ok(Some(auth)) => auth.region.clone(),
-            _ => None,
-        },
+        authed,
+        auth_kind,
+        start_url,
+        region,
     })
     .into())
 }
@@ -354,6 +376,56 @@ pub async fn builder_id_poll_create_token(
     };
 
     Ok(ServerOriginatedSubMessage::AuthBuilderIdPollCreateTokenResponse(response).into())
+}
+
+pub async fn start_unified_portal(_req: AuthStartUnifiedPortalRequest) -> RequestResult {
+    // Step 1: init portal (bind callback port + compose auth URL)
+    let init = init_unified_portal()
+        .await
+        .map_err(|err| format!("Failed to init unified auth portal: {err}"))?;
+
+    // Step 2: open browser for the composed portal URL
+    // (Desktop backend takes responsibility to open; frontend just calls this API)
+    open_url_async(&init.auth_url)
+        .await
+        .map_err(|err| format!("Failed to open browser: {err}"))?;
+
+    // Step 3: wait for callback; do social exchange or return internal params
+    let secret_store = SecretStore::new()
+        .await
+        .map_err(|err| format!("Failed to load secret store: {err}"))?;
+
+    let resp = match finish_unified_portal(init, &secret_store).await {
+        Ok(PortalResult::Social(provider)) => AuthStartUnifiedPortalResponse {
+            kind: "social".to_string(),
+            provider: Some(provider.to_string()),
+            issuer_url: None,
+            idc_region: None,
+        },
+        Ok(PortalResult::Internal { issuer_url, idc_region }) => AuthStartUnifiedPortalResponse {
+            kind: "internal".to_string(),
+            provider: None,
+            issuer_url: Some(issuer_url),
+            idc_region: Some(idc_region),
+        },
+        Ok(PortalResult::AwsIdc { issuer_url, idc_region }) => AuthStartUnifiedPortalResponse {
+            kind: "awsidc".to_string(),
+            provider: None,
+            issuer_url: Some(issuer_url),
+            idc_region: Some(idc_region),
+        },
+        Ok(PortalResult::BuilderId { issuer_url, idc_region }) => AuthStartUnifiedPortalResponse {
+            kind: "builderid".to_string(),
+            provider: None,
+            issuer_url: Some(issuer_url),
+            idc_region: Some(idc_region),
+        },
+        Err(err) => {
+            return Err(format!("Unified auth portal failed: {err}").into());
+        },
+    };
+
+    Ok(ServerOriginatedSubMessage::AuthStartUnifiedPortalResponse(resp).into())
 }
 
 #[cfg(test)]

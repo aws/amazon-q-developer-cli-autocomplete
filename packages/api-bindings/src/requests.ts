@@ -22,6 +22,9 @@ import {
   AuthStartPkceAuthorizationRequest,
   AuthStartPkceAuthorizationRequestSchema,
   AuthStartPkceAuthorizationResponse,
+  AuthStartUnifiedPortalRequest,
+  AuthStartUnifiedPortalRequestSchema,
+  AuthStartUnifiedPortalResponse,
   AuthStatusRequest,
   AuthStatusRequestSchema,
   AuthStatusResponse,
@@ -676,6 +679,35 @@ export async function sendListAvailableProfilesRequest(
             reject(
               Error(
                 `Invalid response '${response?.case}' for 'ListAvailableProfilesRequest'`,
+              ),
+            );
+        }
+      },
+    );
+  });
+}
+
+export async function sendAuthStartUnifiedPortalRequest(
+  request: Omit<AuthStartUnifiedPortalRequest, "$typeName" | "$unknown">,
+): Promise<AuthStartUnifiedPortalResponse> {
+  return new Promise((resolve, reject) => {
+    sendMessage(
+      {
+        case: "authStartUnifiedPortalRequest",
+        value: create(AuthStartUnifiedPortalRequestSchema, request),
+      },
+      (response) => {
+        switch (response?.case) {
+          case "authStartUnifiedPortalResponse":
+            resolve(response.value);
+            break;
+          case "error":
+            reject(Error(response.value));
+            break;
+          default:
+            reject(
+              Error(
+                `Invalid response '${response?.case}' for 'AuthStartUnifiedPortalRequest'`,
               ),
             );
         }

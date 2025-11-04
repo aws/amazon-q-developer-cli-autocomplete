@@ -18,7 +18,7 @@ use amzn_consolas_client::operation::generate_recommendations::GenerateRecommend
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_types::request_id::RequestId;
-use fig_auth::builder_id::BearerResolver;
+use fig_auth::session::UnifiedBearerResolver;
 use fig_aws_common::{
     UserAgentOverrideInterceptor,
     app_name,
@@ -91,7 +91,7 @@ impl Client {
             .http_client(fig_aws_common::http_client::client())
             .interceptor(OptOutInterceptor::new())
             .interceptor(UserAgentOverrideInterceptor::new())
-            .bearer_token_resolver(BearerResolver)
+            .bearer_token_resolver(UnifiedBearerResolver)
             .app_name(app_name())
             .endpoint_url(endpoint.url())
             .build();

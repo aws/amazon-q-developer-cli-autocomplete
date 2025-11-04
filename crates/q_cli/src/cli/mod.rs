@@ -20,11 +20,11 @@ mod translate;
 mod uninstall;
 mod update;
 mod user;
-
 use std::io::{
     Write as _,
     stdout,
 };
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use anstream::{
@@ -53,6 +53,7 @@ use fig_auth::consts::OIDC_BUILDER_ID_REGION;
 use fig_auth::is_logged_in;
 use fig_auth::pkce::Region;
 use fig_auth::secret_store::SecretStore;
+use fig_auth::social::SocialToken;
 use fig_ipc::local::open_ui_element;
 use fig_log::{
     LogArgs,
@@ -60,6 +61,7 @@ use fig_log::{
 };
 use fig_proto::local::UiElement;
 use fig_settings::sqlite::database;
+use fig_util::directories::home_local_bin;
 use fig_util::{
     CLI_BINARY_NAME,
     PRODUCT_NAME,
@@ -85,9 +87,10 @@ use crate::util::desktop::{
 };
 use crate::util::{
     CliContext,
-    assert_logged_in,
-    qchat_path,
+    is_logged_in_check,
 };
+
+const LEGACY_WARNING: &str = "Warning! Q CLI is now Kiro CLI and should be invoked as kiro-cli rather than q";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
@@ -122,7 +125,7 @@ pub enum Processes {
     App,
 }
 
-/// The Amazon Q CLI
+/// The Kiro CLI
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
 pub enum CliRootCommands {
@@ -265,11 +268,11 @@ impl CliRootCommands {
 
 const HELP_TEXT: &str = color_print::cstr! {"
 
-<magenta,em>q</magenta,em> (Amazon Q CLI)
+<magenta,em>kiro-cli</magenta,em> (Kiro CLI)
 
-<magenta,em>Popular Subcommands</magenta,em>              <black!><em>Usage:</em> q [subcommand]</black!>
+<magenta,em>Popular Subcommands</magenta,em>              <black!><em>Usage:</em> kiro-cli [subcommand]</black!>
 ╭────────────────────────────────────────────────────╮
-│ <em>chat</em>         <black!>Chat with Amazon Q</black!>                    │
+│ <em>chat</em>         <black!>Chat with Kiro CLI</black!>                    │
 │ <em>translate</em>    <black!>Natural Language to Shell translation</black!> │
 │ <em>doctor</em>       <black!>Debug installation issues</black!>             │ 
 │ <em>settings</em>     <black!>Customize appearance & behavior</black!>       │
@@ -277,7 +280,7 @@ const HELP_TEXT: &str = color_print::cstr! {"
 ╰────────────────────────────────────────────────────╯
 
 <black!>To see all subcommands, use:</black!>
- <black!>❯</black!> q --help-all
+ <black!>❯</black!> kiro-cli --help-all
 ㅤ
 "};
 
@@ -292,10 +295,18 @@ pub struct Cli {
     /// Print help for all subcommands
     #[arg(long)]
     help_all: bool,
+    /// Show legacy warning for q command
+    #[arg(long, hide = true, default_value = "false")]
+    show_legacy_warning: bool,
 }
 
 impl Cli {
     pub async fn execute(self) -> Result<ExitCode> {
+        // Show legacy warning if flag is set
+        if self.show_legacy_warning {
+            eprintln!("\x1b[33m{}\x1b[0m", LEGACY_WARNING);
+        }
+
         // Initialize our logger and keep around the guard so logging can perform as expected.
         let _log_guard = initialize_logging(LogArgs {
             log_level: match self.verbose > 0 {
@@ -396,8 +407,20 @@ impl Cli {
     }
 
     pub async fn execute_chat(subcmd: &str, args: Option<Vec<String>>, enforce_login: bool) -> Result<ExitCode> {
-        if enforce_login {
-            assert_logged_in().await?;
+        if enforce_login && !is_logged_in_check().await {
+            if subcmd == "chat" {
+                let options = ["Yes", "No"];
+                match crate::util::choose(" You are not logged in. Login now?", &options)? {
+                    Some(0) => {},
+                    _ => bail!("Login is required to use chat"),
+                }
+                crate::cli::user::login_interactive(Default::default()).await?;
+            } else {
+                bail!(
+                    "You are not logged in, please log in with {}",
+                    format!("{CLI_BINARY_NAME} login",).bold()
+                );
+            }
         }
 
         // Save credentials from the macOS keychain to sqlite.
@@ -405,36 +428,63 @@ impl Cli {
         let secret_store = SecretStore::new().await.ok();
         if let Some(secret_store) = secret_store {
             if let Ok(database) = database().map_err(|err| error!(?err, "failed to open database")) {
-                if let Ok(token) = BuilderIdToken::load(&secret_store, false).await {
+                // check builderid token flow
+                if let Ok(Some(token)) = BuilderIdToken::load(&secret_store, false).await {
                     // Save the device registration. This is required for token refresh to succeed.
-                    if let Some(token) = token.as_ref() {
-                        let region = token.region.clone().map_or(OIDC_BUILDER_ID_REGION, Region::new);
-                        match DeviceRegistration::load_from_secret_store(&secret_store, &region).await {
-                            Ok(Some(reg)) => match serde_json::to_string(&reg) {
-                                Ok(reg) => {
-                                    database
-                                        .set_auth_value("codewhisperer:odic:device-registration", reg)
-                                        .map_err(|err| error!(?err, "failed to write device registration to auth db"))
-                                        .ok();
-                                },
-                                Err(err) => error!(?err, "failed to serialize the device registration"),
+                    let region = token.region.clone().map_or(OIDC_BUILDER_ID_REGION, Region::new);
+                    match DeviceRegistration::load_from_secret_store(&secret_store, &region).await {
+                        Ok(Some(reg)) => match serde_json::to_string(&reg) {
+                            Ok(reg) => {
+                                database
+                                    .set_auth_value(DeviceRegistration::SECRET_KEY, reg)
+                                    .map_err(|err| error!(?err, "failed to write device registration to auth db"))
+                                    .ok();
                             },
-                            Ok(None) => {
-                                warn!(?token, "no device registration found for token");
-                            },
-                            Err(err) => {
-                                error!(?err, "failed to load device registration");
-                            },
-                        }
+                            Err(err) => error!(?err, "failed to serialize the device registration"),
+                        },
+                        Ok(None) => {
+                            warn!(?token, "no device registration found for token");
+                        },
+                        Err(err) => {
+                            error!(?err, "failed to load device registration");
+                        },
                     }
 
                     // Next, save the token.
                     if let Ok(token) = serde_json::to_string(&token) {
                         database
-                            .set_auth_value("codewhisperer:odic:token", token)
+                            .set_auth_value(BuilderIdToken::SECRET_KEY, token)
                             .map_err(|err| error!(?err, "failed to write credentials to auth db"))
                             .ok();
                     }
+                }
+
+                // check social token flow
+                match fig_auth::social::SocialToken::load(&secret_store, false).await {
+                    Ok(Some(social)) => {
+                        if let Ok(social_json) = serde_json::to_string(&social) {
+                            database
+                                .set_auth_value(SocialToken::SECRET_KEY, social_json)
+                                .map_err(|err| error!(?err, "failed to write social token to auth db"))
+                                .ok();
+                        }
+
+                        if let Some(profile_arn) = social.profile_arn.clone() {
+                            let _ = fig_settings::state::set_value(
+                                "api.codewhisperer.profile",
+                                serde_json::json!({
+                                    "profileName": "Social_Default_Profile",
+                                    "arn": profile_arn,
+                                }),
+                            );
+                        }
+                    },
+                    Ok(None) => {
+                        warn!("no social token found");
+                    },
+                    Err(err) => {
+                        error!(?err, "failed to load social token from SecretStore");
+                    },
                 }
             }
         }
@@ -598,6 +648,37 @@ async fn launch_dashboard(help_fallback: bool) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+#[cfg(target_os = "linux")]
+fn qchat_path() -> Result<PathBuf> {
+    use fig_os_shim::Context;
+    use fig_util::consts::CHAT_BINARY_NAME;
+
+    let ctx = Context::new();
+    if let Some(path) = ctx.process_info().current_pid().exe() {
+        // This is required for deb installations.
+        if path.starts_with("/usr/bin") {
+            return Ok(PathBuf::from("/usr/bin").join(CHAT_BINARY_NAME));
+        }
+    }
+
+    if let Ok(local_bin_path) = home_local_bin() {
+        let local_bin_path = local_bin_path.join(CHAT_BINARY_NAME);
+        if local_bin_path.exists() {
+            return Ok(local_bin_path);
+        }
+    }
+
+    Ok(PathBuf::from(CHAT_BINARY_NAME))
+}
+
+#[cfg(target_os = "macos")]
+fn qchat_path() -> Result<PathBuf> {
+    use fig_util::consts::CHAT_BINARY_NAME;
+    use macos_utils::bundle::get_bundle_path_for_executable;
+
+    Ok(get_bundle_path_for_executable(CHAT_BINARY_NAME).unwrap_or(home_local_bin()?.join(CHAT_BINARY_NAME)))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -626,21 +707,18 @@ mod test {
     #[test]
     fn test_flags() {
         assert_eq!(Cli::parse_from([CLI_BINARY_NAME, "-v"]), Cli {
-            subcommand: None,
             verbose: 1,
-            help_all: false,
+            ..Default::default()
         });
 
         assert_eq!(Cli::parse_from([CLI_BINARY_NAME, "-vvv"]), Cli {
-            subcommand: None,
             verbose: 3,
-            help_all: false,
+            ..Default::default()
         });
 
         assert_eq!(Cli::parse_from([CLI_BINARY_NAME, "--help-all"]), Cli {
-            subcommand: None,
-            verbose: 0,
             help_all: true,
+            ..Default::default()
         });
     }
 

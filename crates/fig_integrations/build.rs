@@ -1,4 +1,4 @@
-const CLI_BINARY_NAME: &str = "q";
+const CLI_BINARY_NAME: &str = "kiro-cli";
 const CODEX_FOLDER: &str = "src/shell/inline_shell_completion";
 
 // The order here is very specific, do no edit without understanding the implications

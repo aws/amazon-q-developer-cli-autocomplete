@@ -1,27 +1,27 @@
 pub const APP_BUNDLE_ID: &str = "com.amazon.codewhisperer";
-pub const APP_BUNDLE_NAME: &str = "Amazon Q.app";
+pub const APP_BUNDLE_NAME: &str = "Kiro CLI.app";
 
 #[cfg(target_os = "macos")]
-pub const APP_PROCESS_NAME: &str = "q_desktop";
+pub const APP_PROCESS_NAME: &str = "kiro_cli_desktop";
 #[cfg(target_os = "linux")]
-pub const APP_PROCESS_NAME: &str = "q-desktop";
+pub const APP_PROCESS_NAME: &str = "kiro-cli-desktop";
 
 #[cfg(windows)]
-pub const APP_PROCESS_NAME: &str = "q_desktop.exe";
+pub const APP_PROCESS_NAME: &str = "kiro_cli_desktop.exe";
 
 /// The name configured under `"package.productName"` in the tauri.conf.json file.
-pub const TAURI_PRODUCT_NAME: &str = "q_desktop";
+pub const TAURI_PRODUCT_NAME: &str = "kiro_cli_desktop";
 
-pub const CLI_BINARY_NAME: &str = "q";
-pub const CLI_BINARY_NAME_MINIMAL: &str = "q-minimal";
-pub const CHAT_BINARY_NAME: &str = "qchat";
-pub const PTY_BINARY_NAME: &str = "qterm";
+pub const CLI_BINARY_NAME: &str = "kiro-cli";
+pub const CLI_BINARY_NAME_MINIMAL: &str = "kiro-cli-minimal";
+pub const CHAT_BINARY_NAME: &str = "kiro-cli-chat";
+pub const PTY_BINARY_NAME: &str = "kiro-cli-term";
 
 pub const CLI_CRATE_NAME: &str = "q_cli";
 
-pub const URL_SCHEMA: &str = "q";
+pub const URL_SCHEMA: &str = "kiro-cli";
 
-pub const PRODUCT_NAME: &str = "Amazon Q";
+pub const PRODUCT_NAME: &str = "Kiro CLI";
 
 pub const RUNTIME_DIR_NAME: &str = "cwrun";
 
@@ -36,7 +36,7 @@ pub const BACKUP_DIR_NAME: &str = ".amazon-q.dotfiles.bak";
 
 // These are the old "CodeWhisperer" branding, used anywhere we will not update to Amazon Q
 pub const OLD_PRODUCT_NAME: &str = "CodeWhisperer";
-pub const OLD_CLI_BINARY_NAMES: &[&str] = &["cw"];
+pub const OLD_CLI_BINARY_NAMES: &[&str] = &["cw", "q", "qchat"];
 pub const OLD_PTY_BINARY_NAMES: &[&str] = &["cwterm"];
 
 pub const GITHUB_REPO_NAME: &str = "aws/amazon-q-developer-cli";
@@ -83,13 +83,13 @@ pub mod macos {
 }
 
 pub mod linux {
-    pub const DESKTOP_ENTRY_NAME: &str = "amazon-q.desktop";
+    pub const DESKTOP_ENTRY_NAME: &str = "kiro-cli.desktop";
 
     /// Name of the deb package.
-    pub const PACKAGE_NAME: &str = "amazon-q";
+    pub const PACKAGE_NAME: &str = "kiro-cli";
 
     /// The wm_class used for the application windows.
-    pub const DESKTOP_APP_WM_CLASS: &str = "Amazon-q";
+    pub const DESKTOP_APP_WM_CLASS: &str = "Kiro-Cli";
 }
 
 pub mod env_var {

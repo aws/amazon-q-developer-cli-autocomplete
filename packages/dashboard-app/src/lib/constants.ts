@@ -1,6 +1,7 @@
 // These should match the rust constants in fig_util::consts
-export const PRODUCT_NAME = "Amazon Q";
-export const CLI_BINARY_NAME = "q";
+export const PRODUCT_NAME = "Kiro";
+export const PREVIOUS_PRODUCT_NAME = "Amazon Q";
+export const CLI_BINARY_NAME = "kiro-cli";
 
 export const DESKTOP_ENTRY_NAME = "amazon-q.desktop";
 

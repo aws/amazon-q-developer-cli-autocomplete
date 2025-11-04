@@ -5,6 +5,7 @@ pub mod process_info;
 mod shell;
 pub mod system_info;
 pub mod terminal;
+pub mod wrapper;
 
 pub mod consts;
 #[cfg(target_os = "macos")]

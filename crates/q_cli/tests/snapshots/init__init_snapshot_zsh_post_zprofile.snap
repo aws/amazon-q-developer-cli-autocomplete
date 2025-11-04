@@ -1,5 +1,5 @@
 ---
-source: q_cli/tests/init.rs
+source: crates/q_cli/tests/init.rs
 expression: init
 ---
 Q_SHELL="/bin/zsh"
@@ -18,7 +18,7 @@ export TTY
 export SHELL_PID="$$"
 
 if [[ -z "${Q_SHELL:-}" ]]; then
-  Q_SHELL=$(q _ get-shell)
+  Q_SHELL=$(kiro-cli _ get-shell)
 fi
 
 # shellcheck disable=SC2059
@@ -170,8 +170,8 @@ fig_precmd() {
 
   Q_HAS_SET_PROMPT=1
 
-  if command -v q >/dev/null 2>&1; then
-    (command q _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
+  if command -v kiro-cli >/dev/null 2>&1; then
+    (command kiro-cli _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
   fi
 }
 
@@ -195,4 +195,4 @@ fi
 
 fi
 
-(command q _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1
+(command kiro-cli _ pre-cmd --alias "$(\alias)" > /dev/null 2>&1 &) >/dev/null 2>&1

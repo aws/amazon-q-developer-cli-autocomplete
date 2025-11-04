@@ -72,7 +72,7 @@ pub async fn uninstall(components: InstallComponents, ctx: Arc<Context>) -> Resu
         // let folders = [directories::home_local_bin()?, Path::new("/usr/local/bin").into()];
         let folders = [directories::home_local_bin()?];
 
-        let mut all_binary_names = vec![CLI_BINARY_NAME, CHAT_BINARY_NAME, PTY_BINARY_NAME];
+        let mut all_binary_names = vec![CLI_BINARY_NAME, CHAT_BINARY_NAME, PTY_BINARY_NAME, "q", "qchat"];
         all_binary_names.extend(OLD_CLI_BINARY_NAMES);
         all_binary_names.extend(OLD_PTY_BINARY_NAMES);
 

@@ -3,7 +3,7 @@
     "distDir": []
   },
   "package": {
-    "productName": "q_desktop"
+    "productName": "kiro_cli_desktop"
   },
   "tauri": {
     "bundle": {
