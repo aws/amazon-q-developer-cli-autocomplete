@@ -340,6 +340,9 @@ impl Cli {
 
         debug!(command =? std::env::args().collect::<Vec<_>>(), "Command ran");
 
+        // Run migration silently on startup (skips if already completed or locked)
+        let _ = Self::execute_chat("chat", Some(vec!["migrate".to_owned(), "--yes".to_owned()]), false).await;
+
         self.send_telemetry().await;
 
         if self.help_all {
