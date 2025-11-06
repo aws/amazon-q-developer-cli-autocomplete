@@ -5,13 +5,15 @@ use rustix::fs::{
     FlockOperation,
     flock,
 };
+use serde_json::Value;
 use tokio::fs;
 use tracing::debug;
 
 const KIRO_MIGRATION_KEY: &str = "migration.kiro.completed";
-const MIGRATION_TIMEOUT_SECS: u64 = 10;
+const MIGRATION_TIMEOUT_SECS: u64 = 60;
 
 pub async fn migrate_if_needed() -> Result<bool> {
+    let start = std::time::Instant::now();
     let status = detect_migration().await?;
 
     match status {
@@ -54,7 +56,7 @@ pub async fn migrate_if_needed() -> Result<bool> {
     debug!("Marking migration as completed");
     mark_migration_completed()?;
 
-    debug!("Migration completed successfully");
+    debug!("Migration completed successfully in {:?}", start.elapsed());
     Ok(true)
 }
 
@@ -116,6 +118,106 @@ async fn copy_essential_files(src: &std::path::Path, dst: &std::path::Path) -> R
         }
     }
 
+    // Copy global files from home directory
+    copy_global_config_files()?;
+
+    Ok(())
+}
+
+fn copy_global_config_files() -> Result<()> {
+    let home_dir = fig_util::directories::home_dir()?;
+    let kiro_dir = home_dir.join(".kiro");
+    let legacy_amazonq_dir = home_dir.join(".aws/amazonq");
+
+    let src_dir = if legacy_amazonq_dir.exists() {
+        &legacy_amazonq_dir
+    } else {
+        return Ok(());
+    };
+
+    // Use fig_data_dir for knowledge_bases and cli-checkouts
+    let data_dir = fig_util::directories::fig_data_dir()?;
+
+    let files_to_copy = [
+        // copy to home/.kiro
+        ("cli-agents", kiro_dir.join("agents")),
+        ("prompts", kiro_dir.join("prompts")),
+        (".cli_bash_history", kiro_dir.join(".cli_bash_history")),
+        // copy to data-dir
+        ("cli-checkouts", data_dir.join("cli-checkouts")),
+        ("knowledge_bases", data_dir.join("knowledge_bases")),
+    ];
+
+    for (src_subpath, dst_path) in files_to_copy {
+        let src_path = src_dir.join(src_subpath);
+
+        if src_path.exists() {
+            if let Some(parent) = dst_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            if src_path.is_dir() {
+                debug!("Copying directory {} to {}", src_path.display(), dst_path.display());
+                dircpy::copy_dir(&src_path, &dst_path)?;
+            } else {
+                debug!("Copying file {} to {}", src_path.display(), dst_path.display());
+                std::fs::copy(&src_path, &dst_path)?;
+            }
+        }
+    }
+
+    // Handle mcp.json separately with merging
+    let src_mcp = src_dir.join("mcp.json");
+    let dst_mcp = kiro_dir.join("settings/mcp.json");
+    if src_mcp.exists() {
+        merge_mcp_json(&src_mcp, &dst_mcp)?;
+    }
+
+    Ok(())
+}
+
+fn merge_mcp_json(src_path: &std::path::Path, dst_path: &std::path::Path) -> Result<()> {
+    if let Some(parent) = dst_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let src_content = std::fs::read_to_string(src_path)?;
+    let src_json = match serde_json::from_str::<Value>(&src_content) {
+        Ok(json) => json,
+        Err(_) => {
+            debug!("Invalid JSON in source mcp.json, leaving destination unchanged");
+            return Ok(());
+        },
+    };
+
+    let merged_json = if dst_path.exists() {
+        let dst_content = std::fs::read_to_string(dst_path)?;
+        match serde_json::from_str::<Value>(&dst_content) {
+            Ok(mut dst_json) => {
+                if let (Some(src_servers), Some(dst_servers)) = (
+                    src_json.get("mcpServers").and_then(|v| v.as_object()),
+                    dst_json.get_mut("mcpServers").and_then(|v| v.as_object_mut()),
+                ) {
+                    for (key, value) in src_servers {
+                        if !dst_servers.contains_key(key) {
+                            dst_servers.insert(key.clone(), value.clone());
+                        }
+                    }
+                }
+                dst_json
+            },
+            Err(_) => {
+                debug!("Invalid JSON in destination mcp.json, overwriting with source");
+                src_json
+            },
+        }
+    } else {
+        src_json
+    };
+
+    let merged_content = serde_json::to_string_pretty(&merged_json)?;
+    std::fs::write(dst_path, merged_content)?;
+    debug!("Merged mcp.json to {}", dst_path.display());
     Ok(())
 }
 

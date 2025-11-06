@@ -19,6 +19,7 @@ bytes.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
 cookie = "0.18.0"
+dircpy.workspace = true
 eyre.workspace = true
 fig_integrations.workspace = true
 fig_os_shim.workspace = true
