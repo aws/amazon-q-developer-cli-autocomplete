@@ -31,6 +31,7 @@ amzn-qdeveloper-streaming-client = { path = "crates/amzn-qdeveloper-streaming-cl
 anstream = "0.6.13"
 anyhow = "1.0.98"
 appkit-nsworkspace-bindings = { path = "crates/macos-utils/appkit-nsworkspace-bindings" }
+assert_cmd = "2.0.17" # This version is required for musl builds to succeed
 async-trait = "0.1.87"
 aws-smithy-runtime-api = "1.6.1"
 aws-smithy-types = "1.2.10"
