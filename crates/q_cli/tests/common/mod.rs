@@ -10,7 +10,7 @@ pub use predicates::prelude::*;
 pub type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
 pub fn cli() -> Command {
-    Command::new(assert_cmd::cargo::cargo_bin!("q_cli"))
+    Command::cargo_bin("q_cli").unwrap()
 }
 
 pub fn is_json() -> FnPredicate<impl Fn(&str) -> bool, str> {
