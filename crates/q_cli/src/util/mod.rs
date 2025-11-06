@@ -53,6 +53,11 @@ use regex::Regex;
 pub use region_check::region_check;
 use tracing::warn;
 
+// ANSI color codes
+const PURPLE: u8 = 93;
+const GRAY: u8 = 8;
+const MAGENTA: u8 = 13;
+
 /// Glob patterns against full paths
 pub fn glob_dir(glob: &GlobSet, directory: impl AsRef<Path>) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
@@ -276,6 +281,71 @@ pub fn choose(prompt: impl Display, options: &[impl ToString]) -> Result<Option<
     }
 }
 
+pub fn welcome_login_prompt() -> Result<bool> {
+    use crossterm::event::{
+        self,
+        Event,
+        KeyCode,
+        KeyEvent,
+    };
+    use crossterm::style::{
+        Color,
+        ResetColor,
+        SetForegroundColor,
+    };
+    use crossterm::terminal::{
+        disable_raw_mode,
+        enable_raw_mode,
+    };
+
+    if !stdout().is_terminal() {
+        warn!("called welcome_login_prompt while stdout is not a terminal");
+        return Ok(true);
+    }
+
+    println!();
+    print!("Welcome to ");
+    print!(
+        "{}{}{}",
+        SetForegroundColor(Color::AnsiValue(PURPLE)),
+        PRODUCT_NAME,
+        ResetColor
+    );
+    println!(", let's get you signed in!");
+    println!();
+
+    // Print instruction line with styling
+    print!("{}Press ", SetForegroundColor(Color::AnsiValue(GRAY)));
+    print!(
+        "{}enter{}",
+        SetForegroundColor(Color::AnsiValue(MAGENTA)),
+        SetForegroundColor(Color::AnsiValue(GRAY))
+    );
+    print!(" to continue to the browser or ");
+    print!(
+        "{}esc{}",
+        SetForegroundColor(Color::AnsiValue(MAGENTA)),
+        SetForegroundColor(Color::AnsiValue(GRAY))
+    );
+    println!(" to cancel{}", ResetColor);
+    println!();
+
+    enable_raw_mode()?;
+    let result = loop {
+        if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
+            match code {
+                KeyCode::Enter => break Ok(true),
+                KeyCode::Esc => break Ok(false),
+                KeyCode::Char('c') if event::read().is_ok() => break Ok(false), // Ctrl+C
+                _ => {},
+            }
+        }
+    };
+    disable_raw_mode()?;
+
+    result
+}
+
 pub fn input(prompt: &str, initial_text: Option<&str>) -> Result<String> {
     if !stdout().is_terminal() {
         warn!("called input while stdout is not a terminal");
@@ -319,6 +389,14 @@ pub fn dialoguer_theme() -> ColorfulTheme {
         ..ColorfulTheme::default()
     }
 }
+
+pub fn login_spinner_message() -> String {
+    format!(
+        " \x1b[38;5;{}mOpening browser... | Press \x1b[38;5;{}m(^) + C\x1b[38;5;{}m to cancel\x1b[0m",
+        GRAY, MAGENTA, GRAY
+    )
+}
+
 pub async fn is_logged_in_check() -> bool {
     std::env::var("AMAZON_Q_SIGV4").is_ok_and(|v| !v.is_empty()) || fig_auth::is_logged_in().await
 }

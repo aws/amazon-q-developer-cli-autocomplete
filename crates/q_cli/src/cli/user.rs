@@ -269,7 +269,7 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
 
         let mut pre_portal_spinner = Spinner::new(vec![
             SpinnerComponent::Spinner,
-            SpinnerComponent::Text(" Opening auth portal and logging in...".into()),
+            SpinnerComponent::Text(crate::util::login_spinner_message()),
         ]);
 
         // Try unified portal, fallback to device flow on any error
@@ -291,7 +291,10 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
 
         match finish_unified_portal(init, &secret_store).await? {
             PortalResult::Social(provider) => {
-                pre_portal_spinner.stop_with_message(format!("Logged in with {}", provider));
+                pre_portal_spinner.stop_with_message(format!(
+                    "\x1b[32m✓\x1b[0m Signed in with {} \x1b[90m(use \"{} logout\" to logout)\x1b[0m",
+                    provider, CLI_BINARY_NAME
+                ));
                 Some(AuthMethod::Social(provider))
             },
             PortalResult::BuilderId { issuer_url, idc_region } => {
