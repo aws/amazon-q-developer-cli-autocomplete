@@ -238,6 +238,27 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
                 // If license is specified and --identity-provider and --region are specified,
                 // the license is determined to be pro
                 AuthMethod::IdentityCenter
+            } else if let Ok(Some(default_license)) = fig_settings::settings::get_string("auth.defaultLicense") {
+                // Use default license from settings
+                match default_license.as_str() {
+                    "free" => {
+                        println!("Using license: Free (Builder ID)");
+                        AuthMethod::BuilderId
+                    },
+                    "pro" => {
+                        println!("Using license: Pro (Identity Center)");
+                        AuthMethod::IdentityCenter
+                    },
+                    _ => {
+                        // Invalid default, prompt user
+                        let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter];
+                        let i = match choose("Select login method", &options)? {
+                            Some(i) => i,
+                            None => bail!("No login method selected"),
+                        };
+                        options[i]
+                    },
+                }
             } else {
                 // --license is not specified, prompt the user to choose
                 let options = [AuthMethod::BuilderId, AuthMethod::IdentityCenter];
@@ -255,15 +276,38 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
             let (start_url, region) = match login_method {
                 AuthMethod::BuilderId => (None, None),
                 AuthMethod::IdentityCenter => {
-                    let default_start_url = args
-                        .identity_provider
-                        .or_else(|| fig_settings::state::get_string("auth.idc.start-url").ok().flatten());
-                    let default_region = args
-                        .region
-                        .or_else(|| fig_settings::state::get_string("auth.idc.region").ok().flatten());
+                    // Priority: 1. CLI arg > 2. Explicit default setting
+                    // 3. Previously used value is shown as prompt default (requires Enter)
+                    let previous_start_url = fig_settings::state::get_string("auth.idc.start-url").ok().flatten();
+                    let resolved_start_url = resolve_auth_value(
+                        args.identity_provider.clone(),
+                        fig_settings::settings::get_string("auth.defaultIdentityProvider")
+                            .ok()
+                            .flatten(),
+                    );
 
-                    let start_url = input("Enter Start URL", default_start_url.as_deref())?;
-                    let region = input("Enter Region", default_region.as_deref())?;
+                    let start_url = match resolved_start_url {
+                        Some(url) => {
+                            println!("Using Start URL: {}", url);
+                            url
+                        },
+                        None => input("Enter Start URL", previous_start_url.as_deref())?,
+                    };
+
+                    let previous_region = fig_settings::state::get_string("auth.idc.region").ok().flatten();
+
+                    let resolved_region = resolve_auth_value(
+                        args.region.clone(),
+                        fig_settings::settings::get_string("auth.defaultRegion").ok().flatten(),
+                    );
+
+                    let region = match resolved_region {
+                        Some(r) => {
+                            println!("Using Region: {}", r);
+                            r
+                        },
+                        None => input("Enter Region", previous_region.as_deref())?,
+                    };
 
                     let _ = fig_settings::state::set_value("auth.idc.start-url", start_url.clone());
                     let _ = fig_settings::state::set_value("auth.idc.region", region.clone());
@@ -317,6 +361,23 @@ pub async fn login_interactive(args: LoginArgs) -> Result<()> {
 
     if login_method == AuthMethod::IdentityCenter {
         select_profile_interactive(true).await?;
+    }
+
+    // Save default settings for future logins
+    if let Some(license) = &args.license {
+        let license_str = match license {
+            LicenseType::Free => "free",
+            LicenseType::Pro => "pro",
+        };
+        let _ = fig_settings::settings::set_value("auth.defaultLicense", license_str);
+    }
+
+    if let Some(region) = &args.region {
+        let _ = fig_settings::settings::set_value("auth.defaultRegion", region.clone());
+    }
+
+    if let Some(identity_provider) = &args.identity_provider {
+        let _ = fig_settings::settings::set_value("auth.defaultIdentityProvider", identity_provider.clone());
     }
 
     eprintln!("Logged in successfully");
@@ -471,6 +532,11 @@ async fn select_profile_interactive(whoami: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolves authentication value with priority: CLI arg > explicit default
+fn resolve_auth_value(cli_arg: Option<String>, explicit_default: Option<String>) -> Option<String> {
+    cli_arg.or(explicit_default)
 }
 
 mod tests {
