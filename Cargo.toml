@@ -53,7 +53,7 @@ clap = { version = "4.5.32", features = [
 chrono = { version = "0.4", features = ["serde"] }
 cocoa = "0.26.0"
 color-print = "0.3.5"
-convert_case = "0.8.0"
+convert_case = "0.10.0"
 core-foundation = "0.10.0"
 core-foundation-sys = "0.8.7"
 core-graphics = "0.24.0"
