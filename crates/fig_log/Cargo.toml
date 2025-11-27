@@ -21,7 +21,7 @@ fig_util.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-tracing-appender = "0.2.2"
+tracing-appender = "0.2.4"
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
