@@ -19,7 +19,7 @@ version = "0.1.3"
 dependencies = [
  "core-foundation 0.10.1",
  "core-foundation-sys",
- "core-graphics",
+ "core-graphics 0.25.0",
 ]
 
 [[package]]
@@ -1760,7 +1760,7 @@ dependencies = [
  "block",
  "cocoa-foundation",
  "core-foundation 0.10.1",
- "core-graphics",
+ "core-graphics 0.24.0",
  "foreign-types",
  "libc",
  "objc",
@@ -2010,6 +2010,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa95a34622365fa5bbf40b20b75dba8dfa8c94c734aea8ac9a5ca38af14316f1"
 dependencies = [
  "bitflags 2.10.0",
+ "core-foundation 0.10.1",
+ "core-graphics-types",
+ "foreign-types",
+ "libc",
+]
+
+[[package]]
+name = "core-graphics"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "064badf302c3194842cf2c5d61f56cc88e54a759313879cdf03abdd27d0c3b97"
+dependencies = [
+ "bitflags 2.9.1",
  "core-foundation 0.10.1",
  "core-graphics-types",
  "foreign-types",
@@ -2952,7 +2965,7 @@ dependencies = [
  "clap",
  "cocoa",
  "core-foundation 0.10.1",
- "core-graphics",
+ "core-graphics 0.25.0",
  "dashmap",
  "dbus",
  "fig_api_client",
@@ -5550,7 +5563,7 @@ dependencies = [
  "block2 0.5.1",
  "cocoa",
  "core-foundation 0.10.1",
- "core-graphics",
+ "core-graphics 0.25.0",
  "dashmap",
  "flume",
  "fnv",
@@ -9227,7 +9240,7 @@ dependencies = [
  "bitflags 2.10.0",
  "cocoa",
  "core-foundation 0.10.1",
- "core-graphics",
+ "core-graphics 0.24.0",
  "crossbeam-channel",
  "dispatch",
  "dlopen2",

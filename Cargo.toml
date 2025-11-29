@@ -56,7 +56,7 @@ color-print = "0.3.5"
 convert_case = "0.8.0"
 core-foundation = "0.10.0"
 core-foundation-sys = "0.8.7"
-core-graphics = "0.24.0"
+core-graphics = "0.25.0"
 crossterm = { version = "0.28.1", features = ["event-stream", "events"] }
 dashmap = "6.0.1"
 dirs = "5.0.0"
