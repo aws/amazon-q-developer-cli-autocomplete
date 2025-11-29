@@ -6548,13 +6548,13 @@ dependencies = [
 
 [[package]]
 name = "objc2-input-method-kit"
-version = "0.2.2"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12e306c83555cdab87755f31b45f8d9a657081edb15fc89c74a5bb4175ebd487"
+checksum = "95b00217e13b5d51d9b814707fe429fbdd836cd1b74a61514679085c7a017c6b"
 dependencies = [
- "objc2 0.5.2",
- "objc2-app-kit 0.2.2",
- "objc2-foundation 0.2.2",
+ "objc2 0.6.3",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
 ]
 
 [[package]]
