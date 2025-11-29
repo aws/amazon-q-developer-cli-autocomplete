@@ -8,7 +8,11 @@ use std::path::PathBuf;
 use async_trait::async_trait;
 use cfg_if::cfg_if;
 use clap::ValueEnum;
-use fig_os_shim::Env;
+use fig_os_shim::{
+    EnvProvider,
+    FsProvider,
+    PlatformProvider,
+};
 use fig_util::{
     CLI_BINARY_NAME,
     PRODUCT_NAME,
@@ -98,7 +102,10 @@ fn integration_file_name(dotfile_name: &str, when: &When, shell: &Shell) -> Stri
 }
 
 pub trait ShellExt {
-    fn get_shell_integrations(&self, env: &Env) -> Result<Vec<Box<dyn ShellIntegration>>>;
+    fn get_shell_integrations<Ctx: FsProvider + EnvProvider + PlatformProvider>(
+        &self,
+        env: &Ctx,
+    ) -> Result<Vec<Box<dyn ShellIntegration>>>;
     /// Script integrations are installed into ~/.fig/shell
     fn get_script_integrations(&self) -> Result<Vec<ShellScriptShellIntegration>>;
     fn get_fig_integration_source(&self, when: &When) -> String;
@@ -129,8 +136,11 @@ impl ShellExt for Shell {
         Ok(integrations)
     }
 
-    fn get_shell_integrations(&self, env: &Env) -> Result<Vec<Box<dyn ShellIntegration>>> {
-        let config_dir = self.get_config_directory(env)?;
+    fn get_shell_integrations<Ctx: FsProvider + EnvProvider + PlatformProvider>(
+        &self,
+        ctx: &Ctx,
+    ) -> Result<Vec<Box<dyn ShellIntegration>>> {
+        let config_dir = self.get_config_directory(ctx)?;
 
         let integrations: Vec<Box<dyn ShellIntegration>> = match self {
             Shell::Bash => {
@@ -422,10 +432,18 @@ impl DotfileShellIntegration {
         }
     }
 
-    fn legacy_description(when: When) -> String {
+    fn legacycodewhisperer_description(when: When) -> String {
         match when {
             When::Pre => "# CodeWhisperer pre block. Keep at the top of this file.",
             When::Post => "# CodeWhisperer post block. Keep at the bottom of this file.",
+        }
+        .into()
+    }
+
+    fn legacyamazonq_description(when: When) -> String {
+        match when {
+            When::Pre => "# Amazon Q pre block. Keep at the top of this file.",
+            When::Post => "# Amazon Q post block. Keep at the bottom of this file.",
         }
         .into()
     }
@@ -452,28 +470,31 @@ impl DotfileShellIntegration {
         };
         let old_eval_regex = format!(
             r#"(?m)(?:{}\n)?^{}\n{{0,2}}"#,
-            regex::escape(&DotfileShellIntegration::legacy_description(when)),
+            regex::escape(&DotfileShellIntegration::legacycodewhisperer_description(when)),
             regex::escape(&old_eval_source),
         );
         let old_source_regex_1 = format!(
             r#"(?m)(?:{}\n)?^{}\n{{0,2}}"#,
-            regex::escape(&DotfileShellIntegration::legacy_description(when)),
+            regex::escape(&DotfileShellIntegration::legacycodewhisperer_description(when)),
             regex::escape(&self.legacy_source_text_1(when)?),
         );
         let old_source_regex_2 = format!(
             r#"(?m)(?:{}\n)?^{}\n{{0,2}}"#,
-            regex::escape(&DotfileShellIntegration::legacy_description(when)),
+            regex::escape(&DotfileShellIntegration::legacycodewhisperer_description(when)),
             regex::escape(&self.legacy_source_text_2(when)?),
         );
 
-        let old_brand_regex = self.old_brand_regex(when)?;
+        let codewhisperer_regex = self.legacycodewhisperer_brand_regex(when)?;
+
+        let amazonq_regex = self.legacyamazonq_brand_regex(when)?;
 
         Ok(RegexSet::new([
+            &amazonq_regex,
             old_file_regex,
             &old_eval_regex,
             &old_source_regex_1,
             &old_source_regex_2,
-            &old_brand_regex,
+            &codewhisperer_regex,
         ])?)
     }
 
@@ -579,10 +600,18 @@ impl DotfileShellIntegration {
         Ok(())
     }
 
-    fn old_brand_regex(&self, when: When) -> Result<String> {
+    fn legacycodewhisperer_brand_regex(&self, when: When) -> Result<String> {
         Ok(format!(
             r#"(?m)(?:\s*{}\s*\n)?^\s*{}\s*\n{{0,2}}"#,
-            regex::escape(&DotfileShellIntegration::legacy_description(when)),
+            regex::escape(&DotfileShellIntegration::legacycodewhisperer_description(when)),
+            self.legacy_source_text_3(when)?,
+        ))
+    }
+
+    fn legacyamazonq_brand_regex(&self, when: When) -> Result<String> {
+        Ok(format!(
+            r#"(?m)(?:\s*{}\s*\n)?^\s*{}\s*\n{{0,2}}"#,
+            regex::escape(&DotfileShellIntegration::legacyamazonq_description(when)),
             self.legacy_source_text_3(when)?,
         ))
     }
@@ -836,7 +865,7 @@ mod test {
     }
 
     #[test]
-    fn test_legacy_codewhisperer_regex() {
+    fn test_legacycodewhisperer_regex() {
         let re = regex::Regex::new(
             &DotfileShellIntegration {
                 pre: true,
@@ -845,7 +874,7 @@ mod test {
                 dotfile_directory: "".into(),
                 dotfile_name: ".zshrc",
             }
-            .old_brand_regex(When::Pre)
+            .legacycodewhisperer_brand_regex(When::Pre)
             .unwrap(),
         )
         .unwrap();
@@ -891,6 +920,71 @@ mod test {
         // multiple lines
         let doc = indoc::formatdoc! {r#"
             # CodeWhisperer pre block. Keep at the top of this file.
+            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
+            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
+
+            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
+        "#};
+        let replaced = re.replace_all(&doc, "");
+        assert_eq!(replaced, "");
+    }
+
+    #[test]
+    fn test_legacyamazonq_regex() {
+        let re = regex::Regex::new(
+            &DotfileShellIntegration {
+                pre: true,
+                post: true,
+                shell: Shell::Zsh,
+                dotfile_directory: "".into(),
+                dotfile_name: ".zshrc",
+            }
+            .legacyamazonq_brand_regex(When::Pre)
+            .unwrap(),
+        )
+        .unwrap();
+
+        println!("re: {re}");
+
+        let data_dir = old_fig_data_dir().unwrap();
+        let dir = data_dir.strip_prefix(home_dir().unwrap()).unwrap().display();
+
+        // base case
+        let doc = &indoc::formatdoc! {r#"
+            # Amazon Q pre block. Keep at the top of this file.
+            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
+        "#};
+        let replaced = re.replace_all(doc, "");
+        assert_eq!(replaced, "");
+
+        // different comment case
+        let doc = indoc::formatdoc! {r#"
+            # different comment
+            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
+        "#};
+        let replaced = re.replace_all(&doc, "");
+        assert_eq!(replaced, "# different comment\n");
+
+        // spaces in command
+        let doc = indoc::formatdoc! {r#"
+            [[  -f  "${{HOME}}/{dir}/shell/zshrc.pre.zsh"  ]]  &&    builtin  source  "${{HOME}}/{dir}/shell/zshrc.pre.zsh" 
+        "#};
+        let replaced = re.replace_all(&doc, "");
+        assert_eq!(replaced, "");
+
+        // non match which looks similar
+        let doc = indoc::formatdoc! {r#"
+            [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
+            
+            # Amazon Q pre block. Keep at the top of this file.
+            [[ -f ${{HOME}}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/shell/zshrc.pre.zsh"
+        "#};
+        let replaced = re.replace_all(&doc, "");
+        assert_eq!(replaced, doc);
+
+        // multiple lines
+        let doc = indoc::formatdoc! {r#"
+            # Amazon Q pre block. Keep at the top of this file.
             [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
             [[ -f "${{HOME}}/{dir}/shell/zshrc.pre.zsh" ]] && builtin source "${{HOME}}/{dir}/shell/zshrc.pre.zsh"
 

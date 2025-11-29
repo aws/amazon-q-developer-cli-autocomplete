@@ -129,6 +129,20 @@ pub fn config_dir() -> Result<PathBuf> {
     dirs::config_dir().ok_or(DirectoryError::NoHomeDirectory)
 }
 
+pub fn config_dir_ctx<Ctx: FsProvider + EnvProvider + PlatformProvider>(ctx: &Ctx) -> Result<PathBuf> {
+    if ctx.env().is_real() {
+        config_dir()
+    } else {
+        let home = ctx.env().home().ok_or(DirectoryError::NoHomeDirectory)?;
+        match ctx.platform().os() {
+            Os::Mac => Ok(home.join("Library").join("Application Support")),
+            Os::Linux => Ok(home.join(".config")),
+            os @ Os::Windows => Err(DirectoryError::UnsupportedOs(os)),
+            os => Err(DirectoryError::UnsupportedOs(os)),
+        }
+    }
+}
+
 /// The old codewhisperer data directory
 ///
 /// This should be removed at some point in the future, once all our users have migrated

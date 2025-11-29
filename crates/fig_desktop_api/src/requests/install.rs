@@ -73,7 +73,7 @@ where
         (InstallComponent::Dotfiles, action) => {
             let mut errs: Vec<String> = vec![];
             for shell in Shell::all() {
-                match shell.get_shell_integrations(ctx.env()) {
+                match shell.get_shell_integrations(ctx) {
                     Ok(integrations) => {
                         for integration in integrations {
                             let res = match action {

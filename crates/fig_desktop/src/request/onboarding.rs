@@ -2,7 +2,6 @@ use fig_integrations::shell::ShellExt;
 use fig_os_shim::{
     ContextArcProvider,
     ContextProvider,
-    EnvProvider,
 };
 use fig_proto::fig::{
     OnboardingAction,
@@ -38,7 +37,7 @@ where
         OnboardingAction::InstallationScript => {
             let mut errs: Vec<String> = vec![];
             for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
-                match shell.get_shell_integrations(ctx.env()) {
+                match shell.get_shell_integrations(ctx) {
                     Ok(integrations) => {
                         for integration in integrations {
                             if let Err(err) = integration.install().await {

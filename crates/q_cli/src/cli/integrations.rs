@@ -7,7 +7,7 @@ use eyre::Result;
 use fig_integrations::Integration as _;
 use fig_integrations::shell::ShellExt;
 use fig_integrations::ssh::SshIntegration;
-use fig_os_shim::Env;
+use fig_os_shim::Context;
 use fig_util::Shell;
 use serde_json::json;
 use tracing::debug;
@@ -135,7 +135,7 @@ async fn install(integration: Integration, silent: bool) -> Result<()> {
 
             let mut errs: Vec<String> = vec![];
             for shell in &shells {
-                match shell.get_shell_integrations(&Env::new()) {
+                match shell.get_shell_integrations(&Context::new()) {
                     Ok(integrations) => {
                         for integration in integrations {
                             match integration.is_installed().await {
@@ -262,7 +262,7 @@ async fn uninstall(integration: Integration, silent: bool) -> Result<()> {
 
             let mut errs: Vec<String> = vec![];
             for shell in &shells {
-                match shell.get_shell_integrations(&Env::new()) {
+                match shell.get_shell_integrations(&Context::new()) {
                     Ok(integrations) => {
                         for integration in integrations {
                             match integration.is_installed().await {
@@ -412,7 +412,7 @@ async fn status(integration: Integration, format: OutputFormat) -> Result<ExitCo
             let mut errors = vec![];
 
             for shell in &[Shell::Bash, Shell::Zsh, Shell::Fish] {
-                match shell.get_shell_integrations(&Env::new()) {
+                match shell.get_shell_integrations(&Context::new()) {
                     Ok(integrations) => {
                         for integration in integrations {
                             all_integrations.push((

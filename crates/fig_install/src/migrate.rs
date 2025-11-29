@@ -1,13 +1,19 @@
 use std::path::PathBuf;
 
 use eyre::Result;
+use fig_integrations::shell::ShellExt;
+use fig_os_shim::Context;
+use fig_util::Shell;
 use rustix::fs::{
     FlockOperation,
     flock,
 };
 use serde_json::Value;
 use tokio::fs;
-use tracing::debug;
+use tracing::{
+    debug,
+    warn,
+};
 
 const KIRO_MIGRATION_KEY: &str = "migration.kiro.completed";
 const MIGRATION_TIMEOUT_SECS: u64 = 60;
@@ -51,6 +57,12 @@ pub async fn migrate_if_needed() -> Result<bool> {
     }
     debug!("Copying essential files from old to new directory");
     copy_essential_files(&old_dir, &new_dir).await?;
+
+    debug!("Migrating shell integrations");
+    let errors = migrate_dotfiles().await;
+    if !errors.is_empty() {
+        warn!(?errors, "errors occurred migrating shell integrations");
+    }
 
     // Mark migration as completed in database
     debug!("Marking migration as completed");
@@ -221,6 +233,52 @@ fn merge_mcp_json(src_path: &std::path::Path, dst_path: &std::path::Path) -> Res
     Ok(())
 }
 
+async fn migrate_dotfiles() -> Vec<(Shell, fig_integrations::Error)> {
+    let shells = Shell::all();
+    let mut errors = Vec::new();
+
+    // First, collect all available shell integrations
+    let mut shell_integrations = Vec::new();
+    for shell in shells {
+        match shell.get_shell_integrations(&Context::new()) {
+            Ok(integrations) => {
+                for integ in integrations {
+                    shell_integrations.push((*shell, integ));
+                }
+            },
+            Err(err) => errors.push((*shell, err)),
+        }
+    }
+
+    // Because the fish shell doesn't support detecting legacy installations (and
+    // therefore migrating), we're going to iterate through all shells (ie, bash and zsh) to see if a
+    // legacy installation is detected. If so, then perform the migration.
+    let mut has_legacy_installation = None;
+    for (shell, integ) in &shell_integrations {
+        if let Err(fig_integrations::Error::LegacyInstallation(_)) = integ.is_installed().await {
+            has_legacy_installation = Some(shell);
+        }
+    }
+
+    if let Some(shell) = has_legacy_installation {
+        debug!(
+            ?shell,
+            "detected legacy dotfile installation, installing dotfile integrations"
+        );
+    } else {
+        debug!("no legacy dotfile installation detected, not migrating dotfiles");
+        return vec![];
+    }
+
+    for (shell, integration) in shell_integrations {
+        if let Err(err) = integration.install().await {
+            errors.push((shell, err));
+        }
+    }
+
+    errors
+}
+
 fn mark_migration_completed() -> Result<()> {
     let db = fig_settings::sqlite::database()?;
     db.set_state_value(KIRO_MIGRATION_KEY, true)?;
@@ -286,4 +344,16 @@ fn migration_lock_path() -> Result<PathBuf> {
 
 fn is_migration_completed() -> Result<bool> {
     Ok(fig_settings::state::get_bool_or(KIRO_MIGRATION_KEY, false))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "not in ci"]
+    async fn integ_test_migration() {
+        let _ = tracing_subscriber::fmt::try_init();
+        migrate_if_needed().await.unwrap();
+    }
 }

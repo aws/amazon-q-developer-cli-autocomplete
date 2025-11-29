@@ -6,7 +6,9 @@ use fig_integrations::shell::ShellExt;
 use fig_integrations::ssh::SshIntegration;
 use fig_os_shim::{
     Context,
-    Env,
+    EnvProvider,
+    FsProvider,
+    PlatformProvider,
 };
 use fig_util::{
     CHAT_BINARY_NAME,
@@ -53,7 +55,7 @@ pub async fn uninstall(components: InstallComponents, ctx: Arc<Context>) -> Resu
 
     let shell_integration_result = {
         for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
-            for integration in shell.get_shell_integrations(ctx.env())? {
+            for integration in shell.get_shell_integrations(&ctx)? {
                 integration.uninstall().await?;
             }
         }
@@ -139,11 +141,14 @@ pub async fn uninstall(components: InstallComponents, ctx: Arc<Context>) -> Resu
         .and(ssh_result.map_err(|e| e.into()))
 }
 
-pub async fn install(components: InstallComponents, env: &Env) -> Result<(), Error> {
+pub async fn install<Ctx: FsProvider + EnvProvider + PlatformProvider>(
+    components: InstallComponents,
+    ctx: &Ctx,
+) -> Result<(), Error> {
     if components.contains(InstallComponents::SHELL_INTEGRATIONS) {
         let mut errs: Vec<Error> = vec![];
         for shell in Shell::all() {
-            match shell.get_shell_integrations(env) {
+            match shell.get_shell_integrations(ctx) {
                 Ok(integrations) => {
                     for integration in integrations {
                         if let Err(e) = integration.install().await {

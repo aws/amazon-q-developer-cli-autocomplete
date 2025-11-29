@@ -64,7 +64,6 @@ use fig_ipc::{
 };
 use fig_os_shim::{
     Context,
-    Env,
     Os,
 };
 use fig_proto::local::DiagnosticsResponse;
@@ -2132,7 +2131,7 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
 
     let shell_integrations: Vec<_> = [Shell::Bash, Shell::Zsh, Shell::Fish]
         .into_iter()
-        .map(|shell| shell.get_shell_integrations(&Env::new()))
+        .map(|shell| shell.get_shell_integrations(&Context::new()))
         .collect::<Result<Vec<_>, fig_integrations::Error>>()?
         .into_iter()
         .flatten()

@@ -38,7 +38,6 @@ use fig_ipc::local::{
     set_debug_mode,
     toggle_debug_mode,
 };
-use fig_os_shim::Env;
 use fig_util::consts::APP_BUNDLE_ID;
 use fig_util::env_var::Q_DEBUG_SHELL;
 use fig_util::macos::BUNDLE_CONTENTS_MACOS_PATH;
@@ -246,7 +245,7 @@ pub enum DebugSubcommand {
 
 impl DebugSubcommand {
     pub async fn execute(&self) -> Result<ExitCode> {
-        let env = Env::new();
+        let ctx = fig_os_shim::Context::new();
         match self {
             DebugSubcommand::App => {
                 if !cfg!(target_os = "macos") {
@@ -859,7 +858,7 @@ impl DebugSubcommand {
                 }
             },
             DebugSubcommand::FixPermissions => {
-                fix_permissions::fix_permissions(&env)?;
+                fix_permissions::fix_permissions(&ctx)?;
             },
             DebugSubcommand::RefreshAuthToken => match fig_auth::refresh_token().await? {
                 Some(_) => eprintln!("Refreshed token"),

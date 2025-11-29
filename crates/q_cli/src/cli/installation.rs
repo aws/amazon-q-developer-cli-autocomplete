@@ -15,7 +15,7 @@ use fig_install::{
     InstallComponents,
     install,
 };
-use fig_os_shim::Env;
+use fig_os_shim::Context;
 use fig_util::system_info::in_cloudshell;
 use fig_util::{
     CLI_BINARY_NAME,
@@ -36,7 +36,7 @@ pub async fn install_cli(
     force: bool,
     global: bool,
 ) -> Result<ExitCode> {
-    let env = Env::new();
+    let ctx = Context::new();
 
     #[cfg(unix)]
     {
@@ -73,7 +73,7 @@ pub async fn install_cli(
             }
         };
         if !manual_install {
-            if let Err(err) = install(InstallComponents::SHELL_INTEGRATIONS, &env).await {
+            if let Err(err) = install(InstallComponents::SHELL_INTEGRATIONS, &ctx).await {
                 println!("{}", "Could not automatically install:".bold());
                 println!("{err}");
                 manual_install = true;
@@ -98,7 +98,7 @@ pub async fn install_cli(
             println!("zsh:     . \"$HOME/{shell_dir}/zshrc.post.zsh\"");
             println!();
 
-            if let Err(err) = install(InstallComponents::SHELL_INTEGRATIONS, &env).await {
+            if let Err(err) = install(InstallComponents::SHELL_INTEGRATIONS, &ctx).await {
                 println!("Could not install required files:");
                 println!("{err}");
             }
@@ -127,7 +127,7 @@ pub async fn install_cli(
 
                 match choose("Do you want to enable support for input method backed terminals?", &["Yes", "No"])? {
                     Some(0) => {
-                        install(InstallComponents::INPUT_METHOD, &env).await?;
+                        install(InstallComponents::INPUT_METHOD, &ctx).await?;
                     }
                     Some(_) => {}
                     None => bail!("No option selected"),

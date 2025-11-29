@@ -6,7 +6,11 @@ use std::path::{
 use std::str::FromStr;
 
 use clap::ValueEnum;
-use fig_os_shim::Env;
+use fig_os_shim::{
+    EnvProvider,
+    FsProvider,
+    PlatformProvider,
+};
 use regex::Regex;
 use serde::{
     Deserialize,
@@ -103,22 +107,26 @@ impl Shell {
     }
 
     /// Get the directory for the shell that contains the dotfiles
-    pub fn get_config_directory(&self, env: &Env) -> Result<PathBuf, directories::DirectoryError> {
+    pub fn get_config_directory<Ctx: FsProvider + EnvProvider + PlatformProvider>(
+        &self,
+        ctx: &Ctx,
+    ) -> Result<PathBuf, directories::DirectoryError> {
         match self {
-            Shell::Bash => Ok(directories::home_dir()?),
-            Shell::Zsh => match env
+            Shell::Bash => Ok(directories::home_dir_ctx(ctx)?),
+            Shell::Zsh => match ctx
+                .env()
                 .get_os("ZDOTDIR")
-                .or_else(|| env.get_os(Q_ZDOTDIR))
+                .or_else(|| ctx.env().get_os(Q_ZDOTDIR))
                 .map(PathBuf::from)
             {
                 Some(dir) => Ok(dir),
-                None => Ok(directories::home_dir()?),
+                None => Ok(directories::home_dir_ctx(ctx)?),
             },
-            Shell::Fish => match env.get_os("__fish_config_dir").map(PathBuf::from) {
+            Shell::Fish => match ctx.env().get_os("__fish_config_dir").map(PathBuf::from) {
                 Some(dir) => Ok(dir),
-                None => Ok(directories::home_dir()?.join(".config").join("fish")),
+                None => Ok(directories::home_dir_ctx(ctx)?.join(".config").join("fish")),
             },
-            Shell::Nu => Ok(directories::config_dir()?.join("nushell")),
+            Shell::Nu => Ok(directories::config_dir_ctx(ctx)?.join("nushell")),
         }
     }
 

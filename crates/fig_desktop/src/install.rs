@@ -56,7 +56,7 @@ fn run_input_method_migration() {
 pub async fn run_install(ctx: Arc<Context>, ignore_immediate_update: bool) {
     #[cfg(target_os = "macos")]
     {
-        initialize_fig_dir(&fig_os_shim::Env::new()).await.ok();
+        initialize_fig_dir(&fig_os_shim::Context::new()).await.ok();
 
         if fig_util::directories::home_dir()
             .map(|home| home.join("Library/Application Support/fig/credentials.json"))
@@ -201,7 +201,7 @@ async fn symlink(src: impl AsRef<std::path::Path>, dst: impl AsRef<std::path::Pa
 }
 
 #[cfg(target_os = "macos")]
-pub async fn initialize_fig_dir(env: &fig_os_shim::Env) -> anyhow::Result<()> {
+pub async fn initialize_fig_dir(ctx: &fig_os_shim::Context) -> anyhow::Result<()> {
     use std::fs;
 
     use fig_integrations::shell::ShellExt;
@@ -381,7 +381,7 @@ pub async fn initialize_fig_dir(env: &fig_os_shim::Env) -> anyhow::Result<()> {
             }
         }
 
-        for shell_integration in shell.get_shell_integrations(env).unwrap_or_default() {
+        for shell_integration in shell.get_shell_integrations(ctx).unwrap_or_default() {
             if let Err(err) = shell_integration.migrate().await {
                 error!(%err, "Failed installing shell integration {}", shell_integration.describe());
             }

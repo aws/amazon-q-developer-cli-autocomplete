@@ -15,7 +15,6 @@ use eyre::{
     bail,
 };
 use fig_integrations::shell::ShellExt as _;
-use fig_os_shim::Env;
 use fig_util::directories::home_dir;
 use fig_util::{
     CLI_BINARY_NAME,
@@ -28,7 +27,7 @@ use nix::unistd::{
 };
 use tracing::info;
 
-pub fn fix_permissions(env: &Env) -> Result<()> {
+pub fn fix_permissions(ctx: &fig_os_shim::Context) -> Result<()> {
     let Ok(sudo_uid_str) = std::env::var("SUDO_UID") else {
         bail!("This command must be run with sudo");
     };
@@ -48,7 +47,7 @@ pub fn fix_permissions(env: &Env) -> Result<()> {
     let mut updated = false;
 
     for shell in Shell::all() {
-        let shell_dir = shell.get_config_directory(env)?;
+        let shell_dir = shell.get_config_directory(ctx)?;
 
         // Only fix if the shell dir is not the home dir
         if shell_dir.is_dir() && shell_dir != home_dir {
@@ -59,7 +58,7 @@ pub fn fix_permissions(env: &Env) -> Result<()> {
             }
         }
 
-        if let Ok(integrations) = shell.get_shell_integrations(env) {
+        if let Ok(integrations) = shell.get_shell_integrations(ctx) {
             for integration in integrations {
                 let path = integration.path();
                 match std::fs::metadata(&path) {
