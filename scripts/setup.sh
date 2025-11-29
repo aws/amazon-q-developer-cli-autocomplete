@@ -27,7 +27,7 @@ install_linux_deps() {
 install_macos_deps() {
   echo "Detected macOS"
   xcode-select --install || true
-  brew install mise pnpm protobuf zsh bash fish shellcheck jq
+  brew install mise pnpm protobuf zsh bash fish shellcheck jq gnu-tar
 }
 
 install_rust() {
