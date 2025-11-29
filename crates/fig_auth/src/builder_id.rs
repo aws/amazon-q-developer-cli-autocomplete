@@ -45,9 +45,15 @@ use aws_types::request_id::RequestId;
 use aws_types::sdk_config::StalledStreamProtectionConfig;
 use fig_aws_common::app_name;
 use fig_telemetry_core::{
+    AuthErrorType,
     Event,
     EventType,
     TelemetryResult,
+};
+use fig_util::auth::{
+    OAuthFlow,
+    START_URL,
+    TokenType,
 };
 use time::OffsetDateTime;
 use tracing::{
@@ -68,22 +74,6 @@ use crate::{
     Error,
     Result,
 };
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum OAuthFlow {
-    DeviceCode,
-    #[serde(alias = "Pkce")]
-    PKCE,
-}
-
-impl std::fmt::Display for OAuthFlow {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match *self {
-            OAuthFlow::DeviceCode => write!(f, "DeviceCode"),
-            OAuthFlow::PKCE => write!(f, "PKCE"),
-        }
-    }
-}
 
 /// Indicates if an expiration time has passed, there is a small 1 min window that is removed
 /// so the token will not expire in transit
@@ -254,30 +244,42 @@ pub async fn start_device_authorization(
         ..
     } = DeviceRegistration::init_device_code_registration(&client, secret_store, &region).await?;
 
+    let start_url = start_url.as_deref().unwrap_or(START_URL);
+
     let output = client
         .start_device_authorization()
         .client_id(&client_id)
         .client_secret(&client_secret.0)
-        .start_url(start_url.as_deref().unwrap_or(START_URL))
+        .start_url(start_url)
         .send()
-        .await?;
+        .await;
 
-    Ok(StartDeviceAuthorizationResponse {
-        device_code: output.device_code.unwrap_or_default(),
-        user_code: output.user_code.unwrap_or_default(),
-        verification_uri: output.verification_uri.unwrap_or_default(),
-        verification_uri_complete: output.verification_uri_complete.unwrap_or_default(),
-        expires_in: output.expires_in,
-        interval: output.interval,
-        region: region.to_string(),
-        start_url: start_url.unwrap_or_else(|| START_URL.to_owned()),
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TokenType {
-    BuilderId,
-    IamIdentityCenter,
+    match output {
+        Ok(output) => Ok(StartDeviceAuthorizationResponse {
+            device_code: output.device_code.unwrap_or_default(),
+            user_code: output.user_code.unwrap_or_default(),
+            verification_uri: output.verification_uri.unwrap_or_default(),
+            verification_uri_complete: output.verification_uri_complete.unwrap_or_default(),
+            expires_in: output.expires_in,
+            interval: output.interval,
+            region: region.to_string(),
+            start_url: start_url.to_string(),
+        }),
+        Err(err) => {
+            let err: Error = err.into();
+            fig_telemetry_core::send_event(
+                Event::new(EventType::AuthFailed {
+                    auth_method: TokenType::from_start_url(Some(start_url)),
+                    oauth_flow: OAuthFlow::DeviceCode,
+                    error_type: AuthErrorType::NewLogin,
+                    error_code: err.service_error_code(),
+                })
+                .with_credential_start_url(start_url.to_string()),
+            )
+            .await;
+            Err(err)
+        },
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -513,6 +515,27 @@ pub async fn poll_create_token(
     start_url: Option<String>,
     region: Option<String>,
 ) -> PollCreateToken {
+    match poll_create_token_impl(secret_store, device_code, start_url.clone(), region).await {
+        PollCreateToken::Error(err) => {
+            fig_telemetry_core::send_event(Event::new(EventType::AuthFailed {
+                auth_method: TokenType::from_start_url(start_url.as_deref()),
+                oauth_flow: OAuthFlow::DeviceCode,
+                error_type: AuthErrorType::NewLogin,
+                error_code: err.service_error_code(),
+            }))
+            .await;
+            PollCreateToken::Error(err)
+        },
+        other => other,
+    }
+}
+
+async fn poll_create_token_impl(
+    secret_store: &SecretStore,
+    device_code: String,
+    start_url: Option<String>,
+    region: Option<String>,
+) -> PollCreateToken {
     let region = region.clone().map_or(OIDC_BUILDER_ID_REGION, Region::new);
     let client = client(region.clone());
 
@@ -633,23 +656,6 @@ mod tests {
 
     const US_EAST_1: Region = Region::from_static("us-east-1");
     const US_WEST_2: Region = Region::from_static("us-west-2");
-
-    macro_rules! test_ser_deser {
-        ($ty:ident, $variant:expr, $text:expr) => {
-            let quoted = format!("\"{}\"", $text);
-            assert_eq!(quoted, serde_json::to_string(&$variant).unwrap());
-            assert_eq!($variant, serde_json::from_str(&quoted).unwrap());
-
-            assert_eq!($text, format!("{}", $variant));
-        };
-    }
-
-    #[test]
-    fn test_oauth_flow_ser_deser() {
-        test_ser_deser!(OAuthFlow, OAuthFlow::DeviceCode, "DeviceCode");
-        test_ser_deser!(OAuthFlow, OAuthFlow::PKCE, "PKCE");
-        assert_eq!(OAuthFlow::PKCE, serde_json::from_str("\"Pkce\"").unwrap());
-    }
 
     #[test]
     fn test_client() {

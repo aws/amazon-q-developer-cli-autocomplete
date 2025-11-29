@@ -13,6 +13,7 @@ use aws_toolkit_telemetry_definitions::metrics::{
     AmazonqProfileState,
     AmazonqStartChat,
     CodewhispererterminalAddChatMessage,
+    CodewhispererterminalAuthFailed,
     CodewhispererterminalCliSubcommandExecuted,
     CodewhispererterminalCompletionInserted,
     CodewhispererterminalDashboardPageViewed,
@@ -40,6 +41,10 @@ use aws_toolkit_telemetry_definitions::types::{
     CodewhispererterminalToolsPerMcpServer,
     CodewhispererterminalUserInputId,
     CodewhispererterminalUtteranceId,
+};
+use fig_util::auth::{
+    OAuthFlow,
+    TokenType,
 };
 use strum::{
     Display,
@@ -116,6 +121,24 @@ impl Event {
                     value: None,
                     credential_start_url: self.credential_start_url.map(Into::into),
                     codewhispererterminal_in_cloudshell: in_cloudshell(),
+                }
+                .into_metric_datum(),
+            ),
+            EventType::AuthFailed {
+                auth_method,
+                oauth_flow,
+                error_type,
+                error_code,
+            } => Some(
+                CodewhispererterminalAuthFailed {
+                    create_time: self.created_time,
+                    value: None,
+                    credential_start_url: self.credential_start_url.map(Into::into),
+                    codewhispererterminal_in_cloudshell: None,
+                    codewhispererterminal_auth_method: Some(auth_method.to_string().into()),
+                    oauth_flow: Some(oauth_flow.to_string().into()),
+                    codewhispererterminal_error_type: Some(error_type.to_string().into()),
+                    codewhispererterminal_error_code: error_code.map(Into::into),
                 }
                 .into_metric_datum(),
             ),
@@ -414,6 +437,12 @@ impl Event {
 #[serde(tag = "type")]
 pub enum EventType {
     UserLoggedIn {},
+    AuthFailed {
+        auth_method: TokenType,
+        oauth_flow: OAuthFlow,
+        error_type: AuthErrorType,
+        error_code: Option<String>,
+    },
     RefreshCredentials {
         request_id: String,
         result: TelemetryResult,
@@ -572,11 +601,34 @@ fn in_cloudshell() -> Option<CodewhispererterminalInCloudshell> {
     Some(fig_util::system_info::in_cloudshell().into())
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, EnumString, Display, serde::Serialize, serde::Deserialize)]
+pub enum AuthErrorType {
+    NewLogin,
+    TokenRefresh,
+}
+
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
     use std::sync::Mutex;
 
     use super::*;
+
+    macro_rules! test_ser_deser {
+        ($ty:ident, $variant:expr, $text:expr) => {
+            let quoted = format!("\"{}\"", $text);
+            assert_eq!(quoted, serde_json::to_string(&$variant).unwrap());
+            assert_eq!($variant, serde_json::from_str(&quoted).unwrap());
+            assert_eq!($variant, $ty::from_str($text).unwrap());
+            assert_eq!($text, format!("{}", $variant));
+        };
+    }
+
+    #[test]
+    fn test_auth_error_type_ser_deser() {
+        test_ser_deser!(AuthErrorType, AuthErrorType::NewLogin, "NewLogin");
+        test_ser_deser!(AuthErrorType, AuthErrorType::TokenRefresh, "TokenRefresh");
+    }
 
     #[derive(Debug, Default)]
     struct DummyEmitter(Mutex<Vec<Event>>);

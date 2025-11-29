@@ -24,7 +24,6 @@ use fig_api_client::list_available_profiles;
 use fig_api_client::profile::Profile;
 use fig_auth::builder_id::{
     PollCreateToken,
-    TokenType,
     poll_create_token,
     start_device_authorization,
 };
@@ -38,6 +37,7 @@ use fig_telemetry_core::{
     QProfileSwitchIntent,
     TelemetryResult,
 };
+use fig_util::auth::TokenType;
 use fig_util::system_info::is_remote;
 use fig_util::{
     CLI_BINARY_NAME,

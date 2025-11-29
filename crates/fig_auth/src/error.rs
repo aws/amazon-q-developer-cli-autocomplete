@@ -11,8 +11,6 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    Ssooidc(#[from] Box<aws_sdk_ssooidc::Error>),
-    #[error(transparent)]
     SdkRegisterClient(#[from] SdkError<RegisterClientError>),
     #[error(transparent)]
     SdkCreateToken(#[from] SdkError<CreateTokenError>),
@@ -53,11 +51,25 @@ pub enum Error {
 impl Error {
     pub fn to_verbose_string(&self) -> String {
         match self {
-            Error::Ssooidc(s) => DisplayErrorContext(s).to_string(),
             Error::SdkRegisterClient(s) => DisplayErrorContext(s).to_string(),
             Error::SdkCreateToken(s) => DisplayErrorContext(s).to_string(),
             Error::SdkStartDeviceAuthorization(s) => DisplayErrorContext(s).to_string(),
             other => other.to_string(),
+        }
+    }
+
+    pub fn service_error_code(&self) -> Option<String> {
+        match self {
+            Error::SdkRegisterClient(err) => err
+                .as_service_error()
+                .and_then(|e| e.meta().code().map(|s| s.to_string())),
+            Error::SdkCreateToken(err) => err
+                .as_service_error()
+                .and_then(|e| e.meta().code().map(|s| s.to_string())),
+            Error::SdkStartDeviceAuthorization(err) => err
+                .as_service_error()
+                .and_then(|e| e.meta().code().map(|s| s.to_string())),
+            _ => None,
         }
     }
 }

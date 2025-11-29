@@ -12,9 +12,6 @@ pub use builder_id::{
     logout,
     refresh_token,
 };
-pub use consts::{
-    AMZN_START_URL,
-    START_URL,
-};
+pub use consts::AMZN_START_URL;
 pub use error::Error;
 pub(crate) use error::Result;

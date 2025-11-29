@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod directories;
 pub mod manifest;
 mod open;

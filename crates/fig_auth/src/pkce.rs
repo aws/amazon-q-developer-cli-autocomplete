@@ -30,6 +30,16 @@ pub use aws_types::region::Region;
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
 use bytes::Bytes;
+use fig_telemetry_core::{
+    AuthErrorType,
+    Event,
+    EventType,
+};
+use fig_util::auth::{
+    OAuthFlow,
+    START_URL,
+    TokenType,
+};
 use http_body_util::Full;
 use hyper::body::Incoming;
 use hyper::server::conn::http1;
@@ -56,7 +66,6 @@ use crate::secret_store::SecretStore;
 use crate::{
     Error,
     Result,
-    START_URL,
 };
 
 const DEFAULT_AUTHORIZATION_TIMEOUT: Duration = Duration::from_secs(60 * 3);
@@ -70,8 +79,22 @@ pub async fn start_pkce_authorization(
     let issuer_url = start_url.as_deref().unwrap_or(START_URL);
     let region = region.clone().map_or(OIDC_BUILDER_ID_REGION, Region::new);
     let client = client(region.clone());
-    let registration = PkceRegistration::register(&client, region, issuer_url.to_string(), None).await?;
-    Ok((client, registration))
+    match PkceRegistration::register(&client, region, issuer_url.to_string(), None).await {
+        Ok(registration) => Ok((client, registration)),
+        Err(err) => {
+            fig_telemetry_core::send_event(
+                Event::new(EventType::AuthFailed {
+                    auth_method: TokenType::from_start_url(Some(issuer_url)),
+                    oauth_flow: OAuthFlow::PKCE,
+                    error_type: AuthErrorType::NewLogin,
+                    error_code: err.service_error_code(),
+                })
+                .with_credential_start_url(issuer_url.to_string()),
+            )
+            .await;
+            Err(err)
+        },
+    }
 }
 
 /// Represents a client used for registering with AWS IAM OIDC.
@@ -242,10 +265,27 @@ impl PkceRegistration {
                 code_verifier: self.code_verifier,
                 code,
             })
-            .await?;
+            .await;
 
         // Tokens are redacted in the log output.
         debug!(?response, "Received create_token response");
+
+        let response = match response {
+            Ok(res) => res,
+            Err(err) => {
+                fig_telemetry_core::send_event(
+                    Event::new(EventType::AuthFailed {
+                        auth_method: TokenType::from_start_url(Some(&self.issuer_url)),
+                        oauth_flow: OAuthFlow::PKCE,
+                        error_type: AuthErrorType::NewLogin,
+                        error_code: err.service_error_code(),
+                    })
+                    .with_credential_start_url(self.issuer_url),
+                )
+                .await;
+                return Err(err);
+            },
+        };
 
         let token = BuilderIdToken::from_output(
             response.output,

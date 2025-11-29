@@ -6,7 +6,6 @@ use std::sync::{
 use fig_auth::builder_id::{
     PollCreateToken,
     StartDeviceAuthorizationResponse,
-    TokenType,
 };
 use fig_auth::pkce::{
     Client,
@@ -31,6 +30,7 @@ use fig_proto::fig::{
     AuthStatusRequest,
     AuthStatusResponse,
 };
+use fig_util::auth::TokenType;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{
     Receiver,

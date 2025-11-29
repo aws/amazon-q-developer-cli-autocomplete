@@ -18,9 +18,6 @@ pub(crate) const SCOPES: &[&str] = &[
 
 pub(crate) const CLIENT_TYPE: &str = "public";
 
-// The start URL for public builder ID users
-pub const START_URL: &str = "https://view.awsapps.com/start";
-
 // The start URL for internal amzn users
 pub const AMZN_START_URL: &str = "https://amzn.awsapps.com/start";
 
