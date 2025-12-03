@@ -137,7 +137,7 @@ objc.workspace = true
 objc2.workspace = true
 objc2-app-kit = { workspace = true, features = ["NSApplication"] }
 objc2-foundation.workspace = true
-system-configuration = "0.6.0"
+system-configuration = "0.7.0"
 
 [build-dependencies]
 image = "0.25.6"
