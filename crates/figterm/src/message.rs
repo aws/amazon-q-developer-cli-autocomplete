@@ -54,7 +54,6 @@ use crate::{
     MainLoopEvent,
     SHELL_ALIAS,
     SHELL_ENVIRONMENT_VARIABLES,
-    inline,
     shell_state_to_context,
 };
 
@@ -303,23 +302,16 @@ pub async fn process_figterm_message(
     main_loop_tx: Sender<MainLoopEvent>,
     response_tx: Sender<FigtermResponseMessage>,
     term: &Term<EventHandler>,
-    history_sender: &HistorySender,
+    _history_sender: &HistorySender,
     pty_master: &mut Box<dyn AsyncMasterPty + Send + Sync>,
     key_interceptor: &mut KeyInterceptor,
-    session_id: &str,
+    _session_id: &str,
 ) -> Result<()> {
     match figterm_request_message.request {
-        Some(FigtermRequest::InlineShellCompletion(request)) => {
-            let history_sender = history_sender.clone();
-            let session_id = session_id.to_owned();
-
-            tokio::spawn(inline::handle_request(request, session_id, response_tx, history_sender));
-        },
-        Some(FigtermRequest::InlineShellCompletionAccept(request)) => {
-            tokio::spawn(inline::handle_accept(request, session_id.to_owned()));
-        },
-        Some(FigtermRequest::InlineShellCompletionSetEnabled(request)) => {
-            tokio::spawn(inline::handle_set_enabled(request, session_id.to_owned()));
+        Some(FigtermRequest::InlineShellCompletion(_))
+        | Some(FigtermRequest::InlineShellCompletionAccept(_))
+        | Some(FigtermRequest::InlineShellCompletionSetEnabled(_)) => {
+            warn!("Inline shell completion is no longer supported");
         },
         Some(FigtermRequest::Telemtety(TelemetryRequest { event_blob })) => {
             match fig_telemetry::AppTelemetryEvent::from_json(&event_blob) {

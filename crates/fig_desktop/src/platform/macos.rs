@@ -688,11 +688,9 @@ impl PlatformStateImpl {
         // .unwrap_or(false);
 
         if !is_xterm && supports_ime {
-            tracing::debug!("Sending notif com.amazon.codewhisperer.edit_buffer_updated");
-            NotificationCenter::distributed_center().post_notification(
-                ns_string!("com.amazon.codewhisperer.edit_buffer_updated"),
-                &NSDictionary::new(),
-            );
+            tracing::debug!("Sending notif dev.precog.cli.edit_buffer_updated");
+            NotificationCenter::distributed_center()
+                .post_notification(ns_string!("dev.precog.cli.edit_buffer_updated"), &NSDictionary::new());
         } else {
             let caret = if is_xterm {
                 active_window

@@ -23,27 +23,15 @@ impl AppTelemetryEvent {
     pub async fn new(ty: EventType) -> Self {
         Self(Event {
             ty,
-            credential_start_url: fig_auth::builder_id_token()
-                .await
-                .ok()
-                .flatten()
-                .and_then(|t| t.start_url),
+            credential_start_url: None,
             created_time: Some(SystemTime::now()),
         })
     }
 
     pub async fn from_event(event: Event) -> Self {
-        let credential_start_url = match event.credential_start_url {
-            Some(v) => Some(v),
-            None => fig_auth::builder_id_token()
-                .await
-                .ok()
-                .flatten()
-                .and_then(|t| t.start_url),
-        };
         Self(Event {
             ty: event.ty,
-            credential_start_url,
+            credential_start_url: event.credential_start_url,
             created_time: event.created_time.or_else(|| Some(SystemTime::now())),
         })
     }

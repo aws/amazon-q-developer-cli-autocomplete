@@ -7,7 +7,6 @@ use std::io::{
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::LazyLock;
-use std::time::SystemTime;
 
 use clap::Args;
 use crossterm::style::Stylize;
@@ -275,19 +274,6 @@ async fn shell_init(shell: &Shell, when: &When, rcfile: &Option<String>) -> Resu
                 let _ = fig_settings::state::set_value(key, prompt_count + 1);
                 to_source.push(inline_prompt_code(*shell));
             }
-        }
-    }
-
-    if when == &When::Post && !fig_settings::state::get_bool_or("desktop.auth-watcher.logged-in", true) {
-        let last_sent_at = fig_settings::state::get_int_or("cli.init.login-prompt.sent-at", 0);
-        let now = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-        if now - last_sent_at > 60 * 60 * 36 {
-            let _ = fig_settings::state::set_value("cli.init.login-prompt.sent-at", now);
-            // TODO(grant): re-enable, this has not been tested enough before the 1.3.2 launch
-            // to_source.push(login_prompt_code(*shell));
         }
     }
 

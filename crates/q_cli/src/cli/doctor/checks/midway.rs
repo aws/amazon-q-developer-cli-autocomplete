@@ -21,10 +21,7 @@ impl DoctorCheck for MidwayCheck {
     }
 
     async fn get_type(&self, _: &(), _: Platform) -> DoctorCheckType {
-        let amzn_user = matches!(fig_auth::is_amzn_user().await, Ok(true));
-        let has_mwinit = which("mwinit").is_ok();
-
-        if amzn_user && has_mwinit {
+        if which("mwinit").is_ok() {
             DoctorCheckType::NormalCheck
         } else {
             DoctorCheckType::NoCheck

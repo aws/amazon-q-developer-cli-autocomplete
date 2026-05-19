@@ -1,7 +1,6 @@
 mod cli;
 mod event;
 // mod figterm;
-mod auth_watcher;
 mod file_watcher;
 mod install;
 mod local_ipc;
@@ -11,7 +10,6 @@ pub mod protocol;
 mod remote_ipc;
 mod request;
 mod tray;
-mod update;
 mod utils;
 mod webview;
 
@@ -145,7 +143,7 @@ async fn main() -> ExitCode {
     }
 
     let ctx = Context::new();
-    install::run_install(Arc::clone(&ctx), cli.ignore_immediate_update).await;
+    install::run_install(Arc::clone(&ctx)).await;
 
     #[cfg(target_os = "linux")]
     {
@@ -159,28 +157,18 @@ async fn main() -> ExitCode {
         platform::gtk::init().expect("Failed initializing GTK");
     }
 
-    let is_logged_in = fig_auth::is_logged_in().await;
-
-    if !is_logged_in {
-        tracing::info!("Showing onboarding");
-    }
-
     let accessibility_enabled = PlatformState::accessibility_is_enabled().unwrap_or(true);
     let visible = !cli.no_dashboard;
 
     let autocomplete_enabled =
-        !fig_settings::settings::get_bool_or("autocomplete.disable", false) && is_logged_in && accessibility_enabled;
+        !fig_settings::settings::get_bool_or("autocomplete.disable", false) && accessibility_enabled;
 
     let mut webview_manager = WebviewManager::new(ctx, visible);
     webview_manager
         .build_webview(
             DASHBOARD_ID,
             build_dashboard,
-            DashboardOptions {
-                show_onboarding: !is_logged_in,
-                visible,
-                page,
-            },
+            DashboardOptions { visible, page },
             true,
             dashboard::url,
         )

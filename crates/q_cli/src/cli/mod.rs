@@ -8,7 +8,6 @@ mod doctor;
 mod feed;
 mod hook;
 mod init;
-mod inline;
 mod installation;
 mod integrations;
 pub mod internal;
@@ -16,10 +15,7 @@ mod issue;
 mod settings;
 mod telemetry;
 mod theme;
-mod translate;
 mod uninstall;
-mod update;
-mod user;
 
 use std::io::{
     Write as _,
@@ -45,21 +41,12 @@ use eyre::{
     bail,
 };
 use feed::Feed;
-use fig_auth::builder_id::{
-    BuilderIdToken,
-    DeviceRegistration,
-};
-use fig_auth::consts::OIDC_BUILDER_ID_REGION;
-use fig_auth::is_logged_in;
-use fig_auth::pkce::Region;
-use fig_auth::secret_store::SecretStore;
 use fig_ipc::local::open_ui_element;
 use fig_log::{
     LogArgs,
     initialize_logging,
 };
 use fig_proto::local::UiElement;
-use fig_settings::sqlite::database;
 use fig_util::{
     CLI_BINARY_NAME,
     PRODUCT_NAME,
@@ -69,24 +56,16 @@ use fig_util::{
 };
 use internal::InternalSubcommand;
 use serde::Serialize;
-use tokio::signal::ctrl_c;
 use tracing::{
     Level,
     debug,
-    error,
-    warn,
 };
 
 use self::integrations::IntegrationsSubcommands;
-use self::user::RootUserSubcommand;
+use crate::util::CliContext;
 use crate::util::desktop::{
     LaunchArgs,
     launch_fig_desktop,
-};
-use crate::util::{
-    CliContext,
-    assert_logged_in,
-    qchat_path,
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -122,7 +101,7 @@ pub enum Processes {
     App,
 }
 
-/// The Amazon Q CLI
+/// The Precog CLI
 #[deny(missing_docs)]
 #[derive(Debug, PartialEq, Subcommand)]
 pub enum CliRootCommands {
@@ -138,16 +117,13 @@ pub enum CliRootCommands {
     /// Setup cli components
     #[command(alias("install"))]
     Setup(internal::InstallArgs),
-    /// Uninstall Amazon Q
+    /// Uninstall Precog
     #[command(hide = true)]
     Uninstall {
         /// Force uninstall
         #[arg(long, short = 'y')]
         no_confirm: bool,
     },
-    /// Update the Amazon Q application
-    #[command(alias("upgrade"))]
-    Update(update::UpdateArgs),
     /// Run diagnostic tests
     #[command(alias("diagnostics"))]
     Diagnostic(diagnostics::DiagnosticArgs),
@@ -157,12 +133,6 @@ pub enum CliRootCommands {
     Theme(theme::ThemeArgs),
     /// Create a new Github issue
     Issue(issue::IssueArgs),
-    /// Root level user subcommands
-    #[command(flatten)]
-    RootUser(user::RootUserSubcommand),
-    /// Manage your account
-    #[command(subcommand)]
-    User(user::UserSubcommand),
     /// Fix and diagnose common issues
     Doctor(doctor::DoctorArgs),
     /// Generate CLI completion spec
@@ -184,9 +154,6 @@ pub enum CliRootCommands {
     /// Manage system integrations
     #[command(subcommand, alias("integration"))]
     Integrations(IntegrationsSubcommands),
-    /// Natural Language to Shell translation
-    #[command(alias("ai"))]
-    Translate(translate::TranslateArgs),
     /// Enable/disable telemetry
     #[command(subcommand, hide = true)]
     Telemetry(telemetry::TelemetrySubcommand),
@@ -200,30 +167,6 @@ pub enum CliRootCommands {
     },
     /// Open the dashboard
     Dashboard,
-    /// AI assistant in your terminal
-    #[command(disable_help_flag = true)]
-    Chat {
-        /// Args for the chat subcommand
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
-    /// Model Context Protocol (MCP)
-    #[command(disable_help_flag = true)]
-    Mcp {
-        /// Args for the MCP subcommand
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
-    /// Inline shell completions
-    #[command(subcommand)]
-    Inline(inline::InlineSubcommand),
-    /// Agent root commands
-    #[command(disable_help_flag = true)]
-    Agent {
-        /// Args for Agent subcommand
-        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
-        args: Vec<String>,
-    },
 }
 
 impl CliRootCommands {
@@ -234,16 +177,10 @@ impl CliRootCommands {
             CliRootCommands::Settings(_) => "settings",
             CliRootCommands::Setup(_) => "setup",
             CliRootCommands::Uninstall { .. } => "uninstall",
-            CliRootCommands::Update(_) => "update",
             CliRootCommands::Diagnostic(_) => "diagnostics",
             CliRootCommands::Init(_) => "init",
             CliRootCommands::Theme(_) => "theme",
             CliRootCommands::Issue(_) => "issue",
-            CliRootCommands::RootUser(RootUserSubcommand::Login(_)) => "login",
-            CliRootCommands::RootUser(RootUserSubcommand::Logout) => "logout",
-            CliRootCommands::RootUser(RootUserSubcommand::Whoami { .. }) => "whoami",
-            CliRootCommands::RootUser(RootUserSubcommand::Profile) => "profile",
-            CliRootCommands::User(_) => "user",
             CliRootCommands::Doctor(_) => "doctor",
             CliRootCommands::Completion(_) => "completion",
             CliRootCommands::Internal(_) => "internal",
@@ -251,33 +188,27 @@ impl CliRootCommands {
             CliRootCommands::Quit => "quit",
             CliRootCommands::Restart { .. } => "restart",
             CliRootCommands::Integrations(_) => "integrations",
-            CliRootCommands::Translate(_) => "translate",
             CliRootCommands::Telemetry(_) => "telemetry",
             CliRootCommands::Version { .. } => "version",
             CliRootCommands::Dashboard => "dashboard",
-            CliRootCommands::Chat { .. } => "chat",
-            CliRootCommands::Mcp { .. } => "mcp",
-            CliRootCommands::Inline(_) => "inline",
-            CliRootCommands::Agent { .. } => "agent",
         }
     }
 }
 
 const HELP_TEXT: &str = color_print::cstr! {"
 
-<magenta,em>q</magenta,em> (Amazon Q CLI)
+<magenta,em>precog</magenta,em> (Precog CLI)
 
-<magenta,em>Popular Subcommands</magenta,em>              <black!><em>Usage:</em> q [subcommand]</black!>
+<magenta,em>Popular Subcommands</magenta,em>              <black!><em>Usage:</em> precog [subcommand]</black!>
 ╭────────────────────────────────────────────────────╮
-│ <em>chat</em>         <black!>Chat with Amazon Q</black!>                    │
-│ <em>translate</em>    <black!>Natural Language to Shell translation</black!> │
-│ <em>doctor</em>       <black!>Debug installation issues</black!>             │ 
+│ <em>dashboard</em>    <black!>Open the dashboard</black!>                    │
+│ <em>doctor</em>       <black!>Debug installation issues</black!>             │
 │ <em>settings</em>     <black!>Customize appearance & behavior</black!>       │
 │ <em>quit</em>         <black!>Quit the app</black!>                          │
 ╰────────────────────────────────────────────────────╯
 
 <black!>To see all subcommands, use:</black!>
- <black!>❯</black!> q --help-all
+ <black!>❯</black!> precog --help-all
 ㅤ
 "};
 
@@ -312,8 +243,6 @@ impl Cli {
             },
             log_to_stdout: fig_os_shim::Env::new().q_log_stdout() || self.verbose > 0,
             log_file_path: match self.subcommand {
-                Some(CliRootCommands::Chat { .. }) => Some("chat.log".to_owned()),
-                Some(CliRootCommands::Translate(..)) => Some("translate.log".to_owned()),
                 Some(CliRootCommands::Internal(InternalSubcommand::Multiplexer(_))) => Some("mux.log".to_owned()),
                 _ => match fig_log::get_log_level_max() >= Level::DEBUG {
                     true => Some("cli.log".to_owned()),
@@ -343,11 +272,8 @@ impl Cli {
                     installation::install_cli(args.into(), no_confirm, force, global).await
                 },
                 CliRootCommands::Uninstall { no_confirm } => uninstall::uninstall_command(no_confirm).await,
-                CliRootCommands::Update(args) => args.execute().await,
                 CliRootCommands::Diagnostic(args) => args.execute().await,
                 CliRootCommands::Init(args) => args.execute().await,
-                CliRootCommands::User(user) => user.execute().await,
-                CliRootCommands::RootUser(root_user) => root_user.execute().await,
                 CliRootCommands::Doctor(args) => args.execute().await,
                 CliRootCommands::Hook(hook_subcommand) => hook_subcommand.execute().await,
                 CliRootCommands::Theme(theme_args) => theme_args.execute().await,
@@ -363,103 +289,13 @@ impl Cli {
                     launch_dashboard(false).await
                 },
                 CliRootCommands::Integrations(subcommand) => subcommand.execute().await,
-                CliRootCommands::Translate(args) => args.execute().await,
                 CliRootCommands::Telemetry(subcommand) => subcommand.execute().await,
                 CliRootCommands::Version { changelog } => Self::print_version(changelog),
                 CliRootCommands::Dashboard => launch_dashboard(false).await,
-                CliRootCommands::Chat { args } => {
-                    if args.iter().any(|arg| ["--help", "-h"].contains(&arg.as_str())) {
-                        return Self::execute_chat("chat", Some(vec!["--help".to_owned()]), false).await;
-                    }
-
-                    Self::execute_chat("chat", Some(args), true).await
-                },
-                CliRootCommands::Mcp { args } => {
-                    if args.iter().any(|arg| ["--help", "-h"].contains(&arg.as_str())) {
-                        return Self::execute_chat("mcp", Some(args), false).await;
-                    }
-
-                    Self::execute_chat("mcp", Some(args), true).await
-                },
-                CliRootCommands::Inline(subcommand) => subcommand.execute(&cli_context).await,
-                CliRootCommands::Agent { args } => {
-                    if args.iter().any(|arg| ["--help", "-h"].contains(&arg.as_str())) {
-                        return Self::execute_chat("agent", Some(args), false).await;
-                    }
-
-                    Self::execute_chat("agent", Some(args), true).await
-                },
             },
-            // Root command
-            None => Self::execute_chat("chat", None, true).await,
+            // Root command -- no subcommand: open the dashboard.
+            None => launch_dashboard(false).await,
         }
-    }
-
-    pub async fn execute_chat(subcmd: &str, args: Option<Vec<String>>, enforce_login: bool) -> Result<ExitCode> {
-        if enforce_login {
-            assert_logged_in().await?;
-        }
-
-        // Save credentials from the macOS keychain to sqlite.
-        // On Linux, this essentially just rewrites to the database.
-        let secret_store = SecretStore::new().await.ok();
-        if let Some(secret_store) = secret_store {
-            if let Ok(database) = database().map_err(|err| error!(?err, "failed to open database")) {
-                if let Ok(token) = BuilderIdToken::load(&secret_store, false).await {
-                    // Save the device registration. This is required for token refresh to succeed.
-                    if let Some(token) = token.as_ref() {
-                        let region = token.region.clone().map_or(OIDC_BUILDER_ID_REGION, Region::new);
-                        match DeviceRegistration::load_from_secret_store(&secret_store, &region).await {
-                            Ok(Some(reg)) => match serde_json::to_string(&reg) {
-                                Ok(reg) => {
-                                    database
-                                        .set_auth_value("codewhisperer:odic:device-registration", reg)
-                                        .map_err(|err| error!(?err, "failed to write device registration to auth db"))
-                                        .ok();
-                                },
-                                Err(err) => error!(?err, "failed to serialize the device registration"),
-                            },
-                            Ok(None) => {
-                                warn!(?token, "no device registration found for token");
-                            },
-                            Err(err) => {
-                                error!(?err, "failed to load device registration");
-                            },
-                        }
-                    }
-
-                    // Next, save the token.
-                    if let Ok(token) = serde_json::to_string(&token) {
-                        database
-                            .set_auth_value("codewhisperer:odic:token", token)
-                            .map_err(|err| error!(?err, "failed to write credentials to auth db"))
-                            .ok();
-                    }
-                }
-            }
-        }
-
-        let mut cmd = tokio::process::Command::new(qchat_path()?);
-        cmd.arg(subcmd);
-        if let Some(args) = args {
-            cmd.args(args);
-        }
-
-        // Because we are spawning chat as a child process, we need the parent process (this one)
-        // to ignore sigint that are meant for chat (i.e. all of them)
-        tokio::spawn(async move {
-            loop {
-                let _ = ctrl_c().await;
-            }
-        });
-
-        debug!("launching q chat binary");
-        let exit_status = cmd.status().await?;
-        let exit_code = exit_status
-            .code()
-            .map_or(ExitCode::FAILURE, |e| ExitCode::from(e as u8));
-
-        Ok(exit_code)
     }
 
     async fn send_telemetry(&self) {
@@ -580,18 +416,12 @@ async fn launch_dashboard(help_fallback: bool) -> Result<ExitCode> {
     launch_fig_desktop(LaunchArgs {
         wait_for_socket: true,
         open_dashboard: true,
-        immediate_update: true,
         verbose: true,
     })?;
 
-    let route = match is_logged_in().await {
-        true => Some("/".into()),
-        false => None,
-    };
-
     println!("Opening {PRODUCT_NAME} dashboard");
 
-    open_ui_element(UiElement::MissionControl, route)
+    open_ui_element(UiElement::MissionControl, Some("/".into()))
         .await
         .context("Failed to open dashboard")?;
 
@@ -672,59 +502,6 @@ mod test {
             ],
             CliRootCommands::Internal(InternalSubcommand::AttemptToFinishInputMethodInstallation {
                 bundle_path: Some(std::path::PathBuf::from("/path/to/bundle.app"))
-            })
-        );
-    }
-
-    #[test]
-    fn test_inline_shell_completion() {
-        use internal::InternalSubcommand;
-
-        assert_parse!(
-            ["_", "inline-shell-completion", "--buffer", ""],
-            CliRootCommands::Internal(InternalSubcommand::InlineShellCompletion { buffer: "".to_string() })
-        );
-
-        assert_parse!(
-            ["_", "inline-shell-completion", "--buffer", "foo"],
-            CliRootCommands::Internal(InternalSubcommand::InlineShellCompletion {
-                buffer: "foo".to_string()
-            })
-        );
-
-        assert_parse!(
-            ["_", "inline-shell-completion", "--buffer", "-"],
-            CliRootCommands::Internal(InternalSubcommand::InlineShellCompletion {
-                buffer: "-".to_string()
-            })
-        );
-
-        assert_parse!(
-            ["_", "inline-shell-completion", "--buffer", "--"],
-            CliRootCommands::Internal(InternalSubcommand::InlineShellCompletion {
-                buffer: "--".to_string()
-            })
-        );
-
-        assert_parse!(
-            ["_", "inline-shell-completion", "--buffer", "--foo bar"],
-            CliRootCommands::Internal(InternalSubcommand::InlineShellCompletion {
-                buffer: "--foo bar".to_string()
-            })
-        );
-
-        assert_parse!(
-            [
-                "_",
-                "inline-shell-completion-accept",
-                "--buffer",
-                "abc",
-                "--suggestion",
-                "def"
-            ],
-            CliRootCommands::Internal(InternalSubcommand::InlineShellCompletionAccept {
-                buffer: "abc".to_string(),
-                suggestion: "def".to_string()
             })
         );
     }

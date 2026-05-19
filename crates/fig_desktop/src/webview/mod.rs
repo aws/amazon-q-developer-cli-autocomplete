@@ -104,7 +104,6 @@ use crate::{
     EventLoop,
     EventLoopProxy,
     InterceptState,
-    auth_watcher,
     file_watcher,
     local_ipc,
     utils,
@@ -114,8 +113,6 @@ pub const DASHBOARD_SIZE: LogicalSize<f64> = LogicalSize::new(960.0, 720.0);
 pub const DASHBOARD_MINIMUM_SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 480.0);
 
 pub const AUTOCOMPLETE_WINDOW_TITLE: &str = "Fig Autocomplete";
-
-pub const LOGIN_PATH: &str = "/";
 
 fn map_theme(theme: &str) -> Option<WryTheme> {
     match theme {
@@ -361,7 +358,6 @@ impl WebviewManager {
         }
 
         file_watcher::setup_listeners(self.notifications_state.clone(), self.event_loop.create_proxy()).await;
-        auth_watcher::spawn_auth_watcher();
 
         init_webview_notification_listeners(self.event_loop.create_proxy()).await;
 
@@ -501,12 +497,10 @@ impl WebviewManager {
                         Event::ControlFlow(new_control_flow) => {
                             *control_flow = new_control_flow;
                         },
-                        Event::ReloadTray { is_logged_in } => {
-                            tray.set_icon(Some(get_icon(is_logged_in)))
-                                .map_err(|err| error!(?err))
-                                .ok();
+                        Event::ReloadTray => {
+                            tray.set_icon(Some(get_icon())).map_err(|err| error!(?err)).ok();
                             tray.set_icon_as_template(true);
-                            tray.set_menu(Some(Box::new(get_context_menu(is_logged_in))));
+                            tray.set_menu(Some(Box::new(get_context_menu())));
                         },
                         Event::ReloadCredentials => {
                             // tray.set_menu(Some(Box::new(get_context_menu())));
@@ -647,7 +641,6 @@ where
 }
 
 pub struct DashboardOptions {
-    pub show_onboarding: bool,
     pub visible: bool,
     pub page: Option<String>,
 }
@@ -656,11 +649,7 @@ pub fn build_dashboard(
     ctx: Arc<Context>,
     web_context: &mut WebContext,
     event_loop: &EventLoop,
-    DashboardOptions {
-        show_onboarding,
-        visible,
-        page,
-    }: DashboardOptions,
+    DashboardOptions { visible, page }: DashboardOptions,
 ) -> anyhow::Result<(Window, WebView)> {
     let window = WindowBuilder::new()
         .with_title(PRODUCT_NAME)
@@ -692,9 +681,7 @@ pub fn build_dashboard(
 
     let mut url = dashboard::url();
 
-    if show_onboarding {
-        url.set_path(LOGIN_PATH);
-    } else if let Some(page) = page {
+    if let Some(page) = page {
         url.set_path(&page);
     }
 
@@ -1030,27 +1017,6 @@ async fn init_webview_notification_listeners(proxy: EventLoopProxy) {
                 .unwrap();
         }
     );
-
-    // I don't think this is meant to be here anymore
-    // watcher!(settings, "app.beta", |_: JsonNotification, proxy: &EventLoopProxy| {
-    //     let proxy = proxy.clone();
-    //     tokio::spawn(fig_install::update(
-    //         Some(Box::new(move |_| {
-    //             proxy
-    //                 .send_event(Event::ShowMessageNotification {
-    //                     title: "Fig Update".into(),
-    //                     body: "Fig is updating in the background. You can continue to use Fig while
-    // it updates.".into(),                     parent: None,
-    //                 })
-    //                 .unwrap();
-    //         })),
-    //         fig_install::UpdateOptions {
-    //             ignore_rollout: true,
-    //             interactive: true,
-    //             relaunch_dashboard: true,
-    //         },
-    //     ));
-    // });
 
     // Midway watcher
     tokio::spawn(async move {

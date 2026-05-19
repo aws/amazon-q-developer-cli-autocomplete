@@ -1,7 +1,6 @@
 pub mod error;
 pub mod history;
 pub mod keybindings;
-pub mod keys;
 pub mod settings;
 pub mod sqlite;
 pub mod state;

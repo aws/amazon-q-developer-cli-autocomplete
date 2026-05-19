@@ -3,9 +3,9 @@ pub mod midway;
 mod reqwest_client;
 
 pub use error::Error;
-pub use reqwest;
 use reqwest::Client;
 pub use reqwest::{
+    self,
     Error as ReqwestError,
     Method,
 };

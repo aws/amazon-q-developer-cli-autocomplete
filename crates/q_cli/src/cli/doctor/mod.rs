@@ -1843,25 +1843,6 @@ impl DoctorCheck for WindowsConsoleCheck {
     }
 }
 
-struct LoginStatusCheck;
-
-#[async_trait]
-impl DoctorCheck for LoginStatusCheck {
-    fn name(&self) -> Cow<'static, str> {
-        "Auth".into()
-    }
-
-    async fn check(&self, _: &()) -> Result<(), DoctorError> {
-        if !fig_util::system_info::in_cloudshell() && !fig_auth::is_logged_in().await {
-            return Err(doctor_error!(
-                "Not authenticated. Please run {}",
-                format!("{CLI_BINARY_NAME} login").bold()
-            ));
-        }
-        Ok(())
-    }
-}
-
 struct DashboardHostCheck;
 
 #[async_trait]
@@ -2106,26 +2087,9 @@ pub async fn doctor_cli(all: bool, strict: bool) -> Result<ExitCode> {
         })?;
     }
 
-    // Remove update lock on doctor runs to fix bad state if update crashed.
-    if let Ok(update_lock) = fig_util::directories::update_lock_path(&Context::new()) {
-        if update_lock.exists() {
-            std::fs::remove_file(update_lock).ok();
-        }
-    }
-
-    run_checks(
-        "Let's check if you're logged in...".into(),
-        vec![&LoginStatusCheck {}],
-        config,
-        &mut spinner,
-    )
-    .await?;
-
-    // If user is logged in, try to launch fig
     launch_fig_desktop(LaunchArgs {
         wait_for_socket: true,
         open_dashboard: false,
-        immediate_update: true,
         verbose: false,
     })
     .ok();

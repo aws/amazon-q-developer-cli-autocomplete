@@ -14,7 +14,6 @@ import { Suspense, useContext, useEffect, useRef } from "react";
 import Modal from "./components/modal";
 import { Telemetry, Event } from "@aws/amazon-q-developer-cli-api-bindings";
 import InstallModal from "./components/installs/modal";
-import LoginModal from "./components/installs/modal/login";
 import { getIconFromName } from "./lib/icons";
 import { StoreContext } from "./context/zustand";
 import { createStore } from "./lib/store";
@@ -27,7 +26,6 @@ import {
 } from "./hooks/store";
 import { useLocalStateZodDefault } from "./hooks/store/useState";
 import { z } from "zod";
-import { useAuth } from "./hooks/store/useAuth";
 import { NOTIFICATIONS_SEEN_STATE_KEY } from "./lib/constants";
 import WhatsNew from "./pages/whats-new";
 import notificationFeedItems from "../../../feed.json";
@@ -60,28 +58,16 @@ function AppLoading() {
 }
 
 function ActiveModal() {
-  const auth = useAuth();
   const [onboardingComplete] = useLocalStateZodDefault(
     "desktop.completedOnboarding",
     z.boolean(),
     false,
   );
-  const [closed, setClosed] = useState(false);
-
-  if (closed) return null;
 
   if (onboardingComplete === false) {
     return (
       <Modal>
         <InstallModal />
-      </Modal>
-    );
-  }
-
-  if (onboardingComplete && auth.authed === false) {
-    return (
-      <Modal>
-        <LoginModal next={() => setClosed(true)} />
       </Modal>
     );
   }

@@ -22,7 +22,6 @@ use crate::Result;
 use crate::error::DbOpenError;
 
 const STATE_TABLE_NAME: &str = "state";
-const AUTH_TABLE_NAME: &str = "auth_kv";
 
 pub static DATABASE: LazyLock<Result<Db, DbOpenError>> = LazyLock::new(|| {
     let db = Db::new().map_err(|e| DbOpenError(e.to_string()))?;
@@ -61,8 +60,7 @@ const MIGRATIONS: &[Migration] = migrations![
     "001_history_table",
     "002_drop_history_in_ssh_docker",
     "003_improved_history_timing",
-    "004_state_table",
-    "005_auth_table"
+    "004_state_table"
 ];
 
 #[derive(Debug, Clone)]
@@ -154,10 +152,6 @@ impl Db {
         self.get_value(STATE_TABLE_NAME, key)
     }
 
-    pub fn get_auth_value(&self, key: impl AsRef<str>) -> Result<Option<String>> {
-        self.get_value(AUTH_TABLE_NAME, key)
-    }
-
     fn set_value<T: ToSql>(&self, table: &'static str, key: impl AsRef<str>, value: T) -> Result<()> {
         self.pool.get()?.execute(
             &format!("INSERT OR REPLACE INTO {table} (key, value) VALUES (?1, ?2)"),
@@ -170,10 +164,6 @@ impl Db {
         self.set_value(STATE_TABLE_NAME, key, value.into())
     }
 
-    pub fn set_auth_value(&self, key: impl AsRef<str>, value: impl Into<String>) -> Result<()> {
-        self.set_value(AUTH_TABLE_NAME, key, value.into())
-    }
-
     fn unset_value(&self, table: &'static str, key: impl AsRef<str>) -> Result<()> {
         self.pool
             .get()?
@@ -183,10 +173,6 @@ impl Db {
 
     pub fn unset_state_value(&self, key: impl AsRef<str>) -> Result<()> {
         self.unset_value(STATE_TABLE_NAME, key)
-    }
-
-    pub fn unset_auth_value(&self, key: impl AsRef<str>) -> Result<()> {
-        self.unset_value(AUTH_TABLE_NAME, key)
     }
 
     fn is_value_set(&self, table: &'static str, key: impl AsRef<str>) -> Result<bool> {
@@ -201,10 +187,6 @@ impl Db {
 
     pub fn is_state_value_set(&self, key: impl AsRef<str>) -> Result<bool> {
         self.is_value_set(STATE_TABLE_NAME, key)
-    }
-
-    pub fn is_auth_value_set(&self, key: impl AsRef<str>) -> Result<bool> {
-        self.is_value_set(AUTH_TABLE_NAME, key)
     }
 
     fn all_values(&self, table: &'static str) -> Result<Map<String, serde_json::Value>> {
@@ -403,20 +385,6 @@ mod tests {
         assert!(!db.is_state_value_set("int").unwrap());
         assert!(db.is_state_value_set("float").unwrap());
         assert!(db.is_state_value_set("bool").unwrap());
-    }
-
-    #[test]
-    fn auth_table_tests() {
-        let db = mock();
-
-        db.set_auth_value("test", "test").unwrap();
-        assert_eq!(db.get_auth_value("test").unwrap().unwrap(), "test");
-        assert!(db.is_auth_value_set("test").unwrap());
-        db.unset_auth_value("test").unwrap();
-        assert!(!db.is_auth_value_set("test").unwrap());
-
-        assert_eq!(db.get_auth_value("test2").unwrap(), None);
-        assert!(!db.is_auth_value_set("test2").unwrap());
     }
 
     #[test]

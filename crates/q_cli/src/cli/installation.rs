@@ -16,17 +16,10 @@ use fig_install::{
     install,
 };
 use fig_os_shim::Env;
+use fig_util::CLI_BINARY_NAME;
 use fig_util::system_info::in_cloudshell;
-use fig_util::{
-    CLI_BINARY_NAME,
-    PRODUCT_NAME,
-};
 use tracing::warn;
 
-use super::user::{
-    LoginArgs,
-    login_interactive,
-};
 use crate::util::choose;
 
 #[cfg_attr(windows, allow(unused_variables))]
@@ -136,20 +129,7 @@ pub async fn install_cli(
         }
     }
 
-    if !fig_auth::is_logged_in().await && !in_cloudshell() && !global {
-        if !no_confirm {
-            if !dialoguer::console::user_attended() {
-                eyre::bail!("You must run with --no-confirm if unattended");
-            }
-
-            login_interactive(LoginArgs::default()).await?;
-        } else {
-            println!();
-            println!("You must login before you can use {PRODUCT_NAME}'s features.");
-            println!("To login run: {}", format!("{CLI_BINARY_NAME} login").bold());
-            println!();
-        }
-    }
+    let _ = (in_cloudshell(), global, no_confirm);
 
     Ok(ExitCode::SUCCESS)
 }

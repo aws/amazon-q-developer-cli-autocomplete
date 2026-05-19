@@ -10,20 +10,6 @@ const onboardingSteps: InstallCheck[] = [
     action: "Continue",
   },
   ...installChecks,
-  {
-    id: "login",
-    title: "Signed in with Builder ID",
-    description: [
-      "AI features won't work if you're no longer signed into Builder ID.",
-    ],
-    action: "Sign in",
-  },
-  {
-    id: "profile",
-    title: "Select Profile",
-    description: ["SSO users must select a profile"],
-    action: "Select",
-  },
 ];
 
 export default onboardingSteps;

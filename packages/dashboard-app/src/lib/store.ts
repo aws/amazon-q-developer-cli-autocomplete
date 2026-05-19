@@ -2,7 +2,6 @@ import { create } from "zustand";
 import {
   Settings as ApiSettings,
   State as ApiState,
-  Auth,
   Install,
   Platform,
 } from "@aws/amazon-q-developer-cli-api-bindings";
@@ -13,8 +12,6 @@ type KV = Record<string, unknown>;
 export interface Data {
   settings: KV | undefined;
   state: KV | undefined;
-  auth: Awaited<ReturnType<typeof Auth.status>> | undefined;
-  authRequestId: string | undefined;
   platformInfo: PlatformInfo | undefined;
 
   accessibilityIsInstalled: boolean | undefined;
@@ -28,9 +25,6 @@ export interface Actions {
   setSetting: (key: string, value: unknown) => Promise<void>;
   setState: (key: string, value: unknown) => Promise<void>;
   refreshLocalState: () => Promise<void>;
-  refreshAuth: () => Promise<void>;
-  currAuthRequestId: () => string | undefined;
-  setAuthRequestId: (authRequestId: string | undefined) => void;
   refreshAccessibilityIsInstalled: () => Promise<void>;
   refreshDotfilesIsInstalled: () => Promise<void>;
   refreshInputMethodIsInstalled: () => Promise<void>;
@@ -48,20 +42,12 @@ export const createStore = () => {
   const store = create<State>()((set, get) => ({
     settings: undefined,
     state: undefined,
-    auth: undefined,
     accessibilityIsInstalled: undefined,
     dotfilesIsInstalled: undefined,
     inputMethodIsInstalled: undefined,
     desktopEntryIsInstalled: undefined,
     gnomeExtensionIsInstalled: undefined,
-    authRequestId: undefined,
     platformInfo: undefined,
-    currAuthRequestId: () => {
-      return get().authRequestId;
-    },
-    setAuthRequestId: (authRequestId: string | undefined) => {
-      set((s) => ({ ...s, authRequestId }));
-    },
     setSetting: async (key, value) => {
       set((s) => ({ settings: { ...s.settings, [key]: value } }));
       await ApiSettings.set(key, value);
@@ -92,21 +78,15 @@ export const createStore = () => {
         await Install.isInstalled("gnomeExtension");
       set(() => ({ gnomeExtensionIsInstalled }));
     },
-    refreshAuth: async () => {
-      const auth = await Auth.status();
-      set(() => ({ auth }));
-    },
     refreshLocalState: async () => {
       const state = await ApiState.current();
       set(() => ({ state }));
     },
     isLoading: () => {
-      const { state, settings, auth, platformInfo } = get();
-      // return true if any of the values are undefined
+      const { state, settings, platformInfo } = get();
       return (
         state === undefined ||
         settings === undefined ||
-        auth === undefined ||
         platformInfo === undefined
       );
     },
@@ -128,22 +108,6 @@ export const createStore = () => {
     .catch((err) => {
       console.error(err);
       store.setState({ state: {} });
-    });
-
-  Auth.status()
-    .then((auth) => {
-      store.setState({ auth });
-    })
-    .catch((err) => {
-      console.error(err);
-      store.setState({
-        auth: {
-          authed: false,
-          authKind: undefined,
-          region: undefined,
-          startUrl: undefined,
-        },
-      });
     });
 
   Platform.getPlatformInfo()

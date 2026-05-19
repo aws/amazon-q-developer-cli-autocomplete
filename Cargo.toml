@@ -12,22 +12,14 @@ members = [
 default-members = ["crates/q_cli"]
 
 [workspace.package]
-authors = [
-    "Amazon Q CLI Team (q-cli@amazon.com)",
-    "Chay Nabors (nabochay@amazon.com)",
-    "Brandon Kiser (bskiser@amazon.com)",
-]
+authors = ["Precog CLI contributors"]
 edition = "2024"
-homepage = "https://aws.amazon.com/q/"
+homepage = "https://github.com/usqr/CLIprecog"
 publish = false
 version = "1.19.7"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-amzn-codewhisperer-client = { path = "crates/amzn-codewhisperer-client" }
-amzn-codewhisperer-streaming-client = { path = "crates/amzn-codewhisperer-streaming-client" }
-amzn-consolas-client = { path = "crates/amzn-consolas-client" }
-amzn-qdeveloper-streaming-client = { path = "crates/amzn-qdeveloper-streaming-client" }
 anstream = "0.6.13"
 anyhow = "1.0.98"
 appkit-nsworkspace-bindings = { path = "crates/macos-utils/appkit-nsworkspace-bindings" }
@@ -61,8 +53,6 @@ crossterm = { version = "0.28.1", features = ["event-stream", "events"] }
 dashmap = "6.0.1"
 dirs = "5.0.0"
 eyre = "0.6.8"
-fig_api_client = { path = "crates/fig_api_client" }
-fig_auth = { path = "crates/fig_auth" }
 fig_aws_common = { path = "crates/fig_aws_common" }
 fig_desktop_api = { path = "crates/fig_desktop_api" }
 fig_diagnostic = { path = "crates/fig_diagnostic" }

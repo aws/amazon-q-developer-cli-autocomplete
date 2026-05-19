@@ -1,5 +1,5 @@
-pub const APP_BUNDLE_ID: &str = "com.amazon.codewhisperer";
-pub const APP_BUNDLE_NAME: &str = "Amazon Q.app";
+pub const APP_BUNDLE_ID: &str = "dev.precog.cli";
+pub const APP_BUNDLE_NAME: &str = "Precog.app";
 
 #[cfg(target_os = "macos")]
 pub const APP_PROCESS_NAME: &str = "q_desktop";
@@ -12,34 +12,36 @@ pub const APP_PROCESS_NAME: &str = "q_desktop.exe";
 /// The name configured under `"package.productName"` in the tauri.conf.json file.
 pub const TAURI_PRODUCT_NAME: &str = "q_desktop";
 
-pub const CLI_BINARY_NAME: &str = "q";
-pub const CLI_BINARY_NAME_MINIMAL: &str = "q-minimal";
-pub const CHAT_BINARY_NAME: &str = "qchat";
-pub const PTY_BINARY_NAME: &str = "qterm";
+pub const CLI_BINARY_NAME: &str = "precog";
+pub const CLI_BINARY_NAME_MINIMAL: &str = "precog-minimal";
+pub const CHAT_BINARY_NAME: &str = "precogchat";
+pub const PTY_BINARY_NAME: &str = "precogterm";
 
 pub const CLI_CRATE_NAME: &str = "q_cli";
 
-pub const URL_SCHEMA: &str = "q";
+pub const URL_SCHEMA: &str = "precog";
 
-pub const PRODUCT_NAME: &str = "Amazon Q";
+pub const PRODUCT_NAME: &str = "Precog";
 
-pub const RUNTIME_DIR_NAME: &str = "cwrun";
+pub const RUNTIME_DIR_NAME: &str = "precogrun";
 
 /// Data directory name used in paths like ~/.local/share/{DATA_DIR_NAME}
 #[cfg(unix)]
-pub const DATA_DIR_NAME: &str = "amazon-q";
+pub const DATA_DIR_NAME: &str = "precog";
 #[cfg(windows)]
-pub const DATA_DIR_NAME: &str = "AmazonQ";
+pub const DATA_DIR_NAME: &str = "Precog";
 
 /// Backup directory name
-pub const BACKUP_DIR_NAME: &str = ".amazon-q.dotfiles.bak";
+pub const BACKUP_DIR_NAME: &str = ".precog.dotfiles.bak";
 
-// These are the old "CodeWhisperer" branding, used anywhere we will not update to Amazon Q
+// Legacy "CodeWhisperer" / "Amazon Q" upstream binary names. Kept so that, on machines
+// where the upstream Amazon Q CLI was previously installed, our installer/uninstaller
+// paths can still find and clean up the old binaries. Not used for our own branding.
 pub const OLD_PRODUCT_NAME: &str = "CodeWhisperer";
 pub const OLD_CLI_BINARY_NAMES: &[&str] = &["cw"];
 pub const OLD_PTY_BINARY_NAMES: &[&str] = &["cwterm"];
 
-pub const GITHUB_REPO_NAME: &str = "aws/amazon-q-developer-cli";
+pub const GITHUB_REPO_NAME: &str = "usqr/CLIprecog";
 
 pub mod url {
     pub const USER_MANUAL: &str = "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line.html";
@@ -83,13 +85,13 @@ pub mod macos {
 }
 
 pub mod linux {
-    pub const DESKTOP_ENTRY_NAME: &str = "amazon-q.desktop";
+    pub const DESKTOP_ENTRY_NAME: &str = "precog.desktop";
 
     /// Name of the deb package.
-    pub const PACKAGE_NAME: &str = "amazon-q";
+    pub const PACKAGE_NAME: &str = "precog";
 
     /// The wm_class used for the application windows.
-    pub const DESKTOP_APP_WM_CLASS: &str = "Amazon-q";
+    pub const DESKTOP_APP_WM_CLASS: &str = "Precog";
 }
 
 pub mod env_var {
@@ -126,7 +128,7 @@ pub mod env_var {
         /// Overrides the ZDOTDIR environment variable
         Q_ZDOTDIR = "Q_ZDOTDIR",
 
-        /// Indicates a process was launched by Amazon Q
+        /// Indicates a process was launched by Precog
         PROCESS_LAUNCHED_BY_Q = "PROCESS_LAUNCHED_BY_Q",
 
         /// The shell to use in qterm

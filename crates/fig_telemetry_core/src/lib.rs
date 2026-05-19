@@ -538,17 +538,6 @@ impl SuggestionState {
     }
 }
 
-impl From<SuggestionState> for amzn_codewhisperer_client::types::SuggestionState {
-    fn from(value: SuggestionState) -> Self {
-        match value {
-            SuggestionState::Accept => amzn_codewhisperer_client::types::SuggestionState::Accept,
-            SuggestionState::Discard => amzn_codewhisperer_client::types::SuggestionState::Discard,
-            SuggestionState::Empty => amzn_codewhisperer_client::types::SuggestionState::Empty,
-            SuggestionState::Reject => amzn_codewhisperer_client::types::SuggestionState::Reject,
-        }
-    }
-}
-
 #[derive(Debug, Copy, Clone, PartialEq, Eq, EnumString, Display, serde::Serialize, serde::Deserialize)]
 pub enum TelemetryResult {
     Succeeded,

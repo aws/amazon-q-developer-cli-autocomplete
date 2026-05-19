@@ -29,8 +29,13 @@ const makeCdnUrlFactory =
   (specName: string, ext: string = "js") =>
     `${baseUrl}${specName}.${ext}`;
 
+// Network CDN is not used by Precog. The desktop app intercepts the
+// `spec://localhost/...` scheme via `canLoadSpecProtocol()` below and serves
+// vendored specs from disk (`packages/autocomplete-specs/build/`). This
+// factory only fires in browser-only dev builds (no native shell), and falls
+// back to a local dev server.
 const cdnUrlFactory = makeCdnUrlFactory(
-  "https://specs.q.us-east-1.amazonaws.com/",
+  "http://localhost:8080/specs/",
 );
 
 const stringImportCache = new Map<string, unknown>();

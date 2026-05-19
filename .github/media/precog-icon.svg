@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Precog">
+  <title>Precog</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d0d12"/>
+      <stop offset="100%" stop-color="#1a1230"/>
+    </linearGradient>
+    <linearGradient id="ghost" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a78bfa" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0.10"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+
+  <!-- background -->
+  <rect x="0" y="0" width="1024" height="1024" rx="224" ry="224" fill="url(#bg)"/>
+
+  <!-- ghost-text trail (the prediction) -->
+  <rect x="430" y="442" width="430" height="140" rx="32" ry="32" fill="url(#ghost)"/>
+
+  <!-- cursor glow -->
+  <rect x="280" y="296" width="60" height="432" rx="20" ry="20" fill="#ffffff" opacity="0.35" filter="url(#glow)"/>
+  <!-- cursor bar -->
+  <rect x="296" y="312" width="28" height="400" rx="14" ry="14" fill="#ffffff"/>
+</svg>

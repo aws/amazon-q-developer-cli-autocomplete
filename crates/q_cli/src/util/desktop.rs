@@ -18,8 +18,6 @@ pub struct LaunchArgs {
     ///
     /// Note that this won't open the dashboard if the app is already running
     pub open_dashboard: bool,
-    /// Should we do the first update check or skip it
-    pub immediate_update: bool,
     /// Print output to user
     pub verbose: bool,
 }
@@ -116,9 +114,6 @@ pub fn launch_fig_desktop(args: LaunchArgs) -> Result<()> {
     let mut common_args = vec![];
     if !args.open_dashboard {
         common_args.push("--no-dashboard");
-    }
-    if !args.immediate_update {
-        common_args.push("--ignore-immediate-update");
     }
 
     cfg_if::cfg_if! {
@@ -247,7 +242,6 @@ mod tests {
         launch_fig_desktop(LaunchArgs {
             wait_for_socket: true,
             open_dashboard: true,
-            immediate_update: false,
             verbose: true,
         })
         .unwrap();

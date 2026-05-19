@@ -14,15 +14,12 @@ use fig_proto::local::{
     InputMethodCommand,
     LogLevelCommand,
     LogLevelResponse,
-    LoginCommand,
-    LogoutCommand,
     OpenUiElementCommand,
     PromptAccessibilityCommand,
     QuitCommand,
     RestartCommand,
     RestartSettingsListenerCommand,
     UiElement,
-    UpdateCommand,
     command,
     command_response,
     devtools_command,
@@ -121,11 +118,6 @@ pub async fn prompt_accessibility_command() -> Result<()> {
     send_command_to_socket(command).await
 }
 
-pub async fn update_command(force: bool) -> Result<Option<CommandResponse>> {
-    let command = command::Command::Update(UpdateCommand { force });
-    send_recv_command_to_socket_with_timeout(command, std::time::Duration::from_secs(120)).await
-}
-
 pub async fn restart_command() -> Result<()> {
     let command = command::Command::Restart(RestartCommand {});
     send_command_to_socket(command).await
@@ -133,16 +125,6 @@ pub async fn restart_command() -> Result<()> {
 
 pub async fn quit_command() -> Result<()> {
     let command = command::Command::Quit(QuitCommand {});
-    send_command_to_socket(command).await
-}
-
-pub async fn login_command() -> Result<()> {
-    let command = command::Command::Login(LoginCommand {});
-    send_command_to_socket(command).await
-}
-
-pub async fn logout_command() -> Result<()> {
-    let command = command::Command::Logout(LogoutCommand {});
     send_command_to_socket(command).await
 }
 

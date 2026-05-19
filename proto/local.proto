@@ -19,10 +19,8 @@ message Command {
   oneof command {
     TerminalIntegrationCommand terminal_integration = 100;
     ListTerminalIntegrationsCommand list_terminal_integrations = 101;
-    LogoutCommand logout = 102;
     RestartCommand restart = 103;
     QuitCommand quit = 104;
-    UpdateCommand update = 105;
     DiagnosticsCommand diagnostics = 106;
     ReportWindowCommand report_window = 107;
     RestartSettingsListenerCommand restart_settings_listener = 108;
@@ -37,12 +35,11 @@ message Command {
     LogLevelCommand log_level = 118;
     DumpStateCommand dump_state = 119;
     DevtoolsCommand devtools = 120;
-    LoginCommand login = 121;
     ConnectToIBusCommand connect_to_ibus = 122;
     BundleMetadataCommand bundle_metadata = 123;
   }
 
-  reserved 116;
+  reserved 102, 116, 121;
 }
 
 message Hook {
@@ -82,19 +79,11 @@ message TerminalIntegrationCommand {
 
 message ListTerminalIntegrationsCommand {}
 
-message LoginCommand {}
-
-message LogoutCommand {}
-
 message RestartCommand {}
 
 message QuitCommand {}
 
 message UninstallCommand {}
-
-message UpdateCommand {
-  bool force = 1;
-}
 
 message DiagnosticsCommand {}
 

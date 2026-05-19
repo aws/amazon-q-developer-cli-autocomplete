@@ -22,7 +22,6 @@ use crate::history::{
     HistoryCommand,
     HistorySender,
 };
-use crate::inline::on_prompt;
 use crate::{
     INSERT_ON_NEW_CMD,
     MainLoopEvent,
@@ -114,8 +113,6 @@ impl EventListener for EventHandler {
                 }
             },
             Event::CommandInfo(command_info) => {
-                tokio::spawn(on_prompt());
-
                 let context = shell_state_to_context(shell_state);
                 let hook = new_postexec_hook(context, command_info.command.clone(), command_info.exit_code);
                 let message = hook_to_message(hook);

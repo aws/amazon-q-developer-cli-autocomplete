@@ -455,15 +455,6 @@ pub fn settings_path() -> Result<PathBuf> {
     Ok(fig_data_dir()?.join("settings.json"))
 }
 
-/// The path to the lock file used to indicate that the app is updating
-///
-/// - Linux: `$HOME/.local/share/{data_dir}/update.lock`
-/// - MacOS: `$HOME/Library/Application Support/{data_dir}/update.lock`
-/// - Windows: `%LOCALAPPDATA%\{data_dir}\update.lock`
-pub fn update_lock_path(ctx: &impl FsProvider) -> Result<PathBuf> {
-    Ok(fig_data_dir_ctx(ctx)?.join("update.lock"))
-}
-
 /// The path to the midway cookie
 ///
 /// Path: `$HOME/.midway/cookie`
@@ -551,7 +542,6 @@ mod linux_tests {
 
     #[test]
     fn all_paths() {
-        let ctx = Context::new();
         assert!(home_dir().is_ok());
         #[cfg(unix)]
         assert!(home_local_bin().is_ok());
@@ -565,7 +555,6 @@ mod linux_tests {
         assert!(backups_dir().is_ok());
         assert!(logs_dir().is_ok());
         assert!(settings_path().is_ok());
-        assert!(update_lock_path(&ctx).is_ok());
         assert!(midway_cookie_path().is_ok());
     }
 }
@@ -586,7 +575,7 @@ mod tests {
         #[cfg(unix)]
         assert_eq!(
             host_sockets_dir().unwrap().file_name().unwrap().to_str().unwrap(),
-            format!("cwrun")
+            format!("precogrun")
         );
 
         #[cfg(windows)]
@@ -687,73 +676,65 @@ mod tests {
 
     #[test]
     fn snapshot_fig_data_dir() {
-        linux!(fig_data_dir(), @"$HOME/.local/share/amazon-q");
-        macos!(fig_data_dir(), @"$HOME/Library/Application Support/amazon-q");
-        windows!(fig_data_dir(), @r"C:\Users\$USER\AppData\Local\AmazonQ");
+        linux!(fig_data_dir(), @"$HOME/.local/share/precog");
+        macos!(fig_data_dir(), @"$HOME/Library/Application Support/precog");
+        windows!(fig_data_dir(), @r"C:\Users\$USER\AppData\Local\Precog");
     }
 
     #[test]
     fn snapshot_sockets_dir() {
-        linux!(sockets_dir(), @"$XDG_RUNTIME_DIR/cwrun");
-        macos!(sockets_dir(), @"$TMPDIR/cwrun");
-        windows!(sockets_dir(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets");
+        linux!(sockets_dir(), @"$XDG_RUNTIME_DIR/precogrun");
+        macos!(sockets_dir(), @"$TMPDIR/precogrun");
+        windows!(sockets_dir(), @r"C:\Users\$USER\AppData\Local\Temp\Precog\sockets");
     }
 
     #[test]
     fn snapshot_themes_dir() {
         linux!(themes_dir(&Context::new()), @"/usr/share/fig/themes");
-        macos!(themes_dir(&Context::new()), @"/Applications/Amazon Q.app/Contents/Resources/themes");
-        windows!(themes_dir(&Context::new()), @r"C:\Users\$USER\AppData\Local\AmazonQ\resources\themes");
+        macos!(themes_dir(&Context::new()), @"/Applications/Precog.app/Contents/Resources/themes");
+        windows!(themes_dir(&Context::new()), @r"C:\Users\$USER\AppData\Local\Precog\resources\themes");
     }
 
     #[test]
     fn snapshot_backups_dir() {
-        linux!(backups_dir(), @"$HOME/.amazon-q.dotfiles.bak");
-        macos!(backups_dir(), @"$HOME/.amazon-q.dotfiles.bak");
-        windows!(backups_dir(), @r"C:\Users\$USER\.amazon-q.dotfiles.bak");
+        linux!(backups_dir(), @"$HOME/.precog.dotfiles.bak");
+        macos!(backups_dir(), @"$HOME/.precog.dotfiles.bak");
+        windows!(backups_dir(), @r"C:\Users\$USER\.precog.dotfiles.bak");
     }
 
     #[test]
     fn snapshot_fig_socket_path() {
-        linux!(desktop_socket_path(), @"$XDG_RUNTIME_DIR/cwrun/desktop.sock");
-        macos!(desktop_socket_path(), @"$TMPDIR/cwrun/desktop.sock");
-        windows!(desktop_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\desktop.sock");
+        linux!(desktop_socket_path(), @"$XDG_RUNTIME_DIR/precogrun/desktop.sock");
+        macos!(desktop_socket_path(), @"$TMPDIR/precogrun/desktop.sock");
+        windows!(desktop_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\Precog\sockets\desktop.sock");
     }
 
     #[test]
     fn snapshot_remote_socket_path() {
-        linux!(remote_socket_path(), @"$XDG_RUNTIME_DIR/cwrun/remote.sock");
-        macos!(remote_socket_path(), @"$TMPDIR/cwrun/remote.sock");
-        windows!(remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\remote.sock");
+        linux!(remote_socket_path(), @"$XDG_RUNTIME_DIR/precogrun/remote.sock");
+        macos!(remote_socket_path(), @"$TMPDIR/precogrun/remote.sock");
+        windows!(remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\Precog\sockets\remote.sock");
     }
 
     #[test]
     fn snapshot_local_remote_socket_path() {
-        linux!(local_remote_socket_path(), @"$XDG_RUNTIME_DIR/cwrun/remote.sock");
-        macos!(local_remote_socket_path(), @"$TMPDIR/cwrun/remote.sock");
-        windows!(local_remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\remote.sock");
+        linux!(local_remote_socket_path(), @"$XDG_RUNTIME_DIR/precogrun/remote.sock");
+        macos!(local_remote_socket_path(), @"$TMPDIR/precogrun/remote.sock");
+        windows!(local_remote_socket_path(), @r"C:\Users\$USER\AppData\Local\Temp\Precog\sockets\remote.sock");
     }
 
     #[test]
     fn snapshot_figterm_socket_path() {
-        linux!(figterm_socket_path("$SESSION_ID"), @"$XDG_RUNTIME_DIR/cwrun/t/$SESSION_ID.sock");
-        macos!(figterm_socket_path("$SESSION_ID"), @"$TMPDIR/cwrun/t/$SESSION_ID.sock");
-        windows!(figterm_socket_path("$SESSION_ID"), @r"C:\Users\$USER\AppData\Local\Temp\AmazonQ\sockets\t\$SESSION_ID.sock");
+        linux!(figterm_socket_path("$SESSION_ID"), @"$XDG_RUNTIME_DIR/precogrun/t/$SESSION_ID.sock");
+        macos!(figterm_socket_path("$SESSION_ID"), @"$TMPDIR/precogrun/t/$SESSION_ID.sock");
+        windows!(figterm_socket_path("$SESSION_ID"), @r"C:\Users\$USER\AppData\Local\Temp\Precog\sockets\t\$SESSION_ID.sock");
     }
 
     #[test]
     fn snapshot_settings_path() {
-        linux!(settings_path(), @"$HOME/.local/share/amazon-q/settings.json");
-        macos!(settings_path(), @"$HOME/Library/Application Support/amazon-q/settings.json");
-        windows!(settings_path(), @r"C:\Users\$USER\AppData\Local\AmazonQ\settings.json");
-    }
-
-    #[test]
-    fn snapshot_update_lock_path() {
-        let ctx = Context::new();
-        linux!(update_lock_path(&ctx), @"$HOME/.local/share/amazon-q/update.lock");
-        macos!(update_lock_path(&ctx), @"$HOME/Library/Application Support/amazon-q/update.lock");
-        windows!(update_lock_path(&ctx), @r"C:\Users\$USER\AppData\Local\AmazonQ\update.lock");
+        linux!(settings_path(), @"$HOME/.local/share/precog/settings.json");
+        macos!(settings_path(), @"$HOME/Library/Application Support/precog/settings.json");
+        windows!(settings_path(), @r"C:\Users\$USER\AppData\Local\Precog\settings.json");
     }
 
     #[test]

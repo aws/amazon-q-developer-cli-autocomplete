@@ -79,7 +79,7 @@ declare_class!(
             let mut center = NotificationCenter::distributed_center();
             unsafe {
                 center.subscribe_with_observer(
-                    ns_string!("com.amazon.codewhisperer.edit_buffer_updated"),
+                    ns_string!("dev.precog.cli.edit_buffer_updated"),
                     &this,
                     sel!(handleCursorPositionRequest:),
                 );

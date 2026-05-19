@@ -1,9 +1,9 @@
 {
-  "name": "root",
+  "name": "precog",
   "private": true,
-  "author": "Amazon Web Services",
-  "repository": "https://github.com/aws/amazon-q-developer-cli",
-  "license": "MIT OR Apache-2.0",
+  "author": "Precog CLI contributors",
+  "repository": "https://github.com/usqr/CLIprecog",
+  "license": "MIT",
   "packageManager": "pnpm@10.0.0+sha256.43abf6e720fb7bc53c591b0862605c7d323d0a9d2dd33bcac07b062e13cf4948",
   "type": "module",
   "engines": {

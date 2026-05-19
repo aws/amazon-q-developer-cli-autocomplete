@@ -1,0 +1,23 @@
+Vendored Fig Autocomplete Specs
+================================
+
+The TypeScript spec files under `src/` and the icon assets under `icons/` are
+vendored from the upstream `withfig/autocomplete` repository
+(https://github.com/withfig/autocomplete) at the time of import.
+
+Upstream copyright:
+
+    Copyright (c) 2021 Hercules Labs Inc. (Fig)
+    Licensed under the MIT License (see LICENSE in this directory).
+
+This package is part of the Precog CLI fork
+(https://github.com/usqr/CLIprecog) and is distributed under MIT.
+
+Changes from upstream
+---------------------
+
+- Repackaged as `@precog/autocomplete-specs` for in-tree consumption.
+- Added `scripts/generate-index.mjs` to produce `build/index.json` and copy
+  icons into `build/icons/` so the Precog desktop overlay can serve them via
+  the `spec://localhost/...` protocol with no network calls.
+- No edits to the spec content itself.

@@ -1,8 +1,8 @@
 [package]
 name = "fig_desktop"
-authors = ["Amazon Q Devs"]
+authors = ["Precog CLI contributors"]
 edition.workspace = true
-homepage = "https://aws.amazon.com/codewhisperer"
+homepage = "https://github.com/usqr/CLIprecog"
 publish.workspace = true
 version.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ license.workspace = true
 workspace = true
 
 [package.metadata.bundle]
-name = "Fig"
+name = "Precog"
 icon = [
     "./icons/128x128.png",
     "./icons/16x16.png",
@@ -23,7 +23,7 @@ icon = [
     "./icons/512x512.png",
     "./icons/64x64.png",
 ]
-identifier = "com.amazon.codewhisperer"
+identifier = "dev.precog.cli"
 resource = "./autocomplete-icons/*"
 
 [features]
@@ -41,8 +41,6 @@ camino.workspace = true
 cfg-if.workspace = true
 clap.workspace = true
 dashmap.workspace = true
-fig_api_client.workspace = true
-fig_auth.workspace = true
 fig_desktop_api.workspace = true
 fig_install.workspace = true
 fig_integrations = { workspace = true, features = ["dispatch"] }

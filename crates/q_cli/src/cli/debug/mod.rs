@@ -10,12 +10,8 @@ use std::process::{
     Command,
     ExitCode,
 };
-use std::str::FromStr;
 
-use anstream::{
-    eprintln,
-    println,
-};
+use anstream::println;
 use clap::{
     Subcommand,
     ValueEnum,
@@ -42,7 +38,6 @@ use fig_os_shim::Env;
 use fig_util::consts::APP_BUNDLE_ID;
 use fig_util::env_var::Q_DEBUG_SHELL;
 use fig_util::macos::BUNDLE_CONTENTS_MACOS_PATH;
-use fig_util::manifest::FileType;
 use fig_util::{
     APP_BUNDLE_NAME,
     CLI_BINARY_NAME,
@@ -205,36 +200,8 @@ pub enum DebugSubcommand {
         #[arg(long, requires("watch"), default_value_t = 0.25)]
         rate: f64,
     },
-    /// Queries remote repository for updates given the specified metadata
-    QueryIndex {
-        #[arg(short, long)]
-        channel: String,
-        #[arg(short, long)]
-        target_triple: String,
-        #[arg(short = 'V', long)]
-        variant: String,
-        #[arg(short = 'e', long)]
-        version: String,
-        #[arg(short = 'r', long)]
-        enable_rollout: bool,
-        #[arg(short, long)]
-        is_auto_update: bool,
-        #[arg(short, long)]
-        override_threshold: Option<u8>,
-        #[arg(short, long)]
-        file_type: String,
-    },
     /// Open up the devtools of a specific webview
-    Devtools {
-        app: App,
-    },
-    /// Displays remote index
-    GetIndex {
-        channel: String,
-        #[arg(short, long, default_value = "false")]
-        /// Display using debug formatting
-        debug: bool,
-    },
+    Devtools { app: App },
     /// Lists installed IntelliJ variants
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[command(name = "list-intellij-variants")]
@@ -243,7 +210,6 @@ pub enum DebugSubcommand {
     Shell,
     /// Update the shell config permissions to have the correct owner and access rights
     FixPermissions,
-    RefreshAuthToken,
 }
 
 impl DebugSubcommand {
@@ -552,7 +518,6 @@ impl DebugSubcommand {
                         launch_fig_desktop(LaunchArgs {
                             wait_for_socket: true,
                             open_dashboard: false,
-                            immediate_update: true,
                             verbose: true,
                         })?;
                     },
@@ -568,7 +533,6 @@ impl DebugSubcommand {
                         launch_fig_desktop(LaunchArgs {
                             wait_for_socket: true,
                             open_dashboard: false,
-                            immediate_update: true,
                             verbose: true,
                         })?;
 
@@ -744,47 +708,10 @@ impl DebugSubcommand {
                     tokio::time::sleep(std::time::Duration::from_secs_f64(*rate)).await;
                 }
             },
-            DebugSubcommand::QueryIndex {
-                channel,
-                target_triple,
-                variant,
-                version: current_version,
-                enable_rollout,
-                override_threshold,
-                is_auto_update,
-                file_type,
-            } => {
-                use fig_install::index::{
-                    FindNextVersionArgs,
-                    ProductName,
-                };
-                use fig_util::manifest::{
-                    Channel,
-                    TargetTriple,
-                    Variant,
-                };
-
-                let product_name = ProductName::default();
-                let result = fig_install::index::pull(&Channel::from_str(channel)?)
-                    .await?
-                    .find_next_version(FindNextVersionArgs {
-                        target_triple: &TargetTriple::from_str(target_triple)?,
-                        variant: &Variant::from_str(variant)?,
-                        file_type: Some(&FileType::from_str(file_type)?),
-                        current_version,
-                        product_name: &product_name,
-                        ignore_rollout: !enable_rollout,
-                        is_auto_update: *is_auto_update,
-                        threshold_override: *override_threshold,
-                    });
-
-                println!("{result:#?}");
-            },
             Self::Devtools { app } => {
                 launch_fig_desktop(LaunchArgs {
                     wait_for_socket: true,
                     open_dashboard: false,
-                    immediate_update: true,
                     verbose: true,
                 })?;
 
@@ -794,16 +721,6 @@ impl DebugSubcommand {
                 })
                 .await
                 .context("Could not open devtools window")?;
-            },
-            DebugSubcommand::GetIndex { channel, debug } => {
-                use fig_util::manifest::Channel;
-                let index = fig_install::index::pull(&Channel::from_str(channel)?).await?;
-                if *debug {
-                    println!("{index:#?}");
-                } else {
-                    let json = serde_json::to_string_pretty(&index)?;
-                    println!("{json}");
-                }
             },
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             DebugSubcommand::ListIntelliJVariants => {
@@ -870,13 +787,6 @@ impl DebugSubcommand {
             },
             DebugSubcommand::FixPermissions => {
                 fix_permissions::fix_permissions(&env)?;
-            },
-            DebugSubcommand::RefreshAuthToken => match fig_auth::refresh_token().await? {
-                Some(_) => eprintln!("Refreshed token"),
-                None => {
-                    eprintln!("No token to refresh");
-                    return Ok(ExitCode::FAILURE);
-                },
             },
         }
         Ok(ExitCode::SUCCESS)

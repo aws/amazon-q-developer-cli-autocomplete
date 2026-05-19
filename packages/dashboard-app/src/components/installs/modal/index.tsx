@@ -5,7 +5,6 @@ import { Button } from "../../ui/button";
 import Lockup from "../../svg/logo";
 import onboarding from "@/data/onboarding";
 import { useStatusCheck } from "@/hooks/store/useStatusCheck";
-import LoginModal from "./login";
 import InstallModal from "./install";
 import { useLocalState, useRefreshLocalState } from "@/hooks/store/useState";
 import migrate_dark from "@assets/images/fig-migration/dark.png?url";
@@ -14,7 +13,7 @@ import { matchesPlatformRestrictions } from "@/lib/platform";
 
 export default function OnboardingModal() {
   const [step, setStep] = useState(0);
-  const check = onboarding[step] as InstallCheck;
+  const check = onboarding[step] as InstallCheck | undefined;
   const [migrationStarted] = useLocalState("desktop.migratedFromFig");
   const [migrationEnded, setMigrationEnded] = useLocalState(
     "desktop.migratedFromFig.UiComplete",
@@ -47,14 +46,6 @@ export default function OnboardingModal() {
     refreshGnomeExtension,
   ]);
 
-  function nextStep() {
-    if (migrationStarted && !migrationEnded) {
-      setMigrationEnded(true);
-    }
-
-    setStep(step + 1);
-  }
-
   function finish() {
     refreshAccessibility();
     refreshDotfiles();
@@ -69,29 +60,45 @@ export default function OnboardingModal() {
       .catch((err) => console.error(err));
   }
 
+  function nextStep() {
+    if (migrationStarted && !migrationEnded) {
+      setMigrationEnded(true);
+    }
+
+    if (step + 1 >= onboarding.length) {
+      finish();
+      return;
+    }
+    setStep(step + 1);
+  }
+
   function skipInstall() {
-    if (!check.id) return;
+    if (!check?.id) return;
 
     if (check.id === "dotfiles") {
       setDotfiles(true);
-      setStep(step + 1);
+      nextStep();
     }
 
     if (check.id === "accessibility") {
       setAccessibility(true);
-      setStep(step + 1);
+      nextStep();
     }
 
     if (check.id === "desktopEntry" || check.id === "gnomeExtension") {
-      setStep(step + 1);
+      nextStep();
     }
+  }
+
+  if (!check) {
+    return null;
   }
 
   if (
     platformInfo &&
     !matchesPlatformRestrictions(platformInfo, check.platformRestrictions)
   ) {
-    setStep(step + 1);
+    nextStep();
   }
 
   if (check.id === "welcome" && isMigrating) {
@@ -108,10 +115,6 @@ export default function OnboardingModal() {
     )
   ) {
     return <InstallModal check={check} skip={skipInstall} next={nextStep} />;
-  }
-
-  if (check.id === "login") {
-    return <LoginModal next={finish} />;
   }
 
   return null;

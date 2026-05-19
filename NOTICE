@@ -1,0 +1,24 @@
+Precog CLI
+==========
+
+This product is a fork of:
+
+  - aws/amazon-q-developer-cli-autocomplete
+    Copyright (c) 2024 Amazon.com, Inc. or its affiliates.
+    Originally licensed under MIT OR Apache-2.0.
+
+  - withfig/autocomplete (the upstream of the AWS fork)
+    Copyright (c) the Fig authors.
+
+Modifications in this fork are copyright (c) 2026 Precog CLI contributors,
+and are released under the MIT License (see LICENSE.MIT).
+
+The `models/NOTICE` file is preserved unchanged from the upstream project
+and applies to the model definitions vendored into `models/`.
+
+This product is not affiliated with, endorsed by, or sponsored by
+Amazon Web Services, Inc. "Amazon", "AWS", "Amazon Q" and "CodeWhisperer"
+are trademarks of Amazon.com, Inc. or its affiliates. References to those
+names in this codebase are nominative -- e.g. SDK client crates whose
+purpose is to talk to the named AWS service -- and do not imply
+endorsement.

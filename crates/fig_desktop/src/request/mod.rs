@@ -4,7 +4,6 @@ mod onboarding;
 mod process;
 mod properties;
 mod telemetry;
-mod user;
 mod window;
 
 use std::marker::PhantomData;
@@ -37,7 +36,6 @@ use fig_proto::fig::{
     RunProcessRequest,
     ServerOriginatedMessage,
     UpdateApplicationPropertiesRequest,
-    UserLogoutRequest,
     WindowFocusRequest,
 };
 use fig_remote_ipc::figterm::FigtermState;
@@ -48,7 +46,6 @@ use fig_settings::{
     StateProvider,
 };
 use tracing::{
-    error,
     trace,
     warn,
 };
@@ -186,18 +183,6 @@ impl<'a> fig_desktop_api::handler::EventHandler for EventHandler<'a> {
             request.context.figterm_state,
             request.context.intercept_state,
         )
-    }
-
-    async fn user_logged_in_callback(&self, context: Self::Ctx) {
-        context
-            .proxy
-            .send_event(Event::ReloadTray { is_logged_in: true })
-            .map_err(|err| error!(?err, "Unable to send event on user log in"))
-            .ok();
-    }
-
-    async fn user_logout(&self, request: Wrapped<Self::Ctx, UserLogoutRequest>) -> RequestResult {
-        user::logout(request.request, request.context.proxy).await
     }
 }
 

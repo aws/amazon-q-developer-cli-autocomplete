@@ -29,7 +29,7 @@ pub struct Change {
 
 impl Feed {
     pub fn load() -> Self {
-        serde_json::from_str(include_str!("../../../../feed.json")).expect("feed.json is valid json")
+        Feed { entries: Vec::new() }
     }
 
     pub fn get_version_changelog(&self, version: &str) -> Option<Entry> {

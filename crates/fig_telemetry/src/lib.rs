@@ -7,24 +7,8 @@ mod util;
 
 use std::any::Any;
 use std::sync::LazyLock;
-use std::time::{
-    Duration,
-    SystemTime,
-};
+use std::time::Duration;
 
-use amzn_codewhisperer_client::types::{
-    ChatAddMessageEvent,
-    CompletionType,
-    IdeCategory,
-    OperatingSystem,
-    OptOutPreference,
-    ProgrammingLanguage,
-    TelemetryEvent,
-    TerminalUserInteractionEvent,
-    TerminalUserInteractionEventType,
-    UserContext,
-    UserTriggerDecisionEvent,
-};
 use amzn_toolkit_telemetry_client::config::{
     BehaviorVersion,
     Region,
@@ -36,7 +20,6 @@ use amzn_toolkit_telemetry_client::{
     Config,
 };
 use aws_credential_types::provider::SharedCredentialsProvider;
-use aws_smithy_types::DateTime;
 use cognito::CognitoProvider;
 use dispatch::dispatch;
 pub use dispatch::{
@@ -49,7 +32,6 @@ pub use event::{
     AppTelemetryEvent,
     InlineShellCompletionActionedOptions,
 };
-use fig_api_client::Client as CodewhispererClient;
 use fig_aws_common::app_name;
 use fig_settings::State;
 use fig_telemetry_core::{
@@ -94,9 +76,6 @@ pub enum Error {
     #[error(transparent)]
     ClientError(#[from] amzn_toolkit_telemetry_client::operation::post_metrics::PostMetricsError),
 }
-
-const PRODUCT: &str = "CodeWhisperer";
-const PRODUCT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 async fn client() -> &'static Client {
     static CLIENT: OnceCell<Client> = OnceCell::const_new();
@@ -186,19 +165,10 @@ pub async fn finish_telemetry_unwrap() {
     }
 }
 
-fn opt_out_preference() -> OptOutPreference {
-    if telemetry_is_disabled() {
-        OptOutPreference::OptOut
-    } else {
-        OptOutPreference::OptIn
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Client {
     client_id: Uuid,
     toolkit_telemetry_client: Option<ToolkitTelemetryClient>,
-    codewhisperer_client: Option<CodewhispererClient>,
     state: State,
 }
 
@@ -215,13 +185,11 @@ impl Client {
                 .credentials_provider(SharedCredentialsProvider::new(CognitoProvider::new(telemetry_stage)))
                 .build(),
         ));
-        let codewhisperer_client = CodewhispererClient::new().await.ok();
         let state = State::new();
 
         Self {
             client_id,
             toolkit_telemetry_client,
-            codewhisperer_client,
             state,
         }
     }
@@ -229,20 +197,17 @@ impl Client {
     pub fn mock() -> Self {
         let client_id = util::get_client_id();
         let toolkit_telemetry_client = None;
-        let codewhisperer_client = Some(CodewhispererClient::mock());
         let state = State::new_fake();
 
         Self {
             client_id,
             toolkit_telemetry_client,
-            codewhisperer_client,
             state,
         }
     }
 
     async fn send_event(&self, event: AppTelemetryEvent) {
         self.send_migrate().await;
-        self.send_cw_telemetry_event(&event).await;
         self.send_telemetry_toolkit_metric(event).await;
     }
 
@@ -304,291 +269,6 @@ impl Client {
                 {
                     error!(%err, ?metric_name, "Failed to post metric");
                 }
-            }
-        });
-    }
-
-    async fn send_cw_telemetry_event(&self, event: &AppTelemetryEvent) {
-        match &event.ty {
-            EventType::TranslationActioned {
-                latency,
-                suggestion_state,
-                terminal,
-                terminal_version,
-                shell,
-                shell_version,
-            } => {
-                self.send_cw_telemetry_translation_action(
-                    *latency,
-                    *suggestion_state,
-                    terminal.clone(),
-                    terminal_version.clone(),
-                    shell.clone(),
-                    shell_version.clone(),
-                )
-                .await;
-            },
-            EventType::CompletionInserted {
-                command,
-                terminal,
-                shell,
-            } => {
-                self.send_cw_telemetry_completion_inserted(command.clone(), terminal.clone(), shell.clone())
-                    .await;
-            },
-            EventType::ChatAddedMessage {
-                conversation_id,
-                message_id,
-                ..
-            } => {
-                self.send_cw_telemetry_chat_add_message_event(conversation_id.clone(), message_id.clone())
-                    .await;
-            },
-            EventType::InlineShellCompletionActioned {
-                session_id,
-                request_id,
-                latency,
-                suggestion_state,
-                suggested_chars_len,
-                number_of_recommendations,
-                ..
-            } => {
-                self.send_cw_telemetry_user_trigger_decision_event(
-                    session_id.clone(),
-                    request_id.clone(),
-                    *latency,
-                    suggestion_state.is_accepted(),
-                    *suggested_chars_len,
-                    *number_of_recommendations,
-                )
-                .await;
-            },
-            _ => {},
-        }
-    }
-
-    fn user_context(&self) -> Option<UserContext> {
-        let operating_system = match std::env::consts::OS {
-            "linux" => OperatingSystem::Linux,
-            "macos" => OperatingSystem::Mac,
-            "windows" => OperatingSystem::Windows,
-            os => {
-                error!(%os, "Unsupported operating system");
-                return None;
-            },
-        };
-
-        match UserContext::builder()
-            .client_id(self.client_id.hyphenated().to_string())
-            .operating_system(operating_system)
-            .product(PRODUCT)
-            .ide_category(IdeCategory::Cli)
-            .ide_version(PRODUCT_VERSION)
-            .build()
-        {
-            Ok(user_context) => Some(user_context),
-            Err(err) => {
-                error!(%err, "Failed to build user context");
-                None
-            },
-        }
-    }
-
-    async fn send_cw_telemetry_translation_action(
-        &self,
-        latency: Duration,
-        suggestion_state: SuggestionState,
-        terminal: Option<String>,
-        terminal_version: Option<String>,
-        shell: Option<String>,
-        shell_version: Option<String>,
-    ) {
-        let Some(codewhisperer_client) = self.codewhisperer_client.clone() else {
-            return;
-        };
-        let user_context = self.user_context().unwrap();
-        let opt_out_preference = opt_out_preference();
-
-        let mut set = JOIN_SET.lock().await;
-        set.spawn(async move {
-            let mut terminal_user_interaction_event_builder = TerminalUserInteractionEvent::builder()
-                .terminal_user_interaction_event_type(
-                    TerminalUserInteractionEventType::CodewhispererTerminalTranslationAction,
-                )
-                .time_to_suggestion(latency.as_millis() as i32)
-                .is_completion_accepted(suggestion_state == SuggestionState::Accept);
-
-            if let Some(terminal) = terminal {
-                terminal_user_interaction_event_builder = terminal_user_interaction_event_builder.terminal(terminal);
-            }
-
-            if let Some(terminal_version) = terminal_version {
-                terminal_user_interaction_event_builder =
-                    terminal_user_interaction_event_builder.terminal_version(terminal_version);
-            }
-
-            if let Some(shell) = shell {
-                terminal_user_interaction_event_builder = terminal_user_interaction_event_builder.shell(shell);
-            }
-
-            if let Some(shell_version) = shell_version {
-                terminal_user_interaction_event_builder =
-                    terminal_user_interaction_event_builder.shell_version(shell_version);
-            }
-
-            let terminal_user_interaction_event = terminal_user_interaction_event_builder.build();
-
-            if let Err(err) = codewhisperer_client
-                .send_telemetry_event(
-                    TelemetryEvent::TerminalUserInteractionEvent(terminal_user_interaction_event),
-                    user_context,
-                    opt_out_preference,
-                )
-                .await
-            {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
-            }
-        });
-    }
-
-    async fn send_cw_telemetry_completion_inserted(
-        &self,
-        command: String,
-        terminal: Option<String>,
-        shell: Option<String>,
-    ) {
-        let Some(codewhisperer_client) = self.codewhisperer_client.clone() else {
-            return;
-        };
-        let user_context = self.user_context().unwrap();
-        let opt_out_preference = opt_out_preference();
-
-        let mut set = JOIN_SET.lock().await;
-        set.spawn(async move {
-            let mut terminal_user_interaction_event_builder = TerminalUserInteractionEvent::builder()
-                .terminal_user_interaction_event_type(
-                    TerminalUserInteractionEventType::CodewhispererTerminalCompletionInserted,
-                )
-                .cli_tool_command(command);
-
-            if let Some(terminal) = terminal {
-                terminal_user_interaction_event_builder = terminal_user_interaction_event_builder.terminal(terminal);
-            }
-
-            if let Some(shell) = shell {
-                terminal_user_interaction_event_builder = terminal_user_interaction_event_builder.shell(shell);
-            }
-
-            let terminal_user_interaction_event = terminal_user_interaction_event_builder.build();
-
-            if let Err(err) = codewhisperer_client
-                .send_telemetry_event(
-                    TelemetryEvent::TerminalUserInteractionEvent(terminal_user_interaction_event),
-                    user_context,
-                    opt_out_preference,
-                )
-                .await
-            {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
-            }
-        });
-    }
-
-    async fn send_cw_telemetry_chat_add_message_event(&self, conversation_id: String, message_id: String) {
-        let Some(codewhisperer_client) = self.codewhisperer_client.clone() else {
-            return;
-        };
-        let user_context = self.user_context().unwrap();
-        let opt_out_preference = opt_out_preference();
-
-        let chat_add_message_event = match ChatAddMessageEvent::builder()
-            .conversation_id(conversation_id)
-            .message_id(message_id)
-            .build()
-        {
-            Ok(event) => event,
-            Err(err) => {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
-                return;
-            },
-        };
-
-        let mut set = JOIN_SET.lock().await;
-        set.spawn(async move {
-            if let Err(err) = codewhisperer_client
-                .send_telemetry_event(
-                    TelemetryEvent::ChatAddMessageEvent(chat_add_message_event),
-                    user_context,
-                    opt_out_preference,
-                )
-                .await
-            {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
-            }
-        });
-    }
-
-    /// This is the user decision to accept a suggestion for inline suggestions
-    async fn send_cw_telemetry_user_trigger_decision_event(
-        &self,
-        session_id: String,
-        request_id: String,
-        latency: Duration,
-        accepted: bool,
-        suggested_chars_len: i32,
-        number_of_recommendations: i32,
-    ) {
-        let Some(codewhisperer_client) = self.codewhisperer_client.clone() else {
-            return;
-        };
-        let user_context = self.user_context().unwrap();
-        let opt_out_preference = opt_out_preference();
-
-        let programming_language = match ProgrammingLanguage::builder().language_name("shell").build() {
-            Ok(language) => language,
-            Err(err) => {
-                error!(err =% DisplayErrorContext(err), "Failed to build programming language");
-                return;
-            },
-        };
-
-        let suggestion_state = if accepted {
-            SuggestionState::Accept
-        } else {
-            SuggestionState::Reject
-        };
-
-        let user_trigger_decision_event = match UserTriggerDecisionEvent::builder()
-            .session_id(session_id)
-            .request_id(request_id)
-            .programming_language(programming_language)
-            .completion_type(CompletionType::Line)
-            .suggestion_state(suggestion_state.into())
-            .accepted_character_count(if accepted { suggested_chars_len } else { 0 })
-            .number_of_recommendations(number_of_recommendations)
-            .generated_line(1)
-            .recommendation_latency_milliseconds(latency.as_secs_f64() * 1000.0)
-            .timestamp(DateTime::from(SystemTime::now()))
-            .build()
-        {
-            Ok(event) => event,
-            Err(err) => {
-                error!(err =% DisplayErrorContext(err), "Failed to build user trigger decision event");
-                return;
-            },
-        };
-
-        let mut set = JOIN_SET.lock().await;
-        set.spawn(async move {
-            if let Err(err) = codewhisperer_client
-                .send_telemetry_event(
-                    TelemetryEvent::UserTriggerDecisionEvent(user_trigger_decision_event),
-                    user_context,
-                    opt_out_preference,
-                )
-                .await
-            {
-                error!(err =% DisplayErrorContext(err), "Failed to send telemetry event");
             }
         });
     }
@@ -744,27 +424,8 @@ pub async fn send_profile_state(
 mod test {
     use event::tests::all_events;
     use fig_util::CLI_BINARY_NAME;
-    use uuid::uuid;
 
     use super::*;
-
-    #[tokio::test]
-    async fn client_context() {
-        let client = client().await;
-        let context = client.user_context().unwrap();
-
-        assert_eq!(context.ide_category, IdeCategory::Cli);
-        assert!(matches!(
-            context.operating_system,
-            OperatingSystem::Linux | OperatingSystem::Mac | OperatingSystem::Windows
-        ));
-        assert_eq!(context.product, PRODUCT);
-        assert_eq!(
-            context.client_id,
-            Some(uuid!("ffffffff-ffff-ffff-ffff-ffffffffffff").hyphenated().to_string())
-        );
-        assert_eq!(context.ide_version.as_deref(), Some(PRODUCT_VERSION));
-    }
 
     #[tokio::test]
     async fn client_send_event_test() {
@@ -776,45 +437,7 @@ mod test {
 
     #[tracing_test::traced_test]
     #[tokio::test]
-    #[ignore = "needs auth which is not in CI"]
-    async fn test_send() {
-        // let (shell, shell_version) = Shell::current_shell_version()
-        //     .await
-        //     .map(|(shell, shell_version)| (Some(shell), Some(shell_version)))
-        //     .unwrap_or((None, None));
-
-        // let client = Client::new(TelemetryStage::BETA).await;
-
-        // client
-        //     .post_metric(metrics::CodewhispererterminalCliSubcommandExecuted {
-        //         create_time: None,
-        //         value: None,
-        //         codewhispererterminal_subcommand: Some(CodewhispererterminalSubcommand("doctor".into())),
-        //         codewhispererterminal_terminal: CURRENT_TERMINAL
-        //             .clone()
-        //             .map(|terminal| CodewhispererterminalTerminal(terminal.internal_id().to_string())),
-        //         codewhispererterminal_terminal_version: CURRENT_TERMINAL_VERSION
-        //             .clone()
-        //             .map(CodewhispererterminalTerminalVersion),
-        //         codewhispererterminal_shell: shell.map(|shell|
-        // CodewhispererterminalShell(shell.to_string())),
-        //         codewhispererterminal_shell_version:
-        // shell_version.map(CodewhispererterminalShellVersion),         credential_start_url:
-        // start_url().await,     })
-        //     .await;
-
-        finish_telemetry_unwrap().await;
-
-        assert!(!logs_contain("ERROR"));
-        assert!(!logs_contain("error"));
-        assert!(!logs_contain("WARN"));
-        assert!(!logs_contain("warn"));
-        assert!(!logs_contain("Failed to post metric"));
-    }
-
-    #[tracing_test::traced_test]
-    #[tokio::test]
-    #[ignore = "needs auth which is not in CI"]
+    #[ignore = "needs network"]
     async fn test_all_telemetry() {
         send_user_logged_in().await;
         send_completion_inserted(CLI_BINARY_NAME.to_owned(), None, None).await;
@@ -832,28 +455,5 @@ mod test {
         assert!(!logs_contain("WARN"));
         assert!(!logs_contain("warn"));
         assert!(!logs_contain("Failed to post metric"));
-    }
-
-    #[tokio::test]
-    #[ignore = "needs auth which is not in CI"]
-    async fn test_without_optout() {
-        let client = Client::new(TelemetryStage::BETA).await;
-        client
-            .codewhisperer_client
-            .as_ref()
-            .unwrap()
-            .send_telemetry_event(
-                TelemetryEvent::ChatAddMessageEvent(
-                    ChatAddMessageEvent::builder()
-                        .conversation_id("debug".to_owned())
-                        .message_id("debug".to_owned())
-                        .build()
-                        .unwrap(),
-                ),
-                client.user_context().unwrap(),
-                OptOutPreference::OptIn,
-            )
-            .await
-            .unwrap();
     }
 }

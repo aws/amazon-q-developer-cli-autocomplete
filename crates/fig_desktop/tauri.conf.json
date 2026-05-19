@@ -9,7 +9,7 @@
     "bundle": {
       "targets": "app",
       "active": true,
-      "identifier": "com.amazon.codewhisperer",
+      "identifier": "dev.precog.cli",
       "icon": [
         "icons/icon.icns",
         "icons/icon.ico",

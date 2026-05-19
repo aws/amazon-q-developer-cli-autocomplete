@@ -1,0 +1,15 @@
+{
+  "name": "@precog/autocomplete-specs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Vendored Fig autocomplete specs (subcommand/flag/argument descriptors). Compiled to ./build/ and served by the Precog desktop overlay over the spec://localhost protocol.",
+  "license": "MIT",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "npx @withfig/autocomplete-tools compile",
+    "build:index": "node ./scripts/generate-index.mjs"
+  },
+  "files": ["src", "build", "LICENSE", "UPSTREAM-README.md"]
+}

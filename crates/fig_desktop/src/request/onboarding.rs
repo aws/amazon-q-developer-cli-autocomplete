@@ -26,9 +26,7 @@ use super::{
 use crate::EventLoopProxy;
 use crate::event::Event;
 
-pub async fn post_login() {
-    fig_settings::state::set_value("desktop.completedOnboarding", true).ok();
-}
+pub async fn post_login() {}
 
 pub async fn onboarding<Ctx>(request: OnboardingRequest, proxy: &EventLoopProxy, ctx: &Ctx) -> RequestResult
 where

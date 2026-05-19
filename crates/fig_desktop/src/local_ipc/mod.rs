@@ -7,7 +7,6 @@ use anyhow::{
     Context,
     Result,
 };
-use fig_install::UpdateOptions;
 use fig_ipc::{
     BufferedUnixStream,
     RecvMessage,
@@ -173,8 +172,6 @@ async fn handle_local_ipc<Ctx>(
                             InputMethod,
                             ListTerminalIntegrations,
                             LogLevel,
-                            Login,
-                            Logout,
                             OpenBrowser,
                             OpenUiElement,
                             PromptAccessibility,
@@ -185,7 +182,6 @@ async fn handle_local_ipc<Ctx>(
                             RestartSettingsListener,
                             RunInstallScript,
                             TerminalIntegration,
-                            Update,
                         };
 
                         match command {
@@ -196,8 +192,6 @@ async fn handle_local_ipc<Ctx>(
                             OpenBrowser(command) => commands::open_browser(command).await,
                             PromptAccessibility(_) => commands::prompt_for_accessibility_permission(&ctx).await,
                             LogLevel(command) => commands::log_level(command),
-                            Login(_) => commands::login(&proxy).await,
-                            Logout(_) => commands::logout(&proxy).await,
                             DumpState(command) => commands::dump_state(
                                 command,
                                 &figterm_state,
@@ -206,19 +200,6 @@ async fn handle_local_ipc<Ctx>(
                             ),
                             ConnectToIbus(_) => commands::connect_to_ibus(proxy.clone(), &platform_state).await,
                             BundleMetadata(_) => commands::bundle_metadata(&ctx.context_arc()).await,
-                            Update(_) => fig_install::update(
-                                ctx.context_arc(),
-                                Some(Box::new(move |_| {
-                                    debug!("Updating from proto");
-                                })),
-                                UpdateOptions::default(),
-                            )
-                            .await
-                            .map(|_| LocalResponse::Success(None))
-                            .map_err(|err| LocalResponse::Error {
-                                code: None,
-                                message: Some(format!("Failed to update: {err}")),
-                            }),
                             Devtools(command) => {
                                 let window_id = match command.window() {
                                     fig_proto::local::devtools_command::Window::DevtoolsAutocomplete => AUTOCOMPLETE_ID,

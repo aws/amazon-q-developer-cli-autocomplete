@@ -30,9 +30,7 @@ pub enum Event {
 
     ReloadCredentials,
     ReloadAccessibility,
-    ReloadTray {
-        is_logged_in: bool,
-    },
+    ReloadTray,
 
     ShowMessageNotification(ShowMessageNotification),
 }
